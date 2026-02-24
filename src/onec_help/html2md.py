@@ -200,10 +200,23 @@ def _looks_like_html(path: Path) -> bool:
         return False
 
 
+# Extensions we never treat as HTML (binary or non-content)
+_SKIP_EXTENSIONS = frozenset(
+    {
+        ".hbk", ".zip", ".7z", ".exe", ".dll", ".so", ".dylib",
+        ".css", ".js", ".json", ".woff", ".woff2", ".ttf", ".otf", ".eot",
+        ".png", ".gif", ".jpg", ".jpeg", ".ico", ".bmp", ".webp", ".svg",
+        ".db", ".dat", ".bin", ".idx",
+    }
+)
+
+
 def build_docs(project_dir, output_dir):
     """
-    Walk project_dir for .html files (and extension-less HTML, e.g. from unpacked .hbk),
-    convert each to .md in output_dir preserving structure.
+    Walk project_dir recursively (all subdirs, including PayloadData and any name).
+    Process: .html, .htm, extension-less files that look like HTML, and any other
+    file that _looks_like_html (e.g. .xml XHTML). Binary/non-content extensions are skipped.
+    Convert each to .md in output_dir preserving structure.
     Returns list of created .md paths.
     """
     project_dir = Path(project_dir).resolve()
@@ -211,11 +224,15 @@ def build_docs(project_dir, output_dir):
     created: list[Path] = []
     for root, _, files in os.walk(project_dir):
         for name in files:
-            if name.startswith(".") or name.endswith(".hbk"):
+            if name.startswith("."):
                 continue
             html_path = Path(root) / name
-            is_html = name.endswith(".html") or (
-                "." not in name and _looks_like_html(html_path)
+            ext = html_path.suffix.lower() if html_path.suffix else ""
+            if ext in _SKIP_EXTENSIONS:
+                continue
+            is_html = (
+                ext in (".html", ".htm")
+                or (ext in ("", ".xml", ".xhtml", ".st") and _looks_like_html(html_path))
             )
             if not is_html:
                 continue

@@ -30,9 +30,6 @@ functions_data.json
 unpacked/
 docs_md/
 tmp/
-# Содержимое каталога справки не коммитим; сам каталог и .gitkeep — в репо
-help_data/*
-!help_data/.gitkeep
 shcntx_ru/
 shcntx_ru2/
 *.zip

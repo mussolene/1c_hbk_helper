@@ -1,4 +1,7 @@
-# 1C Help: app + Qdrant. Mount unpacked help or .hbk path to /data.
+# 1C Help: Qdrant + MCP. Один контейнер mcp: MCP-сервер (порт 5050) + cron для индексации из /opt/1cv8.
+# На Mac: Docker Desktop → Settings → Resources → File sharing — добавьте /opt (или /opt/1cv8).
+# При старте контейнера (если есть /opt/1cv8) ingest запускается в фоне; логи: docker compose exec mcp tail -f /var/log/ingest.log
+# Индексация вручную: docker compose exec mcp python -m onec_help ingest
 
 services:
   qdrant:
@@ -8,33 +11,11 @@ services:
     volumes:
       - qdrant_storage:/qdrant/storage
     healthcheck:
-      # Image has no wget/curl; use TCP + HTTP via bash
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333 && echo -e 'GET /readyz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q 'HTTP/1.1 200' <&3"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 15s
-
-  app:
-    build: .
-    ports:
-      - "5001:5001"
-    environment:
-      QDRANT_HOST: qdrant
-      QDRANT_PORT: "6333"
-      HELP_PATH: /data
-      PORT: "5001"
-    volumes:
-      - ./help_data:/data
-    depends_on:
-      qdrant:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/ready')\" || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
 
   mcp:
     build: .
@@ -47,12 +28,20 @@ services:
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "5050"
       MCP_PATH: "/mcp"
+      HELP_SOURCE_BASE: /opt/1cv8
+      HELP_LANGUAGES: ru
     volumes:
-      - ./help_data:/data
+      - /opt/1cv8:/opt/1cv8:ro
     command: ["python", "-m", "onec_help", "mcp", "/data", "--transport", "http", "--host", "0.0.0.0", "--port", "5050"]
     depends_on:
       qdrant:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', 5050)); s.close()\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   qdrant_storage:

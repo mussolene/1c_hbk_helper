@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 export PYTHONPATH="$PROJECT_ROOT/src"
-HELP_DIR="${HELP_DIR:-$PROJECT_ROOT/help_data}"
+HELP_DIR="${HELP_DIR:-.}"
 
 # Prefer Python 3.10+ (required by fastmcp)
 for py in python3.12 python3.11 python3.10 python3; do

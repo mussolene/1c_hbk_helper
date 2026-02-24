@@ -1,0 +1,2 @@
+# Индексация справки из смонтированного HELP_SOURCE_BASE (подпапки = версии 1С) — раз в сутки в 3:00
+0 3 * * * /bin/sh -c '. /app/.ingest_env 2>/dev/null; cd /app && python -m onec_help ingest >> /var/log/ingest.log 2>&1'

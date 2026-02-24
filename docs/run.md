@@ -18,9 +18,9 @@
 
 ## Docker Compose
 
-- В проекте есть каталог `help_data/` — положите в него распакованную справку (или распакуйте .hbk в этот каталог).
-- `docker compose up -d` — поднимает Qdrant, веб-приложение (app) и MCP-сервер (mcp).
-- Порты: 5001 (app), 5050 (MCP, streamable-http), 6333 (Qdrant).
+- Данные справки: монтируется `/opt/1cv8` в контейнер mcp, подпапки = версии 1С. Индексация вручную: `docker compose exec mcp python -m onec_help ingest`; по расписанию в mcp запущен cron (раз в сутки в 3:00). На Windows при монтировании `C:\Program Files\1cv8` учтите подпапку `bin` — поиск .hbk рекурсивный.
+- `docker compose up -d` — поднимает Qdrant и MCP-сервер (mcp; в нём же cron для индексации).
+- Порты: 5050 (MCP, streamable-http), 6333 (Qdrant).
 
 ## Подключение MCP к Cursor
 

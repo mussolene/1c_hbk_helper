@@ -1,8 +1,9 @@
-"""Unpack .hbk (or archive) with 7z, then fallback: Python zipfile, unzip. No hardcoded paths."""
+"""Unpack .hbk (or archive) with 7z, then fallback: Python zipfile, zip from offset, unzip. No hardcoded paths."""
 
 import os
 import subprocess
 import zipfile
+from io import BytesIO
 from pathlib import Path
 
 
@@ -15,6 +16,25 @@ def _try_zipfile(archive_path: Path, output_dir: Path) -> bool:
     """Try unpacking as ZIP (Python stdlib). Returns True if successful."""
     try:
         with zipfile.ZipFile(archive_path, "r") as zf:
+            zf.extractall(output_dir)
+        return True
+    except (zipfile.BadZipFile, OSError, ValueError):
+        return False
+
+
+def _try_zipfile_from_offset(
+    archive_path: Path, output_dir: Path, offset: int = 0, truncate_tail: int = 0
+) -> bool:
+    """Try unpacking as ZIP from byte offset (e.g. .hbk with header). truncate_tail = bytes to ignore at end."""
+    try:
+        with open(archive_path, "rb") as f:
+            f.seek(offset)
+            data = f.read()
+        if truncate_tail and len(data) > truncate_tail:
+            data = data[: -truncate_tail]
+        if not data:
+            return False
+        with zipfile.ZipFile(BytesIO(data), "r") as zf:
             zf.extractall(output_dir)
         return True
     except (zipfile.BadZipFile, OSError, ValueError):
@@ -63,12 +83,19 @@ def unpack_hbk(path_to_hbk, output_dir) -> None:
     if _try_zipfile(path_to_hbk, output_dir):
         return
 
-    # 3) unzip command
+    # 3) ZIP with header offset (some .hbk: "Headers Error", "data after end" — ZIP may start at offset)
+    file_size = path_to_hbk.stat().st_size
+    for skip, tail in [(1656, 39274), (1656, 0), (2048, 0), (1024, 0), (512, 0)]:
+        if skip < file_size and file_size - skip > tail:
+            if _try_zipfile_from_offset(path_to_hbk, output_dir, offset=skip, truncate_tail=tail):
+                return
+
+    # 4) unzip command
     if _try_unzip(path_to_hbk, output_dir):
         return
 
     err = (result.stderr or result.stdout or "").strip()
-    tried = "Tried: 7z, Python zipfile, unzip."
+    tried = "Tried: 7z, Python zipfile, zip from offset, unzip."
     if path_to_hbk.suffix.lower() == ".hbk":
         raise RuntimeError(
             f"All unpack methods failed. {tried} "

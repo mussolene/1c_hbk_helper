@@ -2,15 +2,15 @@
 
 ## Назначение проекта
 
-- Справка 1С: распаковка .hbk (только 7z), конвертация HTML → Markdown, индексация в Qdrant, веб-просмотр и MCP-сервер для поиска/чтения справки.
-- Конфигурация только через переменные окружения. БД — отдельный контейнер Qdrant в docker-compose.
-- Дальнейшие этапы: один–два MCP по кодовой базе и метаданным 1С (в плане только задел в README и структуре).
+- Справка 1С: распаковка .hbk (7z), конвертация HTML → Markdown, индексация в Qdrant, MCP-сервер для поиска/чтения справки.
+- Конфигурация через переменные окружения. БД — Qdrant в docker-compose.
+- Дальнейшие этапы: один–два MCP по кодовой базе и метаданным 1С (задел в README).
 
 ## Команды и сценарии
 
 - **Локально:** `python -m onec_help unpack/build-docs/build-index/serve/mcp <args>`
-- **Docker:** `docker-compose up` (сервисы `app` + `qdrant`); приложение по умолчанию — `serve /data`.
-- **Индекс:** после монтирования справки в `/data`: `build-docs /data -o /data/docs_md`, затем `build-index /data/docs_md` (нужны `QDRANT_HOST`, `QDRANT_PORT`).
+- **Docker:** `docker-compose up` (сервисы `qdrant` + `mcp`). В mcp смонтирован `/opt/1cv8`, cron раз в сутки в 3:00 запускает ingest.
+- **Индекс вручную:** `docker compose exec mcp python -m onec_help ingest` (каталог версий — `HELP_SOURCE_BASE`, подпапки = версии 1С, поиск .hbk рекурсивно, в т.ч. в `bin/` на Windows).
 
 ## Структура кода
 
