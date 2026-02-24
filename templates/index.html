@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1C Help File Viewer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Tahoma, Arial, Helvetica, sans-serif;
+            font-size: 0.7rem;
+        }
+
+        .sidebar {
+            width: 300px;
+            position: fixed;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            background: #f8f9fa;
+            border-right: 1px solid #dee2e6;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .content {
+            margin-left: 320px;
+            padding: 20px;
+        }
+
+        .tree-node {
+            cursor: pointer;
+            padding: 5px 0;
+        }
+
+        .tree-node.folder::before {
+            content: '📁 ';
+        }
+
+        .tree-node.file::before {
+            content: '📄 ';
+        }
+
+        .tree-node ul {
+            list-style: none;
+            padding-left: 20px;
+        }
+
+        #search-input {
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        .V8SH_pagetitle {
+            display: none;
+        }
+
+        .V8SH_title {
+            background: gainsboro;
+            font-weight: bold;
+        }
+
+        .V8SH_textarea {
+            padding: 5px;
+        }
+
+        .V8SH_heading {
+            text-decoration: underline;
+            font-weight: bold;
+        }
+
+        .V8SH_chapter {
+            font-weight: bold;
+        }
+
+        .V8SH_rubric {
+            text-decoration: underline;
+        }
+
+        .V8SH_codesample {
+            font-family: 'Courier New', monospace;
+            background: #e6e6e6;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="sidebar">
+        <h4>1C Help File Viewer</h4>
+        <form method="post">
+            <div class="mb-3">
+                <label for="directory" class="form-label">Enter directory path</label>
+                <input type="text" class="form-control" id="directory" name="directory"
+                    placeholder="e.g., C:/path/to/unpacked">
+            </div>
+            <button type="submit" class="btn btn-primary">Load</button>
+        </form>
+        {% if error %}
+        <div class="alert alert-danger mt-3">{{ error }}</div>
+        {% endif %}
+        {% if success %}
+        <input type="text" id="search-input" class="form-control mt-3" placeholder="Search...">
+        <div id="tree"></div>
+        {% endif %}
+    </div>
+    <div class="content">
+        <div id="html-content"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const treeData = {{ tree_elements | safe }};
+        let currentPath = '';
+
+        function buildTree(data, parentElement) {
+            const ul = document.createElement('ul');
+            data.forEach(node => {
+                const li = document.createElement('li');
+                li.className = node.is_folder ? 'tree-node folder' : 'tree-node file';
+                li.textContent = node.identifier;
+                li.dataset.path = node.html_path;
+                li.dataset.id = node.id;
+                if (node.html_path) {
+                    li.addEventListener('click', () => loadContent(node.html_path));
+                }
+                if (node.children.length > 0) {
+                    buildTree(node.children, li);
+                }
+                ul.appendChild(li);
+            });
+            parentElement.appendChild(ul);
+        }
+
+        function loadContent(path) {
+            if (path === currentPath) return;
+            currentPath = path;
+            fetch(`/content/${encodeURIComponent(path)}`)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('html-content').innerHTML = data.content;
+                    fixLinks();
+                });
+        }
+
+        function fixLinks() {
+            const links = document.getElementById('html-content').getElementsByTagName('a');
+            for (let link of links) {
+                if (link.href.startsWith('/content/')) {
+                    link.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        loadContent(link.href.replace('/content/', ''));
+                    });
+                }
+            }
+            const images = document.getElementById('html-content').getElementsByTagName('img');
+            for (let img of images) {
+                if (img.src.startsWith('/download/')) {
+                    img.src = img.src; // Ensure src is set correctly
+                }
+            }
+        }
+
+        function searchTree(query) {
+            const results = [];
+            function searchNodes(nodes) {
+                nodes.forEach(node => {
+                    if (node.identifier.toLowerCase().includes(query.toLowerCase())) {
+                        results.push(node);
+                    }
+                    searchNodes(node.children);
+                });
+            }
+            searchNodes(treeData);
+            const tree = document.getElementById('tree');
+            tree.innerHTML = '';
+            if (query) {
+                results.forEach(node => {
+                    const li = document.createElement('li');
+                    li.className = node.is_folder ? 'tree-node folder' : 'tree-node file';
+                    li.textContent = node.identifier;
+                    if (node.html_path) {
+                        li.addEventListener('click', () => loadContent(node.html_path));
+                    }
+                    tree.appendChild(li);
+                });
+            } else {
+                buildTree(treeData, tree);
+            }
+        }
+
+        document.getElementById('search-input')?.addEventListener('input', (e) => {
+            searchTree(e.target.value);
+        });
+
+        if (treeData) {
+            buildTree(treeData, document.getElementById('tree'));
+            if (treeData.length > 0 && treeData[0].html_path) {
+                loadContent(treeData[0].html_path);
+            }
+        }
+    </script>
+</body>
+
+</html>

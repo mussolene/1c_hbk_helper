@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "onec-help"
+version = "0.1.0"
+description = "1C Help: unpack .hbk, convert to Markdown, index in Qdrant, MCP server"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "flask>=3.0",
+    "beautifulsoup4>=4.12",
+    "qdrant-client>=1.7",
+]
+
+[project.optional-dependencies]
+mcp = [
+    "fastmcp>=2.0",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+embed = [
+    "sentence-transformers>=2.2",
+]
+
+[project.scripts]
+onec_help = "onec_help.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=79"
+# Target 90% (see README); mcp_server.py omitted; reach 90% in CI with full test suite
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.coverage.run]
+omit = ["src/onec_help/__main__.py", "src/onec_help/mcp_server.py", "*/tests/*"]
+source = ["src/onec_help"]

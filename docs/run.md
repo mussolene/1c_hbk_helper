@@ -1,0 +1,32 @@
+# Запуск 1C Help
+
+## Локально
+
+1. Установить зависимости: `pip install -e ".[dev]"` (и при необходимости `.[mcp]` для MCP).
+2. Распаковать справку (если есть .hbk):  
+   `python -m onec_help unpack /path/to/file.hbk -o ./unpacked`
+3. Сгенерировать Markdown:  
+   `python -m onec_help build-docs ./unpacked -o ./docs_md`
+4. Запустить Qdrant (Docker): `docker run -d -p 6333:6333 -v qdrant_data:/qdrant/storage qdrant/qdrant:v1.12.0`
+5. Построить индекс:  
+   `QDRANT_HOST=localhost QDRANT_PORT=6333 python -m onec_help build-index ./docs_md`
+6. Веб-просмотр:  
+   `python -m onec_help serve ./unpacked`
+7. MCP локально (stdio или HTTP):  
+   `python -m onec_help mcp ./unpacked` (stdio) или  
+   `python -m onec_help mcp ./unpacked --transport streamable-http --host 0.0.0.0 --port 5050`
+
+## Docker Compose
+
+- В проекте есть каталог `help_data/` — положите в него распакованную справку (или распакуйте .hbk в этот каталог).
+- `docker compose up -d` — поднимает Qdrant, веб-приложение (app) и MCP-сервер (mcp).
+- Порты: 5001 (app), 5050 (MCP, streamable-http), 6333 (Qdrant).
+
+## Подключение MCP к Cursor
+
+MCP работает **в контейнере** по протоколу **streamable-http** (не stdio). В проекте уже есть **`.cursor/mcp.json`**:
+
+- Сервер: `1c-help`, URL: `http://localhost:5050/mcp`.
+- После `docker compose up -d` Cursor подключается к контейнеру по этому URL. Перезапустите Cursor после правок конфига.
+
+Инструменты: `search_1c_help`, `get_1c_help_topic`, `get_1c_function_info`.

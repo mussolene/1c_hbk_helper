@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Tests / coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Data / artifacts (do not commit)
+*.hbk
+functions_data.json
+unpacked/
+docs_md/
+tmp/
+# Содержимое каталога справки не коммитим; сам каталог и .gitkeep — в репо
+help_data/*
+!help_data/.gitkeep
+shcntx_ru/
+shcntx_ru2/
+*.zip
+
+# Windows / 1C
+V8Unpack.exe
+zlib1.dll
+*.dll
+
+# OS
+.DS_Store
+Thumbs.db

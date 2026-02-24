@@ -1,0 +1,4 @@
+flask>=3.0
+beautifulsoup4>=4.12
+qdrant-client>=1.7
+fastmcp>=2.0; python_version >= "3.10"

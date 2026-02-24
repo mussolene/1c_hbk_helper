@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "1c-help": {
+      "url": "http://localhost:5001/mcp"
+    }
+  }
+}
