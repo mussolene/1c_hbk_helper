@@ -75,3 +75,16 @@ def test_unpack_fallback_zipfile(tmp_path: Path) -> None:
         run.return_value = MagicMock(returncode=1)
         unpack_hbk(archive, out)
     assert (out / "file.txt").read_text() == "hello"
+
+
+def test_unpack_hbk_real_zip_no_mock(tmp_path: Path) -> None:
+    """Unpack a real .hbk-sized zip (no 7z mock): fallback zipfile must succeed."""
+    archive = tmp_path / "sample_ru.hbk"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("PayloadData/index.html", "<html><body><h1>Test</h1></body></html>")
+        zf.writestr("PayloadData/page2.html", "<html><body><p>Second</p></body></html>")
+    out = tmp_path / "unpacked"
+    # 7z may fail on .hbk or succeed; zipfile fallback will work
+    unpack_hbk(archive, out)
+    assert (out / "PayloadData" / "index.html").exists()
+    assert "Test" in (out / "PayloadData" / "index.html").read_text()

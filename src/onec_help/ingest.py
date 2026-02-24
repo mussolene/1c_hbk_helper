@@ -60,12 +60,13 @@ def _unpack_and_build_docs(
     temp_base: Path,
     unpack_fn: Any,
     build_docs_fn: Any,
-) -> Tuple[Optional[Path], str, str]:
-    """Unpack one .hbk to temp, build .md there. Returns (md_dir, version, language) or (None, v, l) on failure."""
+) -> Tuple[Optional[Path], str, str, Optional[str]]:
+    """Unpack one .hbk to temp, build .md there. Returns (md_dir, version, language, error_message) or (None, v, l, reason) on failure."""
     safe_name = re.sub(r"[^\w\-]", "_", hbk_path.stem)
     out_sub = temp_base / version / language / safe_name
     unpacked = out_sub / "unpacked"
     md_dir = out_sub / "md"
+    err_msg: Optional[str] = None
     try:
         unpacked.mkdir(parents=True, exist_ok=True)
         unpack_fn(hbk_path, unpacked)
@@ -73,10 +74,11 @@ def _unpack_and_build_docs(
         build_docs_fn(unpacked, md_dir)
         if any(md_dir.rglob("*.md")) or any(md_dir.rglob("*")) and not list(md_dir.rglob("*.md")):
             # build_docs may create .md or we have extension-less HTML; indexer will use HTML fallback
-            return (md_dir, version, language)
-        return (md_dir, version, language)
-    except Exception:
-        return (None, version, language)
+            return (md_dir, version, language, None)
+        return (md_dir, version, language, None)
+    except Exception as e:
+        err_msg = f"{type(e).__name__}: {e}"
+        return (None, version, language, err_msg)
     finally:
         if unpacked.exists():
             try:
@@ -160,6 +162,7 @@ def run_ingest(
 
     total_indexed = 0
     done = 0
+    failed: List[Tuple[Path, str, str, str]] = []  # (path, version, language, error_message)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
@@ -176,10 +179,13 @@ def run_ingest(
         for future in as_completed(futures):
             path_hbk, version, language = futures[future]
             done += 1
-            md_dir, _, _ = future.result()
+            md_dir, _, _, err_msg = future.result()
             if md_dir is None or not md_dir.exists():
+                reason = (err_msg or "unknown").split("\n")[0].strip()[:200]
+                failed.append((path_hbk, version, language, err_msg or "unknown"))
                 if verbose:
                     _log(f"[ingest] [{done}/{len(tasks)}] skip (unpack/build failed) {version}/{language} — {path_hbk}")
+                    _log(f"[ingest]   reason: {reason}")
                 continue
             try:
                 if verbose:
@@ -207,6 +213,21 @@ def run_ingest(
         pass
     if verbose:
         _log(f"[ingest] Done. Total points indexed: {total_indexed}")
+    if failed and verbose:
+        _log(f"[ingest] Failed {len(failed)} file(s) (unpack or build_docs error):")
+        for path_hbk, version, language, err in failed:
+            short_err = (err or "").split("\n")[0].strip()[:150]
+            _log(f"[ingest]   — {version}/{language} {path_hbk.name}: {short_err}")
+        fail_log = os.environ.get("INGEST_FAILED_LOG")
+        if fail_log:
+            try:
+                with open(fail_log, "w", encoding="utf-8") as f:
+                    f.write(f"# Ingest failed .hbk ({len(failed)})\n")
+                    for path_hbk, version, language, err in failed:
+                        f.write(f"{version}\t{language}\t{path_hbk}\t{err or ''}\n")
+                _log(f"[ingest] Wrote failure list to {fail_log}")
+            except OSError as e:
+                _log(f"[ingest] Could not write failure log {fail_log}: {e}")
     return total_indexed
 
 

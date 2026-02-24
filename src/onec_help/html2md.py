@@ -48,6 +48,21 @@ def _legacy_body_to_md(body) -> str:
     return "\n".join(lines).strip()
 
 
+# Encodings to try when reading HTML (1C help may be UTF-8 or Windows-1251)
+_HTML_ENCODINGS = ("utf-8", "cp1251", "cp866", "latin-1")
+
+
+def _read_html_file(path: Path) -> str:
+    """Read file content; try utf-8, then cp1251/cp866/latin-1 for legacy 1C help."""
+    raw = path.read_bytes()
+    for enc in _HTML_ENCODINGS:
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 def html_to_md_content(html_path) -> str:
     """
     Extract help article from HTML and return Markdown string.
@@ -56,8 +71,8 @@ def html_to_md_content(html_path) -> str:
     path = Path(html_path)
     if not path.exists():
         return ""
-    with open(path, "r", encoding="utf-8") as f:
-        soup = BeautifulSoup(f, "html.parser")
+    text = _read_html_file(path)
+    soup = BeautifulSoup(text, "html.parser")
 
     # Legacy schema: no V8SH_pagetitle → structured body (H1→#, H2–H6, tables)
     title_tag = soup.find("h1", class_="V8SH_pagetitle")
@@ -194,7 +209,7 @@ def html_to_md_content(html_path) -> str:
 def _looks_like_html(path: Path) -> bool:
     """True if file has no extension and content starts like HTML (e.g. unpacked .hbk)."""
     try:
-        head = path.read_text(encoding="utf-8", errors="ignore")[:1024].lower()
+        head = _read_html_file(path)[:1024].lower()
         return "<html" in head or "<!doctype" in head
     except Exception:
         return False
