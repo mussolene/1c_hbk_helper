@@ -31,3 +31,19 @@ def test_html_to_md_with_sections(help_sample_dir: Path) -> None:
         assert "Формат" in md
         assert "Описание" in md or "Синтаксис" in md
         assert "Параметры" in md or "Значение" in md
+
+
+def test_function_sample_md_structure(help_sample_dir: Path) -> None:
+    """V8SH article must yield formal MD: title + sections Описание, Синтаксис, Параметры, Пример, См. также."""
+    fn = help_sample_dir / "function_sample.html"
+    if not fn.exists():
+        return
+    md = html_to_md_content(fn)
+    assert md.startswith("# "), "MD must start with level-1 heading"
+    assert "## Описание" in md
+    assert "## Синтаксис" in md
+    assert "## Параметры" in md
+    assert "## Пример" in md
+    assert "## См. также" in md
+    assert "Формат(Значение, ФорматнаяСтрока)" in md or "Формат" in md
+    assert "Значение" in md and "ФорматнаяСтрока" in md

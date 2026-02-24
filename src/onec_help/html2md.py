@@ -1,9 +1,51 @@
-"""Convert 1C help HTML to Markdown (one .md per article)."""
+"""Convert 1C help HTML to Markdown (one .md per article).
+Supports: (1) V8SH_* schema (Syntax Helper), (2) Legacy schema (H1–H6, tables, STRONG sections).
+See docs/help_formats.md for formal spec."""
 
 import os
+import re
 from pathlib import Path
 
 from bs4 import BeautifulSoup
+
+
+def _table_to_md(table) -> str:
+    """Convert a <table> to Markdown table."""
+    rows = []
+    for tr in table.find_all("tr"):
+        cells = [td.get_text(separator=" ", strip=True) for td in tr.find_all(["td", "th"])]
+        if cells:
+            rows.append("| " + " | ".join(cells) + " |")
+    if not rows:
+        return ""
+    if len(rows) >= 2:
+        rows.insert(1, "|" + "|".join([" --- " for _ in rows[0].split("|")[1:-1]]) + "|")
+    return "\n".join(rows) + "\n\n"
+
+
+def _legacy_body_to_md(body) -> str:
+    """Convert legacy article body (H1–H6, P, TABLE, STRONG) to Markdown."""
+    lines = []
+    for elem in body.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "table", "pre"]):
+        tag = elem.name.lower()
+        if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            level = int(tag[1])
+            lines.append("\n" + "#" * level + " " + elem.get_text(separator=" ", strip=True) + "\n\n")
+        elif tag == "table":
+            tbl = _table_to_md(elem)
+            if tbl:
+                lines.append(tbl)
+        elif tag == "pre":
+            lines.append("```\n" + elem.get_text(separator="\n", strip=True) + "\n```\n\n")
+        elif tag == "p":
+            text = elem.get_text(separator=" ", strip=True)
+            if text:
+                # Inline links: keep [text](url)
+                for a in elem.find_all("a", href=True):
+                    a.replace_with("[" + a.get_text(strip=True) + "](" + a["href"] + ")")
+                text = elem.get_text(separator=" ", strip=True)
+                lines.append(text + "\n\n")
+    return "\n".join(lines).strip()
 
 
 def html_to_md_content(html_path) -> str:
@@ -17,11 +59,19 @@ def html_to_md_content(html_path) -> str:
     with open(path, "r", encoding="utf-8") as f:
         soup = BeautifulSoup(f, "html.parser")
 
-    lines: list[str] = []
-
-    # Title
+    # Legacy schema: no V8SH_pagetitle → structured body (H1→#, H2–H6, tables)
     title_tag = soup.find("h1", class_="V8SH_pagetitle")
-    title = title_tag.get_text(strip=True) if title_tag else "Untitled"
+    if not title_tag:
+        body = soup.find("body")
+        if body:
+            md_body = _legacy_body_to_md(body)
+            if md_body.strip():
+                return md_body.strip()
+        title = "Untitled"
+    else:
+        title = title_tag.get_text(strip=True)
+
+    lines: list[str] = []
     lines.append(f"# {title}\n")
 
     # Description
@@ -51,11 +101,15 @@ def html_to_md_content(html_path) -> str:
                 break
     if syntax_heading:
         lines.append("## Синтаксис\n\n```\n")
-        next_ = syntax_heading.find_next(string=True)
-        if next_:
-            syntax_text = str(next_).strip()
-            if syntax_text and syntax_text != "Синтаксис:":
-                lines.append(syntax_text + "\n")
+        pre = syntax_heading.find_next("pre")
+        if pre:
+            lines.append(pre.get_text(separator="\n", strip=True) + "\n")
+        else:
+            next_ = syntax_heading.find_next(string=True)
+            if next_:
+                syntax_text = str(next_).strip()
+                if syntax_text and syntax_text != "Синтаксис:":
+                    lines.append(syntax_text + "\n")
         lines.append("```\n\n")
 
     # Parameters
@@ -68,6 +122,8 @@ def html_to_md_content(html_path) -> str:
     if params_heading:
         lines.append("## Параметры\n\n")
         for div in params_heading.find_all_next("div", class_="V8SH_rubric"):
+            if div.find_previous("p", class_="V8SH_chapter") != params_heading:
+                break
             p_tag = div.find("p")
             a_tag = div.find("a")
             name = p_tag.get_text(strip=True) if p_tag else "—"
@@ -83,12 +139,19 @@ def html_to_md_content(html_path) -> str:
                 ret_heading = p
                 break
     if ret_heading:
-        next_ = ret_heading.find_next(string=True)
-        if next_:
-            ret_text = str(next_).strip()
-            if ret_text and "Возвращаемое значение" not in ret_text:
+        next_p = ret_heading.find_next_sibling("p")
+        if next_p:
+            ret_text = next_p.get_text(separator=" ", strip=True)
+            if ret_text:
                 lines.append("## Возвращаемое значение\n\n")
                 lines.append(ret_text + "\n\n")
+        else:
+            next_ = ret_heading.find_next(string=True)
+            if next_:
+                ret_text = str(next_).strip()
+                if ret_text and "Возвращаемое значение" not in ret_text:
+                    lines.append("## Возвращаемое значение\n\n")
+                    lines.append(ret_text + "\n\n")
 
     # Examples
     ex_heading = soup.find("p", class_="V8SH_chapter", string=lambda t: t and "Пример:" in (t if isinstance(t, str) else t))
@@ -98,10 +161,10 @@ def html_to_md_content(html_path) -> str:
                 ex_heading = p
                 break
     if ex_heading:
-        table = ex_heading.find_next("table")
-        if table:
+        code_block = ex_heading.find_next("pre") or ex_heading.find_next("table")
+        if code_block:
             lines.append("## Пример\n\n```\n")
-            lines.append(table.get_text(separator="\n", strip=True) + "\n")
+            lines.append(code_block.get_text(separator="\n", strip=True) + "\n")
             lines.append("```\n\n")
 
     # See also
@@ -128,9 +191,19 @@ def html_to_md_content(html_path) -> str:
     return out
 
 
+def _looks_like_html(path: Path) -> bool:
+    """True if file has no extension and content starts like HTML (e.g. unpacked .hbk)."""
+    try:
+        head = path.read_text(encoding="utf-8", errors="ignore")[:1024].lower()
+        return "<html" in head or "<!doctype" in head
+    except Exception:
+        return False
+
+
 def build_docs(project_dir, output_dir):
     """
-    Walk project_dir for .html files, convert each to .md in output_dir preserving structure.
+    Walk project_dir for .html files (and extension-less HTML, e.g. from unpacked .hbk),
+    convert each to .md in output_dir preserving structure.
     Returns list of created .md paths.
     """
     project_dir = Path(project_dir).resolve()
@@ -138,16 +211,22 @@ def build_docs(project_dir, output_dir):
     created: list[Path] = []
     for root, _, files in os.walk(project_dir):
         for name in files:
-            if not name.endswith(".html"):
+            if name.startswith(".") or name.endswith(".hbk"):
                 continue
             html_path = Path(root) / name
+            is_html = name.endswith(".html") or (
+                "." not in name and _looks_like_html(html_path)
+            )
+            if not is_html:
+                continue
             try:
                 rel = html_path.relative_to(project_dir)
             except ValueError:
                 rel = html_path.name
             out_sub = output_dir / rel.parent
             out_sub.mkdir(parents=True, exist_ok=True)
-            md_path = out_sub / (rel.stem + ".md")
+            stem = rel.stem if rel.suffix else rel.name
+            md_path = out_sub / (stem + ".md")
             content = html_to_md_content(html_path)
             if content:
                 md_path.write_text(content, encoding="utf-8")

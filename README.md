@@ -21,8 +21,8 @@ pip install -e ".[dev]"
 ## Команды CLI
 
 - **`unpack <archive> [--output-dir]`** — распаковать .hbk через 7z
-- **`build-docs <project_dir> [--output]`** — сгенерировать Markdown из HTML справки
-- **`build-index <directory> [--incremental]`** — построить векторный индекс в Qdrant по всем .md (или .html) в каталоге рекурсивно; `--incremental` — добавить/обновить без пересоздания коллекции (для дополнения при новых файлах)
+- **`build-docs <project_dir> [--output]`** — сгенерировать Markdown из HTML справки (.html и файлы без расширения с HTML, например после распаковки .hbk)
+- **`build-index <directory> [--incremental]`** — построить векторный индекс в Qdrant по всем .md в каталоге; если .md нет — по .html и по файлам без расширения с HTML-содержимым (распакованный .hbk). `--incremental` — добавить/обновить без пересоздания коллекции.
 - **`serve <directory>`** — запустить веб-просмотр справки (Flask)
 - **`mcp <directory>`** — запустить MCP-сервер (stdio; нужен fastmcp)
 

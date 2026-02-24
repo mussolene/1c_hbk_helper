@@ -79,10 +79,18 @@ def build_index(
             )
         )
     if not points:
-        # Fallback: index .html as plain text chunks
-        for path in docs_dir.rglob("*.html"):
+        # Fallback: index .html and extension-less HTML (e.g. unpacked .hbk)
+        from .html2md import html_to_md_content, _looks_like_html
+        html_paths = list(docs_dir.rglob("*.html"))
+        for p in docs_dir.rglob("*"):
+            if not p.is_file():
+                continue
+            if "." in p.name or p.name == ".gitkeep":
+                continue
+            if _looks_like_html(p) and p not in html_paths:
+                html_paths.append(p)
+        for path in html_paths:
             try:
-                from .html2md import html_to_md_content
                 text = html_to_md_content(path)
             except Exception:
                 try:
@@ -95,6 +103,7 @@ def build_index(
             rel_str = str(rel).replace("\\", "/")
             vector = _get_embedding(text[:8000])
             point_id = _path_to_point_id(rel_str) if incremental else len(points)
+            title = path.stem if path.suffix else path.name
             points.append(
                 PointStruct(
                     id=point_id,
@@ -102,7 +111,7 @@ def build_index(
                     payload={
                         "path": rel_str,
                         "text": text[:12000],
-                        "title": path.stem,
+                        "title": title,
                     },
                 )
             )
