@@ -2,11 +2,22 @@
 Supports: (1) V8SH_* schema (Syntax Helper), (2) Legacy schema (H1–H6, tables, STRONG sections).
 See docs/help_formats.md for formal spec."""
 
+import html
 import os
 import re
+import unicodedata
 from pathlib import Path
 
 from bs4 import BeautifulSoup
+
+
+def _normalize_md_text(s: str) -> str:
+    """Replace HTML entities with Unicode and normalize composite characters for consistent search."""
+    if not s:
+        return s
+    s = html.unescape(s)  # &nbsp; &amp; &lt; &#160; etc. → real characters
+    s = unicodedata.normalize("NFC", s)  # canonical composition (é as one codepoint)
+    return s
 
 
 def _table_to_md(table) -> str:
@@ -81,7 +92,7 @@ def html_to_md_content(html_path) -> str:
         if body:
             md_body = _legacy_body_to_md(body)
             if md_body.strip():
-                return md_body.strip()
+                return _normalize_md_text(md_body.strip())
         title = "Untitled"
     else:
         title = title_tag.get_text(strip=True)
@@ -203,7 +214,7 @@ def html_to_md_content(html_path) -> str:
         body = soup.find("body")
         if body:
             out = f"# {title}\n\n" + body.get_text(separator="\n", strip=True)[:8000]
-    return out
+    return _normalize_md_text(out)
 
 
 def _looks_like_html(path: Path) -> bool:

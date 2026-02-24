@@ -2,7 +2,17 @@
 import pytest
 from pathlib import Path
 
-from onec_help.html2md import html_to_md_content, build_docs
+from onec_help.html2md import _normalize_md_text, html_to_md_content, build_docs
+
+
+def test_normalize_md_text() -> None:
+    """HTML entities and Unicode are normalized for consistent display and search."""
+    assert _normalize_md_text("a&amp;b") == "a&b"
+    assert _normalize_md_text("&nbsp;") == "\u00a0"
+    assert _normalize_md_text("&lt;tag&gt;") == "<tag>"
+    assert _normalize_md_text("&#1057;&#1080;&#1085;&#1090;&#1072;&#1082;&#1089;&#1080;&#1089;") == "Синтаксис"
+    assert _normalize_md_text("plain") == "plain"
+    assert _normalize_md_text("") == ""
 
 
 def test_html_to_md_content(sample_html: Path) -> None:
