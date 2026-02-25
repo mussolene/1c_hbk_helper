@@ -1,11 +1,11 @@
 # 1C Help: app container (Python + p7zip-full + cron для индексации по расписанию).
 # Зависимости для эмбеддингов ставятся только при EMBEDDING_BACKEND=local. Для openai_api или none:
 #   docker build --build-arg EMBEDDING_BACKEND=none -t onec-help .
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 ARG EMBEDDING_BACKEND=local
 
-# Базовый python:3.12-slim не содержит: 7z (распаковка .hbk), cron (ingest по расписанию), gosu (запуск не от root)
+# Базовый slim не содержит: 7z, cron, gosu
 RUN apt-get update && apt-get install -y --no-install-recommends \
     p7zip-full \
     cron \
@@ -18,6 +18,7 @@ RUN groupadd -r app --gid=1000 && useradd -r -g app --uid=1000 --create-home app
 WORKDIR /app
 
 COPY requirements.lock .
+# numpy 2.4+ и qdrant-client 1.17+ имеют готовые wheel под Python 3.14 (manylinux), без сборки из исходников
 RUN pip install --no-cache-dir -r requirements.lock
 
 COPY pyproject.toml .

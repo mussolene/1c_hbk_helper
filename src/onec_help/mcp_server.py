@@ -1,5 +1,6 @@
 """MCP server for 1C Help: search_1c_help, get_1c_help_topic, get_1c_function_info."""
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -130,7 +131,24 @@ def run_mcp(
             return "Index does not exist. Run ingest to index the help (e.g. docker compose exec mcp python -m onec_help ingest)."
         count = s.get("points_count")
         name = s.get("collection", "onec_help")
-        lines = [f"Collection: **{name}**", f"Topics indexed: **{count}**"]
+        lines = [
+            f"Collection: **{name}**",
+            f"Topics indexed: **{count}**",
+            f"Embeddings: **{count}**",
+        ]
+        storage_path = os.environ.get("QDRANT_STORAGE_PATH")
+        if storage_path and os.path.isdir(storage_path):
+            try:
+                total = 0
+                for dirpath, _dirnames, filenames in os.walk(storage_path):
+                    for f in filenames:
+                        try:
+                            total += os.path.getsize(os.path.join(dirpath, f))
+                        except OSError:
+                            pass
+                lines.append(f"DB size: **{total / (1024 * 1024):.1f} MB**")
+            except OSError:
+                pass
         if s.get("versions"):
             lines.append(f"Versions (sample): {', '.join(s['versions'])}")
         if s.get("languages"):

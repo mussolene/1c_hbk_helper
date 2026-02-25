@@ -70,6 +70,8 @@ def cmd_build_index(args: argparse.Namespace) -> int:
             qdrant_port=int(os.environ.get("QDRANT_PORT", "6333")),
             collection=os.environ.get("QDRANT_COLLECTION", "onec_help"),
             incremental=getattr(args, "incremental", False),
+            embedding_batch_size=getattr(args, "embedding_batch_size", None),
+            embedding_workers=getattr(args, "embedding_workers", None),
         )
         print(f"Indexed {count} chunks")
         return 0
@@ -79,8 +81,9 @@ def cmd_build_index(args: argparse.Namespace) -> int:
 
 
 def cmd_index_status(args: argparse.Namespace) -> int:
-    """Print index status: points count, versions, languages."""
+    """Print index status: points count, versions, languages; ingest progress (embedding speed, per-folder, ETA)."""
     from .indexer import get_index_status
+    from .ingest import read_ingest_status
 
     host = os.environ.get("QDRANT_HOST", "localhost")
     port = int(os.environ.get("QDRANT_PORT", "6333"))
@@ -89,15 +92,84 @@ def cmd_index_status(args: argparse.Namespace) -> int:
     if s.get("error"):
         print(f"Error: {s['error']}", file=sys.stderr)
         return 1
-    if not s.get("exists"):
+    ingest = read_ingest_status()
+    if not s.get("exists") and not ingest:
         print("Index does not exist. Run: python -m onec_help ingest")
         return 0
-    print(f"Collection: {s.get('collection', 'onec_help')}")
-    print(f"Topics indexed: {s.get('points_count', 0)}")
-    if s.get("versions"):
-        print(f"Versions (sample): {', '.join(s['versions'])}")
-    if s.get("languages"):
-        print(f"Languages (sample): {', '.join(s['languages'])}")
+    if s.get("exists"):
+        pts = s.get("points_count", 0)
+        print(f"Collection: {s.get('collection', 'onec_help')}")
+        print(f"Topics indexed: {pts}")
+        print(f"Embeddings: {pts}")
+        storage_path = os.environ.get("QDRANT_STORAGE_PATH")
+        if storage_path and os.path.isdir(storage_path):
+            try:
+                total = 0
+                for dirpath, _dirnames, filenames in os.walk(storage_path):
+                    for f in filenames:
+                        p = os.path.join(dirpath, f)
+                        try:
+                            total += os.path.getsize(p)
+                        except OSError:
+                            pass
+                size_mb = total / (1024 * 1024)
+                print(f"DB size: {size_mb:.1f} MB")
+            except OSError:
+                print("DB size: —")
+        elif storage_path:
+            print("DB size: — (path not found)")
+        if s.get("versions"):
+            print(f"Versions (sample): {', '.join(s['versions'])}")
+        if s.get("languages"):
+            print(f"Languages (sample): {', '.join(s['languages'])}")
+    if ingest:
+        backend = ingest.get("embedding_backend") or "none"
+        print(f"Embedding: {backend}")
+        if backend == "none":
+            print("Embedding speed: none")
+        else:
+            speed = ingest.get("embedding_speed_pts_per_sec")
+            if speed is not None:
+                print(f"Embedding speed: {speed} pts/sec")
+            else:
+                print("Embedding speed: —")
+        elapsed = ingest.get("elapsed_sec")
+        if elapsed is not None:
+            print(f"Elapsed: {elapsed} s")
+        status = ingest.get("status", "")
+        if status == "completed":
+            total_sec = ingest.get("total_elapsed_sec")
+            if total_sec is not None:
+                print(f"Indexing finished. Total time: {total_sec} s")
+            print("Indexing: completed")
+        else:
+            print("Indexing: in progress")
+            eta = ingest.get("eta_sec")
+            if eta is not None:
+                print(f"ETA: ~{int(eta)} s")
+        current = ingest.get("current") or []
+        if current:
+            print("Current (per thread):")
+            for c in current:
+                path = c.get("path", "")
+                ver = c.get("version", "")
+                lang = c.get("language", "")
+                stage = c.get("stage", "")
+                print(f"  {ver}/{lang}  {path}  — {stage}")
+        folders = ingest.get("folders") or []
+        if folders:
+            print("Per folder (version/lang): hbk → html, md, err, pts")
+            for fo in folders:
+                v = fo.get("version", "")
+                lang = fo.get("language", "")
+                hbk = fo.get("hbk_count", 0)
+                html = fo.get("html_count", 0)
+                md = fo.get("md_count", 0)
+                err = fo.get("err_count", 0)
+                pts = fo.get("points", 0)
+                st = fo.get("status", "pending")
+                # One line: 8.3/ru  hbk:2  html:150  md:120  err:0  pts:120  done
+                print(f"  {v}/{lang}  hbk:{hbk}  html:{html}  md:{md}  err:{err}  pts:{pts}  {st}")
     return 0
 
 
@@ -209,6 +281,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         languages = parse_languages_env(raw_lang if raw_lang.strip() else "all")
     else:
         languages = parse_languages_env(os.environ.get("HELP_LANGUAGES"))
+    if getattr(args, "no_cache", False):
+        os.environ["INGEST_SKIP_CACHE"] = "1"
     try:
         n = run_ingest(
             source_dirs_with_versions=sources,
@@ -218,11 +292,13 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             qdrant_port=int(os.environ.get("QDRANT_PORT", "6333")),
             collection=os.environ.get("QDRANT_COLLECTION", "onec_help"),
             incremental=not getattr(args, "recreate", False),
-            max_workers=getattr(args, "workers", 4),
+            max_workers=getattr(args, "workers", None),
             max_tasks=getattr(args, "max_tasks", None),
             verbose=not getattr(args, "quiet", False),
             dry_run=getattr(args, "dry_run", False),
             index_batch_size=getattr(args, "index_batch_size", 500),
+            embedding_batch_size=getattr(args, "embedding_batch_size", None),
+            embedding_workers=getattr(args, "embedding_workers", None),
         )
         print(f"Ingested and indexed {n} chunks")
         return 0
@@ -327,13 +403,21 @@ def main() -> int:
         action="store_true",
         help="Add/update only, do not recreate collection (new files in folder will be indexed)",
     )
-    p_idx.set_defaults(func=cmd_build_index)
-
-    # index-status
-    p_status = sub.add_parser(
-        "index-status", help="Show 1C help index status (topic count, versions, languages)"
+    p_idx.add_argument(
+        "--embedding-batch-size",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Texts per embedding batch (default: env EMBEDDING_BATCH_SIZE or 64)",
     )
-    p_status.set_defaults(func=cmd_index_status)
+    p_idx.add_argument(
+        "--embedding-workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Parallel API requests for openai_api (default: env EMBEDDING_WORKERS or 4)",
+    )
+    p_idx.set_defaults(func=cmd_build_index)
 
     # ingest
     p_ingest = sub.add_parser(
@@ -361,7 +445,12 @@ def main() -> int:
         help="Temp dir in container (default HELP_INGEST_TEMP or /tmp/help_ingest)",
     )
     p_ingest.add_argument(
-        "--workers", "-w", type=int, default=4, help="Parallel workers for unpack/build (default 4)"
+        "--workers",
+        "-w",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Parallel workers for unpack/build (default: half of CPUs)",
     )
     p_ingest.add_argument(
         "--max-tasks",
@@ -393,7 +482,33 @@ def main() -> int:
         action="store_true",
         help="Recreate Qdrant collection (e.g. after changing EMBEDDING_DIMENSION or model)",
     )
+    p_ingest.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Ignore ingest cache; re-parse and re-embed all .hbk (env INGEST_SKIP_CACHE=1)",
+    )
+    p_ingest.add_argument(
+        "--embedding-batch-size",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Texts per embedding batch (default: env EMBEDDING_BATCH_SIZE or 64)",
+    )
+    p_ingest.add_argument(
+        "--embedding-workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Parallel API requests for openai_api (default: env EMBEDDING_WORKERS or 4)",
+    )
     p_ingest.set_defaults(func=cmd_ingest)
+
+    # index-status (ingest: embedding speed, per-folder, ETA, total time)
+    p_status = sub.add_parser(
+        "index-status",
+        help="Show index status (topics, versions, languages; ingest: embedding speed, per-folder, ETA)",
+    )
+    p_status.set_defaults(func=cmd_index_status)
 
     # mcp
     p_mcp = sub.add_parser("mcp", help="Run MCP server (stdio, sse, http, streamable-http)")

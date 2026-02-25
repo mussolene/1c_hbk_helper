@@ -17,7 +17,7 @@
 
 ## Требования
 
-- Python 3.9+ (для MCP с fastmcp — 3.10+)
+- Python 3.14+ (в образе Docker используется python:3.14-slim; при несовместимости зависимостей можно понизить до 3.12)
 - Docker и docker-compose (для контейнерного запуска)
 - 7z (p7zip-full) — для распаковки .hbk внутри контейнера
 
@@ -42,9 +42,9 @@ pip install -e ".[dev]"
 | **`unpack <archive> [--output-dir]`** | Распаковать один .hbk через 7z |
 | **`unpack-dir [source_dir] [-o output]`** | Распаковать все .hbk из дерева каталогов в указанную директорию (без индексации). Источники: `source_dir`, `HELP_SOURCE_BASE` или `--sources` |
 | **`build-docs <project_dir> [--output]`** | Сгенерировать Markdown из HTML справки |
-| **`build-index <directory> [--incremental]`** | Построить векторный индекс в Qdrant по .md/.html (эмбеддинги по умолчанию: sentence-transformers) |
-| **`ingest`** | Распаковать .hbk из мультикаталогов во временную папку, построить Markdown, проиндексировать в Qdrant, удалить временные данные |
-| **`index-status`** | Показать статус индекса (число тем, версии, языки) |
+| **`build-index <directory> [--incremental] [--embedding-batch-size N] [--embedding-workers N]`** | Построить векторный индекс в Qdrant по .md/.html (батч-эмбеддинги; при openai_api — параллельные запросы) |
+| **`ingest`** | Распаковать .hbk из мультикаталогов во временную папку, построить Markdown, проиндексировать в Qdrant, удалить временные данные. По хэшу .hbk кэшируется факт индексации — при перезапуске неизменённые файлы пропускаются (не парсятся, не пересчитываются эмбеддинги). Опции `--no-cache` для полной переиндексации; `--embedding-batch-size`, `--embedding-workers` — для ускорения эмбеддингов |
+| **`index-status`** | Статус индекса: число тем, число эмбеддингов, размер БД на диске (если задан `QDRANT_STORAGE_PATH`), версии и языки; при запущенном ingest — скорость эмбеддингов, прогресс по папкам, ETA |
 | **`serve <directory>`** | Веб-просмотр справки (Flask) |
 | **`mcp <directory>`** | MCP-сервер (stdio/HTTP; нужен fastmcp) |
 
@@ -55,13 +55,17 @@ pip install -e ".[dev]"
 | `QDRANT_HOST` | Хост Qdrant | `localhost` |
 | `QDRANT_PORT` | Порт Qdrant | `6333` |
 | `QDRANT_COLLECTION` | Имя коллекции в Qdrant | `onec_help` |
+| `QDRANT_STORAGE_PATH` | Путь к каталогу хранилища Qdrant (для `index-status`: вывод размера БД на диске) | — |
 | `HELP_PATH` | Базовый каталог справки (для MCP/serve) | `/data` |
 | `HELP_SOURCE_BASE` | Корень каталогов с версиями 1С (ingest) | — |
 | `HELP_SOURCES_DIR` | То же, альтернативное имя | — |
 | `HELP_SOURCE_DIRS` | Список путей через запятую (ingest) | — |
 | `HELP_LANGUAGES` | Языки справки (ingest) | `ru` |
 | `HELP_INGEST_TEMP` | Временный каталог для ingest | `/tmp/help_ingest` |
+| `INGEST_CACHE_FILE` | Путь к SQLite-кэшу ingest (хэш .hbk → уже проиндексировано; при перезапуске не перепарсивать и не пересчитывать embedding). В Docker по умолчанию `/qdrant_storage/ingest_cache.db` | `/tmp/onec_help_ingest_cache.db` |
+| `INGEST_SKIP_CACHE` | `1`/`true` — полная переиндексация без кэша (или `ingest --no-cache`) | — |
 | `INGEST_FAILED_LOG` | Файл для списка неудачных .hbk | — |
+| `INDEX_STATUS_FILE` | Файл статуса ingest (для `index-status`: скорость эмбеддингов, по папкам, ETA) | `/tmp/onec_help_ingest_status.json` |
 | `MCP_TRANSPORT` | Транспорт MCP: `stdio` или `http` | `stdio` |
 | `MCP_HOST` | Хост для MCP HTTP | `127.0.0.1` |
 | `MCP_PORT` | Порт для MCP HTTP | `5050` |
@@ -70,9 +74,13 @@ pip install -e ".[dev]"
 | `HELP_SERVE_ALLOWED_DIRS` | Список путей через запятую (serve): разрешённые базовые каталоги для формы; если задан, ввод вне списка отклоняется | — |
 | `EMBEDDING_BACKEND` | Эмбеддинги: `local` (sentence-transformers), `openai_api` (внешний API) или `none` (отключены — плейсхолдер, только поиск по ключевым словам) | `local` |
 | `EMBEDDING_MODEL` | Имя модели. Для openai_api (LM Studio): если такой модели нет на сервере, берётся первая из списка или популярная (nomic-embed-text, all-MiniLM-L6-v2); при необходимости выполняется запрос на загрузку через API LM Studio | `all-MiniLM-L6-v2` |
-| `EMBEDDING_API_URL` | Для openai_api: базовый URL (по умолчанию LM Studio: `http://localhost:1234/v1` локально, в контейнере — `http://host.docker.internal:1234/v1`) | LM Studio: 1234 |
+| `EMBEDDING_API_URL` | Для openai_api: базовый URL (по умолчанию LM Studio: `http://localhost:1234/v1` локально, в контейнере — `http://host.docker.internal:1234/v1`). При недоступности/ошибках используются плейсхолдер-векторы и семантический поиск ограничен | LM Studio: 1234 |
 | `EMBEDDING_API_KEY` | Ключ API (если нужен для openai_api) | — |
 | `EMBEDDING_DIMENSION` | Размерность при openai_api (если не задана — определяется по первому ответу API) | — |
+| `EMBEDDING_BATCH_SIZE` | Размер батча для эмбеддингов (текстов за один вызов encode/API). По умолчанию 64 | `64` |
+| `EMBEDDING_WORKERS` | Число параллельных запросов к внешнему API (только openai_api). По умолчанию 4 | `4` |
+| `EMBEDDING_FORCE_BATCH` | Максимальная мощность: `1`/`true`/`yes` — батч 256 и 16 воркеров для любого типа embedding | — |
+| `EMBEDDING_TIMEOUT` | Таймаут HTTP-запроса к API (секунды). При ошибке — retry с backoff, затем плейсхолдер | `60` |
 
 ## Запуск из коробки (Docker Compose)
 
@@ -86,7 +94,8 @@ pip install -e ".[dev]"
 
 ```bash
 docker compose up -d
-# База Qdrant хранится в ./data/qdrant (в проекте, при перезапуске не теряется)
+# База Qdrant хранится в ./data/qdrant (в проекте, при перезапуске не теряется).
+# В docker-compose хранилище смонтировано в mcp как /qdrant_storage (QDRANT_STORAGE_PATH) — index-status показывает размер БД.
 # MCP: http://localhost:5050/mcp (подключить в Cursor через .cursor/mcp.json)
 # Индексация вручную: docker compose exec mcp python -m onec_help ingest
 # Проверка индекса: docker compose exec mcp python -m onec_help index-status
@@ -129,6 +138,7 @@ docker compose exec mcp python -m onec_help ingest --workers 4
 docker compose exec mcp python -m onec_help ingest --dry-run   # сколько .hbk будет обработано
 docker compose exec mcp python -m onec_help ingest --max-tasks 1  # ограничить объём за один запуск
 docker compose exec mcp python -m onec_help ingest --recreate  # пересоздать коллекцию (после смены модели/размерности)
+docker compose exec mcp python -m onec_help ingest --no-cache  # полная переиндексация без кэша
 ```
 
 **Сколько топиков:** полная справка (один 1cv8_ru.hbk) — обычно 10–25 тыс. страниц. Проверка индексации: `docker compose exec mcp python -m onec_help index-status` или MCP **get_1c_help_index_status** (локально: `python -m onec_help index-status`).

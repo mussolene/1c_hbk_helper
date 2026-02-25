@@ -125,6 +125,35 @@ def test_cmd_index_status_exists(mock_status) -> None:
         assert cmd_index_status(Args()) == 0
 
 
+@patch("onec_help.ingest.read_ingest_status")
+@patch("onec_help.indexer.get_index_status")
+def test_cmd_index_status_shows_embeddings_and_db_size(
+    mock_status, mock_ingest, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """index-status shows Topics indexed, Embeddings (same as points), and DB size when QDRANT_STORAGE_PATH is set."""
+    mock_ingest.return_value = None
+    mock_status.return_value = {
+        "exists": True,
+        "collection": "onec_help",
+        "points_count": 100,
+    }
+    (tmp_path / "some_file").write_bytes(b"x" * 500)  # ~0.5 KB
+
+    class Args:
+        pass
+
+    with patch.dict(
+        "os.environ",
+        {"QDRANT_HOST": "localhost", "QDRANT_PORT": "6333", "QDRANT_STORAGE_PATH": str(tmp_path)},
+    ):
+        assert cmd_index_status(Args()) == 0
+    out = capsys.readouterr().out
+    assert "Topics indexed: 100" in out
+    assert "Embeddings: 100" in out
+    assert "DB size:" in out
+    assert "MB" in out
+
+
 @patch("onec_help.indexer.get_index_status")
 def test_cmd_index_status_not_exists(mock_status) -> None:
     mock_status.return_value = {"exists": False}
@@ -143,6 +172,47 @@ def test_cmd_index_status_error(mock_status) -> None:
         pass
 
     assert cmd_index_status(Args()) == 1
+
+
+@patch("onec_help.ingest.read_ingest_status")
+@patch("onec_help.indexer.get_index_status")
+def test_cmd_index_status_with_ingest(mock_status, mock_ingest, capsys: pytest.CaptureFixture[str]) -> None:
+    """index-status shows embedding speed, per-folder, total time when ingest status exists.
+    When status is completed, current is empty so no stale workers are shown."""
+    mock_status.return_value = {
+        "exists": True,
+        "collection": "onec_help",
+        "points_count": 100,
+        "versions": ["8.3"],
+        "languages": ["ru"],
+    }
+    mock_ingest.return_value = {
+        "embedding_backend": "openai_api",
+        "embedding_speed_pts_per_sec": 12.5,
+        "elapsed_sec": 8.0,
+        "status": "completed",
+        "total_elapsed_sec": 8.2,
+        "current": [],  # cleared when ingest completes
+        "folders": [
+            {
+                "version": "8.3",
+                "language": "ru",
+                "hbk_count": 1,
+                "html_count": 50,
+                "md_count": 100,
+                "err_count": 0,
+                "points": 100,
+                "status": "done",
+            },
+        ],
+    }
+
+    class Args:
+        pass
+
+    assert cmd_index_status(Args()) == 0
+    out = capsys.readouterr().out
+    assert "Current (per thread):" not in out  # completed => no worker list
 
 
 @patch("onec_help.ingest.run_ingest")

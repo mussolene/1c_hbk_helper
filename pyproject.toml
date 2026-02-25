@@ -7,7 +7,7 @@ name = "onec-help"
 version = "0.1.0"
 description = "1C Help: unpack .hbk, convert to Markdown, index in Qdrant, MCP server"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.14"
 dependencies = [
     "flask>=3.0",
     "beautifulsoup4>=4.12",
@@ -50,7 +50,7 @@ source = ["src/onec_help"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]

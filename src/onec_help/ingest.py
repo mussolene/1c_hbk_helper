@@ -3,19 +3,185 @@ Ingest .hbk from multiple read-only source directories.
 Unpacks to a temp dir in the container, builds docs, indexes with version/language, then cleans up.
 Supports language filter (e.g. only *_ru.hbk) and concurrent processing.
 Progress is printed to stderr so long runs are not killed by "no output" timeouts.
+Writes ingest status to INDEX_STATUS_FILE for index-status command (embedding speed, per-folder, ETA).
 """
 
+import copy
+import hashlib
+import json
 import os
 import re
 import shutil
+import sqlite3
 import sys
+import threading
+import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+# Path for ingest status (read by index-status). Default under /tmp so it works without /app.
+DEFAULT_INDEX_STATUS_FILE = "/tmp/onec_help_ingest_status.json"
+# How often to write status file while ingest runs (seconds); env INDEX_STATUS_INTERVAL_SEC
+STATUS_UPDATE_INTERVAL_SEC = 2.0
+# Path for ingest cache (SQLite). Skip re-parsing and re-embedding if .hbk unchanged.
+DEFAULT_INGEST_CACHE_FILE = "/tmp/onec_help_ingest_cache.db"
+_CACHE_TABLE = "ingest_cache"
+
+
+def _default_workers() -> int:
+    """Default workers = half of available CPUs, at least 1 (do not exceed half of resources)."""
+    return max(1, (os.cpu_count() or 4) // 2)
+
+
+def _file_sha256(path: Path) -> Optional[str]:
+    """SHA256 of file contents (for .hbk). Returns None on read error."""
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return None
+
+
+def _ingest_cache_path() -> str:
+    return os.environ.get("INGEST_CACHE_FILE", DEFAULT_INGEST_CACHE_FILE)
+
+
+def _load_ingest_cache() -> Dict[str, Dict[str, Any]]:
+    """Load cache from SQLite. Returns dict key -> {hash, indexed, points}."""
+    path = _ingest_cache_path()
+    entries: Dict[str, Dict[str, Any]] = {}
+    try:
+        conn = sqlite3.connect(path)
+        conn.execute(
+            f"CREATE TABLE IF NOT EXISTS {_CACHE_TABLE} "
+            "(key TEXT PRIMARY KEY, hash TEXT NOT NULL, indexed INTEGER NOT NULL, points INTEGER)"
+        )
+        for row in conn.execute(
+            f"SELECT key, hash, indexed, points FROM {_CACHE_TABLE}"
+        ):
+            entries[row[0]] = {
+                "hash": row[1],
+                "indexed": bool(row[2]),
+                "points": row[3],
+            }
+        conn.close()
+    except (OSError, sqlite3.Error):
+        pass
+    return entries
+
+
+def _update_ingest_cache_entry(key: str, file_hash: str, points: int) -> None:
+    """Persist one cache entry (SQLite INSERT OR REPLACE). No full rewrite."""
+    path = _ingest_cache_path()
+    try:
+        conn = sqlite3.connect(path)
+        conn.execute(
+            f"CREATE TABLE IF NOT EXISTS {_CACHE_TABLE} "
+            "(key TEXT PRIMARY KEY, hash TEXT NOT NULL, indexed INTEGER NOT NULL, points INTEGER)"
+        )
+        conn.execute(
+            f"INSERT OR REPLACE INTO {_CACHE_TABLE} (key, hash, indexed, points) VALUES (?, ?, 1, ?)",
+            (key, file_hash, points),
+        )
+        conn.commit()
+        conn.close()
+    except (OSError, sqlite3.Error):
+        pass
+
+
+def _status_writer_loop(
+    stop_event: threading.Event,
+    state_lock: threading.Lock,
+    state: Dict[str, Any],
+    status_file: str,
+    interval_sec: float,
+) -> None:
+    """Background thread: write status file every interval_sec until stop_event is set."""
+    while not stop_event.wait(timeout=interval_sec):
+        with state_lock:
+            if state.get("status") == "completed":
+                break
+            done_tasks = state["done_tasks"]
+            total_points = state["total_points"]
+            folders = copy.deepcopy(state["folders"])
+            current = list(state["current_work"].values())
+        _write_ingest_status(
+            status_file,
+            started_at=state["started_at"],
+            embedding_backend=state["embedding_backend"],
+            total_tasks=state["total_tasks"],
+            done_tasks=done_tasks,
+            total_points=total_points,
+            folders=folders,
+            status="in_progress",
+            current=current,
+        )
 
 
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
+
+
+def _write_ingest_status(
+    status_file: str,
+    *,
+    started_at: float,
+    embedding_backend: str,
+    total_tasks: int,
+    done_tasks: int,
+    total_points: int,
+    folders: List[Dict[str, Any]],
+    status: str = "in_progress",
+    finished_at: Optional[float] = None,
+    current: Optional[List[Dict[str, Any]]] = None,
+) -> None:
+    """Write ingest status JSON for index-status command. current = list of {path, version, language, stage} per active thread."""
+    elapsed = time.time() - started_at
+    payload: Dict[str, Any] = {
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started_at)),
+        "embedding_backend": embedding_backend or "none",
+        "total_tasks": total_tasks,
+        "done_tasks": done_tasks,
+        "total_points": total_points,
+        "folders": folders,
+        "status": status,
+        "elapsed_sec": round(elapsed, 1),
+    }
+    if status == "completed":
+        payload["current"] = []
+    elif current:
+        payload["current"] = current
+    if elapsed > 0 and total_points > 0:
+        payload["embedding_speed_pts_per_sec"] = round(total_points / elapsed, 2)
+    if done_tasks > 0 and total_tasks > done_tasks and total_points > 0 and elapsed > 0:
+        avg_pts = total_points / done_tasks
+        remaining_tasks = total_tasks - done_tasks
+        eta_points = avg_pts * remaining_tasks
+        rate = total_points / elapsed
+        payload["eta_sec"] = round(eta_points / rate, 0) if rate > 0 else None
+    if finished_at is not None:
+        payload["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(finished_at))
+        payload["total_elapsed_sec"] = round(finished_at - started_at, 1)
+    try:
+        with open(status_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
+def read_ingest_status(status_file: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Read ingest status JSON (for index-status). Returns None if file missing or invalid."""
+    path = status_file or os.environ.get("INDEX_STATUS_FILE", DEFAULT_INDEX_STATUS_FILE)
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 # Language: filename pattern like 1cv8_ru.hbk, shcntx_en.hbk
@@ -25,6 +191,22 @@ LANG_PATTERN = re.compile(r"_([a-z]{2})\.hbk$", re.IGNORECASE)
 def _language_from_filename(name: str) -> Optional[str]:
     m = LANG_PATTERN.search(name)
     return m.group(1).lower() if m else None
+
+
+def _count_html_md(dir_path: Path) -> Tuple[int, int]:
+    """Return (html_count, md_count) for files under dir_path (recursive)."""
+    html_c, md_c = 0, 0
+    try:
+        for p in dir_path.rglob("*"):
+            if not p.is_file():
+                continue
+            if p.suffix.lower() == ".html":
+                html_c += 1
+            elif p.suffix.lower() == ".md":
+                md_c += 1
+    except OSError:
+        pass
+    return (html_c, md_c)
 
 
 def collect_hbk_tasks(
@@ -62,16 +244,32 @@ def _unpack_and_build_docs(
     temp_base: Path,
     unpack_fn: Any,
     build_docs_fn: Any,
+    current_work: Optional[Dict[int, Dict[str, Any]]] = None,
+    state_lock: Optional[threading.Lock] = None,
 ) -> Tuple[Optional[Path], str, str, Optional[str]]:
-    """Unpack one .hbk to temp, build .md there. Returns (md_dir, version, language, error_message) or (None, v, l, reason) on failure."""
+    """Unpack one .hbk to temp, build .md there. Returns (md_dir, version, language, error_message) or (None, v, l, reason) on failure.
+    If current_work and state_lock are set, updates current file/stage for this thread for status display."""
+    ident = threading.get_ident()
     safe_name = re.sub(r"[^\w\-]", "_", hbk_path.stem)
     out_sub = temp_base / version / language / safe_name
     unpacked = out_sub / "unpacked"
     md_dir = out_sub / "md"
     err_msg: Optional[str] = None
     try:
+        if current_work is not None and state_lock is not None:
+            with state_lock:
+                current_work[ident] = {
+                    "path": hbk_path.name,
+                    "version": version,
+                    "language": language,
+                    "stage": "unpack",
+                }
         unpacked.mkdir(parents=True, exist_ok=True)
         unpack_fn(hbk_path, unpacked)
+        if current_work is not None and state_lock is not None:
+            with state_lock:
+                if ident in current_work:
+                    current_work[ident]["stage"] = "build_docs"
         md_dir.mkdir(parents=True, exist_ok=True)
         build_docs_fn(unpacked, md_dir)
         if any(md_dir.rglob("*.md")) or any(md_dir.rglob("*")) and not list(md_dir.rglob("*.md")):
@@ -82,6 +280,9 @@ def _unpack_and_build_docs(
         err_msg = f"{type(e).__name__}: {e}"
         return (None, version, language, err_msg)
     finally:
+        if current_work is not None and state_lock is not None:
+            with state_lock:
+                current_work.pop(ident, None)
         if unpacked.exists():
             try:
                 shutil.rmtree(unpacked)
@@ -97,11 +298,13 @@ def run_ingest(
     qdrant_port: int = 6333,
     collection: str = "onec_help",
     incremental: bool = True,
-    max_workers: int = 4,
+    max_workers: Optional[int] = None,
     max_tasks: Optional[int] = None,
     verbose: bool = True,
     dry_run: bool = False,
     index_batch_size: int = 500,
+    embedding_batch_size: Optional[int] = None,
+    embedding_workers: Optional[int] = None,
 ) -> int:
     """
     Ingest .hbk from multiple source dirs (read-only): unpack to temp, build docs, index in batches, cleanup.
@@ -112,6 +315,8 @@ def run_ingest(
     verbose: print progress to stderr (keeps long runs from being killed by "no output" timeouts).
     dry_run: if True, only report how many .hbk tasks would be processed and return 0.
     index_batch_size: number of files per index upsert (smaller = more progress, less memory per step).
+    embedding_batch_size: texts per embedding batch (env EMBEDDING_BATCH_SIZE).
+    embedding_workers: parallel API requests for openai_api (env EMBEDDING_WORKERS).
     Returns total points indexed (0 if dry_run).
     """
     from qdrant_client import QdrantClient
@@ -131,9 +336,36 @@ def run_ingest(
         raise RuntimeError(f"Cannot create temp dir {base}: {e}") from e
 
     pairs = [(Path(p).resolve(), v) for p, v in source_dirs_with_versions]
-    tasks = collect_hbk_tasks(pairs, languages)
-    if not tasks:
+    all_tasks = collect_hbk_tasks(pairs, languages)
+    if not all_tasks:
         return 0
+
+    skip_cache = (os.environ.get("INGEST_SKIP_CACHE") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    cache_entries = _load_ingest_cache()
+    to_process: List[Tuple[Path, str, str]] = []
+    task_hashes: Dict[Tuple[str, str, str], str] = {}
+    skipped = 0
+    for path, version, lang in all_tasks:
+        key = f"{version}/{lang}/{path.name}"
+        h = None if skip_cache else _file_sha256(path)
+        if h is None:
+            to_process.append((path, version, lang))
+            task_hashes[(version, lang, path.name)] = ""
+            continue
+        task_hashes[(version, lang, path.name)] = h
+        ent = cache_entries.get(key)
+        if ent and ent.get("hash") == h and ent.get("indexed"):
+            skipped += 1
+            continue
+        to_process.append((path, version, lang))
+    tasks = to_process
+    if verbose and skipped > 0:
+        _log(f"[ingest] Cache hit: skip {skipped} already indexed .hbk (unchanged)")
 
     if dry_run:
         if verbose:
@@ -149,8 +381,71 @@ def run_ingest(
         if verbose:
             _log(f"[ingest] Limiting to first {max_tasks} task(s)")
 
+    if not tasks:
+        if verbose and skipped > 0:
+            _log("[ingest] All tasks skipped (cache); nothing to do.")
+        return 0
+
+    if max_workers is None:
+        max_workers = _default_workers()
     if verbose:
         _log(f"[ingest] Found {len(tasks)} .hbk task(s); workers={max_workers}")
+
+    status_file = os.environ.get("INDEX_STATUS_FILE", DEFAULT_INDEX_STATUS_FILE)
+    embedding_backend = (os.environ.get("EMBEDDING_BACKEND") or "local").strip().lower()
+    if embedding_backend not in ("local", "openai_api"):
+        embedding_backend = "none"
+    started_at = time.time()
+    # One entry per folder (version/language): hbk_count, html/md/err/points aggregated
+    folder_hbk_count: Dict[Tuple[str, str], int] = Counter()
+    for _, v, l in tasks:
+        folder_hbk_count[(v, l)] += 1
+    folders = [
+        {
+            "version": v,
+            "language": l,
+            "hbk_count": folder_hbk_count[(v, l)],
+            "html_count": 0,
+            "md_count": 0,
+            "err_count": 0,
+            "points": 0,
+            "tasks_done": 0,
+            "status": "pending",
+        }
+        for (v, l) in sorted(folder_hbk_count.keys())
+    ]
+    _write_ingest_status(
+        status_file,
+        started_at=started_at,
+        embedding_backend=embedding_backend,
+        total_tasks=len(tasks),
+        done_tasks=0,
+        total_points=0,
+        folders=folders,
+        status="in_progress",
+    )
+
+    state_lock = threading.Lock()
+    current_work: Dict[int, Dict[str, Any]] = {}
+    state: Dict[str, Any] = {
+        "done_tasks": 0,
+        "total_points": 0,
+        "folders": folders,
+        "current_work": current_work,
+        "started_at": started_at,
+        "embedding_backend": embedding_backend,
+        "total_tasks": len(tasks),
+        "status": "in_progress",
+        "status_file": status_file,
+    }
+    interval_sec = float(os.environ.get("INDEX_STATUS_INTERVAL_SEC", str(STATUS_UPDATE_INTERVAL_SEC)))
+    stop_event = threading.Event()
+    writer = threading.Thread(
+        target=_status_writer_loop,
+        args=(stop_event, state_lock, state, status_file, interval_sec),
+        daemon=True,
+    )
+    writer.start()
 
     # Ensure collection exists once (avoid race when multiple workers call build_index)
     if incremental:
@@ -166,6 +461,7 @@ def run_ingest(
     total_indexed = 0
     done = 0
     failed: List[Tuple[Path, str, str, str]] = []  # (path, version, language, error_message)
+    main_ident = threading.get_ident()
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
@@ -176,6 +472,8 @@ def run_ingest(
                 base,
                 unpack_hbk,
                 build_docs,
+                current_work,
+                state_lock,
             ): (path, version, lang)
             for path, version, lang in tasks
         }
@@ -186,6 +484,26 @@ def run_ingest(
             if md_dir is None or not md_dir.exists():
                 reason = (err_msg or "unknown").split("\n")[0].strip()[:200]
                 failed.append((path_hbk, version, language, err_msg or "unknown"))
+                for fo in folders:
+                    if fo["version"] == version and fo["language"] == language:
+                        fo["err_count"] = fo.get("err_count", 0) + 1
+                        fo["tasks_done"] = fo.get("tasks_done", 0) + 1
+                        if fo["tasks_done"] + fo["err_count"] >= fo["hbk_count"]:
+                            fo["status"] = "done"
+                        break
+                with state_lock:
+                    state["done_tasks"] = done
+                    state["total_points"] = total_indexed
+                _write_ingest_status(
+                    status_file,
+                    started_at=started_at,
+                    embedding_backend=embedding_backend,
+                    total_tasks=len(tasks),
+                    done_tasks=done,
+                    total_points=total_indexed,
+                    folders=folders,
+                    status="in_progress",
+                )
                 if verbose:
                     _log(
                         f"[ingest] [{done}/{len(tasks)}] skip (unpack/build failed) {version}/{language} — {path_hbk}"
@@ -197,25 +515,89 @@ def run_ingest(
                     _log(
                         f"[ingest] [{done}/{len(tasks)}] indexing {version}/{language} — {path_hbk}"
                     )
-                n = build_index(
-                    docs_dir=md_dir,
-                    qdrant_host=qdrant_host,
-                    qdrant_port=qdrant_port,
-                    collection=collection,
-                    incremental=incremental,
-                    extra_payload={"version": version, "language": language},
-                    batch_size=index_batch_size,
-                )
-                total_indexed += n
-                if verbose:
-                    _log(
-                        f"[ingest] [{done}/{len(tasks)}] indexed {n} points ({version}/{language}) — {path_hbk}, total={total_indexed}"
-                    )
-            finally:
+                with state_lock:
+                    current_work[main_ident] = {
+                        "path": path_hbk.name,
+                        "version": version,
+                        "language": language,
+                        "stage": "indexing",
+                    }
                 try:
-                    shutil.rmtree(md_dir.parent)
-                except OSError:
-                    pass
+                    n = build_index(
+                        docs_dir=md_dir,
+                        qdrant_host=qdrant_host,
+                        qdrant_port=qdrant_port,
+                        collection=collection,
+                        incremental=incremental,
+                        extra_payload={"version": version, "language": language},
+                        batch_size=index_batch_size,
+                        embedding_batch_size=embedding_batch_size,
+                        embedding_workers=embedding_workers,
+                    )
+                    total_indexed += n
+                    key = f"{version}/{language}/{path_hbk.name}"
+                    h = task_hashes.get((version, language, path_hbk.name)) or _file_sha256(
+                        path_hbk
+                    )
+                    if h:
+                        cache_entries[key] = {"hash": h, "indexed": True, "points": n}
+                        _update_ingest_cache_entry(key, h, n)
+                    html_c, md_c = _count_html_md(md_dir)
+                    for fo in folders:
+                        if fo["version"] == version and fo["language"] == language:
+                            fo["html_count"] = fo.get("html_count", 0) + html_c
+                            fo["md_count"] = fo.get("md_count", 0) + md_c
+                            fo["points"] = fo.get("points", 0) + n
+                            fo["tasks_done"] = fo.get("tasks_done", 0) + 1
+                            if fo["tasks_done"] + fo.get("err_count", 0) >= fo["hbk_count"]:
+                                fo["status"] = "done"
+                            break
+                    with state_lock:
+                        state["done_tasks"] = done
+                        state["total_points"] = total_indexed
+                        current_snapshot = list(current_work.values())
+                    _write_ingest_status(
+                        status_file,
+                        started_at=started_at,
+                        embedding_backend=embedding_backend,
+                        total_tasks=len(tasks),
+                        done_tasks=done,
+                        total_points=total_indexed,
+                        folders=folders,
+                        status="in_progress",
+                        current=current_snapshot,
+                    )
+                    if verbose:
+                        _log(
+                            f"[ingest] [{done}/{len(tasks)}] indexed {n} points ({version}/{language}) — {path_hbk}, total={total_indexed}"
+                        )
+                finally:
+                    with state_lock:
+                        current_work.pop(main_ident, None)
+                    try:
+                        shutil.rmtree(md_dir.parent)
+                    except OSError:
+                        pass
+            finally:
+                pass
+    finished_at = time.time()
+    with state_lock:
+        state["status"] = "completed"
+        current_work.clear()
+    stop_event.set()
+    writer.join(timeout=interval_sec * 2 + 1)
+    _write_ingest_status(
+        status_file,
+        started_at=started_at,
+        embedding_backend=embedding_backend,
+        total_tasks=len(tasks),
+        done_tasks=len(tasks),
+        total_points=total_indexed,
+        folders=folders,
+        status="completed",
+        finished_at=finished_at,
+        current=[],
+    )
     try:
         shutil.rmtree(base)
     except OSError:

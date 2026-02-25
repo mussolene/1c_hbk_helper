@@ -6,11 +6,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from onec_help.ingest import (
+    _file_sha256,
     _language_from_filename,
+    _load_ingest_cache,
+    _update_ingest_cache_entry,
+    _write_ingest_status,
     collect_hbk_tasks,
     discover_version_dirs,
     parse_languages_env,
     parse_source_dirs_env,
+    read_ingest_status,
     run_ingest,
     run_unpack_only,
 )
@@ -83,6 +88,101 @@ def test_discover_version_dirs_returns_subdirs(tmp_path: Path) -> None:
     assert len(result) == 2
     names = {r[1] for r in result}
     assert names == {"8.3.27", "8.3.26"}
+
+
+def test_file_sha256(tmp_path: Path) -> None:
+    """_file_sha256 returns hex digest of file contents; same content => same hash."""
+    f = tmp_path / "a.hbk"
+    f.write_bytes(b"hello")
+    h1 = _file_sha256(f)
+    assert h1 is not None
+    assert len(h1) == 64
+    assert all(c in "0123456789abcdef" for c in h1)
+    f.write_bytes(b"hello")
+    assert _file_sha256(f) == h1
+    f.write_bytes(b"world")
+    assert _file_sha256(f) != h1
+
+
+def test_file_sha256_missing() -> None:
+    """_file_sha256 returns None for non-existent file."""
+    assert _file_sha256(Path("/nonexistent/file.hbk")) is None
+
+
+def test_load_save_ingest_cache(tmp_path: Path) -> None:
+    """_load_ingest_cache returns entries from SQLite; _update_ingest_cache_entry persists one row."""
+    cache_file = tmp_path / "cache.db"
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": str(cache_file)}, clear=False):
+        c = _load_ingest_cache()
+        assert c == {}
+        _update_ingest_cache_entry("v/ru/1cv8.hbk", "abc", 10)
+        c2 = _load_ingest_cache()
+        assert c2["v/ru/1cv8.hbk"] == {"hash": "abc", "indexed": True, "points": 10}
+
+
+def test_run_ingest_skips_cached(tmp_path: Path) -> None:
+    """When cache has same-hash entry with indexed=true, task is skipped (no unpack/index)."""
+    (tmp_path / "v").mkdir()
+    (tmp_path / "v" / "1cv8_ru.hbk").write_bytes(b"x")
+    cache_file = tmp_path / "cache.db"
+    key = "v/ru/1cv8_ru.hbk"
+    h = _file_sha256(tmp_path / "v" / "1cv8_ru.hbk")
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": str(cache_file)}, clear=False):
+        _update_ingest_cache_entry(key, h, 5)
+        with patch("onec_help.indexer.build_index") as mock_idx:
+            with patch("onec_help.html2md.build_docs") as mock_docs:
+                with patch("onec_help.unpack.unpack_hbk") as mock_unpack:
+                    n = run_ingest(
+                        source_dirs_with_versions=[(tmp_path, "v")],
+                        languages=["ru"],
+                        temp_base=tmp_path / "temp",
+                        max_workers=1,
+                        verbose=False,
+                    )
+    assert n == 0
+    mock_unpack.assert_not_called()
+    mock_docs.assert_not_called()
+    mock_idx.assert_not_called()
+
+
+def test_write_ingest_status_completed_clears_current(tmp_path: Path) -> None:
+    """When status is completed, written JSON has current=[] so no stale workers are shown."""
+    import json
+
+    status_file = str(tmp_path / "status.json")
+    _write_ingest_status(
+        status_file,
+        started_at=0.0,
+        embedding_backend="local",
+        total_tasks=2,
+        done_tasks=2,
+        total_points=100,
+        folders=[],
+        status="completed",
+        finished_at=1.0,
+    )
+    data = json.loads((tmp_path / "status.json").read_text(encoding="utf-8"))
+    assert data["status"] == "completed"
+    assert data["current"] == []
+
+
+def test_read_ingest_status_missing() -> None:
+    """read_ingest_status returns None when file does not exist."""
+    assert read_ingest_status("/nonexistent/path/status.json") is None
+
+
+def test_read_ingest_status_exists(tmp_path: Path) -> None:
+    """read_ingest_status returns parsed JSON when file exists."""
+    status_file = tmp_path / "status.json"
+    status_file.write_text(
+        '{"status": "completed", "embedding_backend": "local", "total_points": 10}',
+        encoding="utf-8",
+    )
+    out = read_ingest_status(str(status_file))
+    assert out is not None
+    assert out["status"] == "completed"
+    assert out["embedding_backend"] == "local"
+    assert out["total_points"] == 10
 
 
 def test_parse_source_dirs_env_empty() -> None:
@@ -294,15 +394,16 @@ def test_run_ingest_integration_mock(
     mock_build_index.return_value = 1
     mock_qdrant.return_value.collection_exists.return_value = False
 
-    n = run_ingest(
-        source_dirs_with_versions=[(tmp_path, "v")],
-        languages=["ru"],
-        temp_base=tmp_path / "temp",
-        qdrant_host="localhost",
-        qdrant_port=6333,
-        max_workers=1,
-        verbose=False,
-    )
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": str(tmp_path / "cache.json")}, clear=False):
+        n = run_ingest(
+            source_dirs_with_versions=[(tmp_path, "v")],
+            languages=["ru"],
+            temp_base=tmp_path / "temp",
+            qdrant_host="localhost",
+            qdrant_port=6333,
+            max_workers=1,
+            verbose=False,
+        )
     assert mock_unpack.called
     assert mock_build_index.return_value == 1
     assert n >= 1
@@ -366,7 +467,11 @@ def test_run_ingest_failed_log(
     mock_unpack.side_effect = RuntimeError("7z failed")
     mock_qdrant.return_value.collection_exists.return_value = True
     fail_log = tmp_path / "failed.txt"
-    with patch.dict("os.environ", {"INGEST_FAILED_LOG": str(fail_log)}, clear=False):
+    with patch.dict(
+        "os.environ",
+        {"INGEST_FAILED_LOG": str(fail_log), "INGEST_CACHE_FILE": str(tmp_path / "cache.json")},
+        clear=False,
+    ):
         n = run_ingest(
             source_dirs_with_versions=[(tmp_path, "v")],
             languages=["ru"],
@@ -403,7 +508,11 @@ def test_run_ingest_failed_log_write_raises(
             raise OSError(13, "Permission denied")
         return real_open(path, mode, *args, **kwargs)
 
-    with patch.dict("os.environ", {"INGEST_FAILED_LOG": str(fail_log)}, clear=False):
+    with patch.dict(
+        "os.environ",
+        {"INGEST_FAILED_LOG": str(fail_log), "INGEST_CACHE_FILE": str(tmp_path / "cache2.json")},
+        clear=False,
+    ):
         with patch("builtins.open", open_raise_for_fail_log):
             n = run_ingest(
                 source_dirs_with_versions=[(tmp_path, "v")],

@@ -59,6 +59,14 @@ def test_find_categories_root_not_found(tmp_path: Path) -> None:
     assert find_categories_root(tmp_path) is None
 
 
+def test_find_categories_root_not_found_after_common_subdirs(tmp_path: Path) -> None:
+    """find_categories_root returns None when common subdirs exist but have no __categories__."""
+    (tmp_path / "source").mkdir()
+    (tmp_path / "objects").mkdir()
+    assert find_categories_root(tmp_path) is None
+    assert find_categories_root(tmp_path / "source") is None
+
+
 def test_build_tree_dir_without_categories(tmp_path: Path) -> None:
     """Directory without __categories__ uses iterdir() for sub structure."""
     sub = tmp_path / "subdir"
@@ -84,3 +92,20 @@ def test_find_categories_root_via_common_subdir(tmp_path: Path) -> None:
     root = find_categories_root(deep)
     assert root is not None
     assert (root / "__categories__").exists()
+
+
+def test_build_tree_nested_categories(tmp_path: Path) -> None:
+    """Subdirectory with __categories__ uses parse_content_file for children."""
+    (tmp_path / "__categories__").write_text('{1,"subdir"}', encoding="utf-8")
+    sub = tmp_path / "subdir"
+    sub.mkdir()
+    (sub / "__categories__").write_text('{1,"nested.html"}', encoding="utf-8")
+    (sub / "nested.html").write_text(
+        "<html><head><title>Nested</title></head><body></body></html>", encoding="utf-8"
+    )
+    structure = parse_content_file(tmp_path / "__categories__")
+    tree = build_tree(tmp_path, structure)
+    assert len(tree) == 1
+    assert tree[0]["title"] == "subdir"
+    assert len(tree[0]["children"]) == 1
+    assert tree[0]["children"][0]["path"] == "subdir/nested.html"

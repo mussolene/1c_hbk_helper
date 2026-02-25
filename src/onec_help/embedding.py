@@ -1,0 +1,411 @@
+"""
+Embedding backend: local (sentence-transformers), openai_api, or none (placeholder).
+Retry, timeout and batch support for indexing. Lazy import of sentence-transformers.
+"""
+
+import hashlib
+import json
+import os
+import sys
+import time
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Optional
+
+VECTOR_SIZE = 384  # default for all-MiniLM-L6-v2; overridden when EMBEDDING_BACKEND=openai_api
+MAX_EMBEDDING_INPUT_CHARS = 2000
+DEFAULT_EMBEDDING_BATCH_SIZE = 64
+DEFAULT_EMBEDDING_WORKERS = 4
+# When EMBEDDING_FORCE_BATCH=1: use max batch and workers for maximum throughput (any backend)
+MAX_EMBEDDING_BATCH_SIZE = 256
+MAX_EMBEDDING_WORKERS = 16
+DEFAULT_EMBEDDING_TIMEOUT = 60
+RETRY_ATTEMPTS = 3
+RETRY_BASE_DELAY = 1.0
+
+_embedding_model = None
+
+_EMBEDDING_BACKEND = os.environ.get("EMBEDDING_BACKEND", "local").strip().lower()
+_EMBEDDING_MODEL = (os.environ.get("EMBEDDING_MODEL") or "all-MiniLM-L6-v2").strip()
+_LMSTUDIO_PREFERRED_EMBEDDING_MODELS = (
+    "nomic-embed-text",
+    "all-MiniLM-L6-v2",
+    "text-embedding-3-small",
+)
+_EMBEDDING_API_URL = (
+    os.environ.get("EMBEDDING_API_URL") or "http://localhost:1234/v1"
+).strip().rstrip("/")
+_EMBEDDING_API_KEY = (os.environ.get("EMBEDDING_API_KEY") or "").strip()
+_EMBEDDING_DIMENSION = (os.environ.get("EMBEDDING_DIMENSION") or "").strip()
+
+
+def _embedding_timeout() -> int:
+    try:
+        return max(5, int(os.environ.get("EMBEDDING_TIMEOUT", DEFAULT_EMBEDDING_TIMEOUT)))
+    except ValueError:
+        return DEFAULT_EMBEDDING_TIMEOUT
+
+
+def _embedding_force_batch() -> bool:
+    """True if EMBEDDING_FORCE_BATCH is set (1, true, yes) — use max batch size and workers."""
+    v = (os.environ.get("EMBEDDING_FORCE_BATCH") or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _embedding_batch_size() -> int:
+    if _embedding_force_batch():
+        return MAX_EMBEDDING_BATCH_SIZE
+    try:
+        return max(
+            1,
+            min(MAX_EMBEDDING_BATCH_SIZE, int(os.environ.get("EMBEDDING_BATCH_SIZE", DEFAULT_EMBEDDING_BATCH_SIZE))),
+        )
+    except ValueError:
+        return DEFAULT_EMBEDDING_BATCH_SIZE
+
+
+def _embedding_workers() -> int:
+    if _embedding_force_batch():
+        return MAX_EMBEDDING_WORKERS
+    try:
+        return max(
+            1,
+            min(MAX_EMBEDDING_WORKERS, int(os.environ.get("EMBEDDING_WORKERS", DEFAULT_EMBEDDING_WORKERS))),
+        )
+    except ValueError:
+        return DEFAULT_EMBEDDING_WORKERS
+
+
+_resolved_api_model_id: Optional[str] = None
+_cached_api_dimension: Optional[int] = None
+_dimension_detecting: bool = False
+_embedding_api_available: Optional[bool] = None
+_fallback_log_count = 0
+
+
+def _log_fallback(reason: str) -> None:
+    """Log once per 100 fallbacks to avoid spam."""
+    global _fallback_log_count
+    _fallback_log_count += 1
+    if _fallback_log_count <= 1 or _fallback_log_count % 100 == 0:
+        msg = f"[embedding] {reason}"
+        if _fallback_log_count > 1:
+            msg += f" (fallback count={_fallback_log_count})"
+        print(msg, file=sys.stderr, flush=True)
+
+
+def _check_embedding_api_available() -> bool:
+    """Проверить доступность внешнего API эмбеддингов; при недоступности пишет в stderr и возвращает False."""
+    global _embedding_api_available
+    if _embedding_api_available is not None:
+        return _embedding_api_available
+    if _EMBEDDING_BACKEND != "openai_api" or not _EMBEDDING_API_URL:
+        _embedding_api_available = True
+        return True
+    try:
+        req = urllib.request.Request(
+            f"{_EMBEDDING_API_URL}/models",
+            headers={"Content-Type": "application/json"}
+            | ({"Authorization": f"Bearer {_EMBEDDING_API_KEY}"} if _EMBEDDING_API_KEY else {}),
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            resp.read()
+        _embedding_api_available = True
+        return True
+    except Exception as e:
+        _embedding_api_available = False
+        print(
+            f"[embedding] Внешний сервис эмбеддингов недоступен ({_EMBEDDING_API_URL}): {e!r}",
+            file=sys.stderr,
+            flush=True,
+        )
+        print(
+            "[embedding] Продолжаю индексирование с плейсхолдер-векторами (семантический поиск ограничен).",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
+
+
+def get_embedding_dimension() -> int:
+    """Return vector size for the current embedding backend (for collection creation)."""
+    global _cached_api_dimension, _dimension_detecting
+    if _EMBEDDING_BACKEND == "openai_api" and _EMBEDDING_DIMENSION:
+        try:
+            return int(_EMBEDDING_DIMENSION)
+        except ValueError:
+            pass
+    if _EMBEDDING_BACKEND == "openai_api" and _EMBEDDING_API_URL:
+        if _cached_api_dimension is not None:
+            return _cached_api_dimension
+        _dimension_detecting = True
+        try:
+            vec = _get_embedding_api_single(".")
+            _cached_api_dimension = len(vec)
+            return _cached_api_dimension
+        except Exception:
+            pass
+        finally:
+            _dimension_detecting = False
+    return VECTOR_SIZE
+
+
+def _resolve_openai_api_model() -> str:
+    """Для openai_api: вернуть id модели — из списка на сервере (предпочтительная или первая)."""
+    global _resolved_api_model_id
+    if _resolved_api_model_id is not None:
+        return _resolved_api_model_id
+    model_ids: List[str] = []
+    try:
+        req = urllib.request.Request(
+            f"{_EMBEDDING_API_URL}/models",
+            headers={"Content-Type": "application/json"}
+            | ({"Authorization": f"Bearer {_EMBEDDING_API_KEY}"} if _EMBEDDING_API_KEY else {}),
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        for item in data.get("data") or []:
+            if isinstance(item, dict) and item.get("id"):
+                model_ids.append(str(item["id"]))
+        for item in data.get("models") or []:
+            if isinstance(item, dict) and item.get("key"):
+                model_ids.append(str(item["key"]))
+    except Exception:
+        pass
+    if _EMBEDDING_MODEL in model_ids:
+        _resolved_api_model_id = _EMBEDDING_MODEL
+        return _resolved_api_model_id
+    for preferred in _LMSTUDIO_PREFERRED_EMBEDDING_MODELS:
+        for mid in model_ids:
+            if preferred in mid or mid in preferred:
+                _resolved_api_model_id = mid
+                return _resolved_api_model_id
+    if model_ids:
+        _resolved_api_model_id = model_ids[0]
+        return _resolved_api_model_id
+    base_url = _EMBEDDING_API_URL.rstrip("/")
+    if base_url.endswith("/v1"):
+        base_url = base_url[:-3]
+    try:
+        load_req = urllib.request.Request(
+            f"{base_url}/api/v1/models",
+            method="GET",
+            headers={"Content-Type": "application/json"}
+            | ({"Authorization": f"Bearer {_EMBEDDING_API_KEY}"} if _EMBEDDING_API_KEY else {}),
+        )
+        with urllib.request.urlopen(load_req, timeout=10) as resp:
+            native = json.loads(resp.read().decode("utf-8"))
+        for item in native.get("models") or []:
+            if isinstance(item, dict) and item.get("type") == "embedding" and item.get("key"):
+                key = str(item["key"])
+                load_body = json.dumps({"model": key}).encode("utf-8")
+                post = urllib.request.Request(
+                    f"{base_url}/api/v1/models/load",
+                    data=load_body,
+                    headers={"Content-Type": "application/json"}
+                    | ({"Authorization": f"Bearer {_EMBEDDING_API_KEY}"} if _EMBEDDING_API_KEY else {}),
+                    method="POST",
+                )
+                urllib.request.urlopen(post, timeout=120)
+                _resolved_api_model_id = key
+                return _resolved_api_model_id
+    except Exception:
+        pass
+    _resolved_api_model_id = _EMBEDDING_MODEL
+    return _resolved_api_model_id
+
+
+def _embedding_fallback_dim() -> int:
+    return VECTOR_SIZE if _dimension_detecting else get_embedding_dimension()
+
+
+def _get_embedding_placeholder(text: str, dimension: int = VECTOR_SIZE) -> list[float]:
+    """Deterministic placeholder vector (no model, no API)."""
+    h = hashlib.sha256(text.encode()).digest()
+    return [(h[i % len(h)] - 128) / 128.0 for i in range(dimension)]
+
+
+def _get_embedding_local(text: str) -> list[float]:
+    """Embedding via sentence-transformers (cached); fallback to hash placeholder if unavailable."""
+    global _embedding_model
+    try:
+        from sentence_transformers import SentenceTransformer
+
+        if _embedding_model is None:
+            _embedding_model = SentenceTransformer(_EMBEDDING_MODEL)
+        return _embedding_model.encode(text, convert_to_numpy=True).tolist()
+    except ImportError:
+        return _get_embedding_placeholder(text, VECTOR_SIZE)
+
+
+def _get_embedding_local_batch(texts: List[str]) -> List[list[float]]:
+    """Batch embedding via sentence-transformers."""
+    global _embedding_model
+    if not texts:
+        return []
+    try:
+        from sentence_transformers import SentenceTransformer
+
+        if _embedding_model is None:
+            _embedding_model = SentenceTransformer(_EMBEDDING_MODEL)
+        truncated = [t[:MAX_EMBEDDING_INPUT_CHARS] for t in texts]
+        matrix = _embedding_model.encode(truncated, convert_to_numpy=True)
+        return [row.tolist() for row in matrix]
+    except ImportError:
+        return [_get_embedding_placeholder(t, VECTOR_SIZE) for t in texts]
+
+
+def _get_embedding_api_single(text: str) -> list[float]:
+    """Single request to OpenAI-compatible API with retry and configurable timeout."""
+    if not _EMBEDDING_API_URL:
+        return _get_embedding_placeholder(text, _embedding_fallback_dim())
+    if not _check_embedding_api_available():
+        return _get_embedding_placeholder(text, _embedding_fallback_dim())
+    model_id = _resolve_openai_api_model()
+    url = f"{_EMBEDDING_API_URL}/embeddings"
+    body = json.dumps({
+        "model": model_id,
+        "input": text[:MAX_EMBEDDING_INPUT_CHARS],
+    }).encode("utf-8")
+    timeout = _embedding_timeout()
+    last_err = None
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    **({"Authorization": f"Bearer {_EMBEDDING_API_KEY}"} if _EMBEDDING_API_KEY else {}),
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            out = data.get("data") or []
+            first = out[0] if out else None
+            if isinstance(first, dict) and "embedding" in first:
+                return list(first["embedding"])
+            break
+        except Exception as e:
+            last_err = e
+            if attempt < RETRY_ATTEMPTS - 1:
+                delay = RETRY_BASE_DELAY * (2**attempt)
+                time.sleep(delay)
+    global _resolved_api_model_id
+    _resolved_api_model_id = None
+    _log_fallback(f"embedding API error/timeout, using placeholder: {last_err!r}")
+    return _get_embedding_placeholder(text, _embedding_fallback_dim())
+
+
+def _get_embedding_api_batch(texts: List[str]) -> List[list[float]]:
+    """Batch request to OpenAI-compatible API (input array). Fallback to single requests on error."""
+    if not texts:
+        return []
+    if not _EMBEDDING_API_URL:
+        return [_get_embedding_placeholder(t, _embedding_fallback_dim()) for t in texts]
+    if not _check_embedding_api_available():
+        return [_get_embedding_placeholder(t, _embedding_fallback_dim()) for t in texts]
+    model_id = _resolve_openai_api_model()
+    truncated = [t[:MAX_EMBEDDING_INPUT_CHARS] for t in texts]
+    url = f"{_EMBEDDING_API_URL}/embeddings"
+    body = json.dumps({"model": model_id, "input": truncated}).encode("utf-8")
+    timeout = _embedding_timeout()
+    last_err = None
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    **({"Authorization": f"Bearer {_EMBEDDING_API_KEY}"} if _EMBEDDING_API_KEY else {}),
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=max(timeout, 30 + len(texts) // 10)) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            out = data.get("data") or []
+            if len(out) >= len(texts):
+                result = []
+                for i, item in enumerate(out[: len(texts)]):
+                    if isinstance(item, dict) and "embedding" in item:
+                        result.append(list(item["embedding"]))
+                    else:
+                        result.append(_get_embedding_placeholder(truncated[i], _embedding_fallback_dim()))
+                return result
+            break
+        except Exception as e:
+            last_err = e
+            if attempt < RETRY_ATTEMPTS - 1:
+                delay = RETRY_BASE_DELAY * (2**attempt)
+                time.sleep(delay)
+    global _resolved_api_model_id
+    _resolved_api_model_id = None
+    _log_fallback(f"embedding API batch error, falling back to single requests: {last_err!r}")
+    return [_get_embedding_api_single(t) for t in texts]
+
+
+def _get_embedding_api_batch_parallel(
+    texts: List[str],
+    batch_size: int,
+    workers: int,
+) -> List[list[float]]:
+    """Split texts into batches and call API in parallel (ThreadPool)."""
+    if not texts:
+        return []
+    batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
+    if workers <= 1 or len(batches) <= 1:
+        results: List[list[float]] = []
+        for batch in batches:
+            results.extend(_get_embedding_api_batch(batch))
+        return results
+    batch_results: List[List[list[float]]] = [None] * len(batches)  # type: ignore[list-item]
+    with ThreadPoolExecutor(max_workers=min(workers, len(batches))) as executor:
+        future_to_idx = {executor.submit(_get_embedding_api_batch, b): i for i, b in enumerate(batches)}
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            batch_results[idx] = future.result()
+    results = []
+    for vecs in batch_results:
+        results.extend(vecs)
+    return results
+
+
+def get_embedding(text: str) -> list[float]:
+    """Produce embedding for one text; backend from env: local, openai_api, or none (placeholder)."""
+    if _EMBEDDING_BACKEND in ("none", "null", "off"):
+        return _get_embedding_placeholder(text, get_embedding_dimension())
+    if _EMBEDDING_BACKEND == "openai_api":
+        return _get_embedding_api_single(text)
+    return _get_embedding_local(text)
+
+
+def get_embedding_batch(
+    texts: List[str],
+    batch_size: Optional[int] = None,
+    workers: Optional[int] = None,
+) -> List[list[float]]:
+    """
+    Produce embeddings for a list of texts. Uses batch API where supported;
+    for openai_api, workers > 1 runs batches in parallel.
+    """
+    if not texts:
+        return []
+    size = batch_size if batch_size is not None else _embedding_batch_size()
+    w = workers if workers is not None else _embedding_workers()
+
+    if _EMBEDDING_BACKEND in ("none", "null", "off"):
+        dim = get_embedding_dimension()
+        return [_get_embedding_placeholder(t, dim) for t in texts]
+
+    if _EMBEDDING_BACKEND == "openai_api":
+        return _get_embedding_api_batch_parallel(texts, size, w)
+
+    results = []
+    for i in range(0, len(texts), size):
+        chunk = texts[i : i + size]
+        results.extend(_get_embedding_local_batch(chunk))
+    return results

@@ -39,6 +39,8 @@ services:
       QDRANT_HOST: ${QDRANT_HOST:-qdrant}
       QDRANT_PORT: ${QDRANT_PORT:-6333}
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-onec_help}
+      # Путь к хранилищу Qdrant внутри контейнера (смонтирован ниже) — для вывода размера БД в index-status
+      QDRANT_STORAGE_PATH: /qdrant_storage
       MCP_TRANSPORT: ${MCP_TRANSPORT:-http}
       MCP_HOST: ${MCP_HOST:-0.0.0.0}
       MCP_PORT: "5050"
@@ -46,6 +48,7 @@ services:
       HELP_SOURCE_BASE: ${HELP_SOURCE_BASE:-/opt/1cv8}
       HELP_LANGUAGES: ${HELP_LANGUAGES:-ru}
       HELP_INGEST_TEMP: ${HELP_INGEST_TEMP:-/tmp/help_ingest}
+      INGEST_CACHE_FILE: ${INGEST_CACHE_FILE:-/qdrant_storage/ingest_cache.db}
       INGEST_FAILED_LOG: ${INGEST_FAILED_LOG:-/var/log/ingest_failed.log}
       # Эмбеддинги: local (по умолчанию) или openai_api; при openai_api задать EMBEDDING_API_URL и EMBEDDING_DIMENSION
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-openai_api}
@@ -53,8 +56,14 @@ services:
       EMBEDDING_API_URL: ${EMBEDDING_API_URL:-http://host.docker.internal:1234/v1}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-64}
+      EMBEDDING_WORKERS: ${EMBEDDING_WORKERS:-4}
+      EMBEDDING_FORCE_BATCH: ${EMBEDDING_FORCE_BATCH:-0}
+      EMBEDDING_TIMEOUT: ${EMBEDDING_TIMEOUT:-60}
     volumes:
       - /opt/1cv8:/opt/1cv8:ro
+      # Доступ к хранилищу Qdrant только для чтения — index-status показывает размер БД на диске
+      - ./data/qdrant:/qdrant_storage:ro
     command: ["python", "-m", "onec_help", "mcp", "/data", "--transport", "http", "--host", "0.0.0.0", "--port", "5050"]
     depends_on:
       qdrant:

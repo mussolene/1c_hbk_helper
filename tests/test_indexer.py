@@ -7,7 +7,6 @@ import pytest
 
 from onec_help import indexer as indexer_mod
 from onec_help.indexer import (
-    _get_embedding,
     _path_to_point_id,
     build_index,
     get_embedding_dimension,
@@ -22,78 +21,27 @@ from onec_help.indexer import (
 
 
 def test_get_embedding_dimension_default() -> None:
-    """Default backend is local: dimension is VECTOR_SIZE."""
-    assert get_embedding_dimension() == indexer_mod.VECTOR_SIZE
+    """Default backend is local: dimension is VECTOR_SIZE (from embedding module)."""
+    from onec_help import embedding
+
+    assert get_embedding_dimension() == embedding.VECTOR_SIZE
 
 
 def test_get_embedding_dimension_openai_api() -> None:
     """When openai_api and EMBEDDING_DIMENSION set, returns that value."""
     import importlib
 
+    from onec_help import embedding
+
     with patch.dict(
         "os.environ",
         {"EMBEDDING_BACKEND": "openai_api", "EMBEDDING_DIMENSION": "768"},
         clear=False,
     ):
+        importlib.reload(embedding)
         importlib.reload(indexer_mod)
         assert indexer_mod.get_embedding_dimension() == 768
-    importlib.reload(indexer_mod)  # restore defaults for other tests
-
-
-def test_get_embedding() -> None:
-    vec = _get_embedding("test text")
-    assert isinstance(vec, list)
-    assert len(vec) == indexer_mod.VECTOR_SIZE
-    assert all(isinstance(x, float) for x in vec)
-
-
-def test_get_embedding_backend_none() -> None:
-    """When EMBEDDING_BACKEND=none, uses placeholder vector (no model, no API)."""
-    import importlib
-
-    with patch.dict(
-        "os.environ",
-        {"EMBEDDING_BACKEND": "none"},
-        clear=False,
-    ):
-        importlib.reload(indexer_mod)
-        vec = indexer_mod._get_embedding("hello")
-        assert len(vec) == indexer_mod.VECTOR_SIZE
-        assert all(isinstance(x, float) for x in vec)
-        # Placeholder is deterministic
-        vec2 = indexer_mod._get_embedding("hello")
-        assert vec == vec2
-    importlib.reload(indexer_mod)
-
-
-def test_get_embedding_openai_api_mock() -> None:
-    """When EMBEDDING_BACKEND=openai_api and API returns valid embedding."""
-    import importlib
-
-    with patch.dict(
-        "os.environ",
-        {
-            "EMBEDDING_BACKEND": "openai_api",
-            "EMBEDDING_API_URL": "http://test:8080/v1",
-            "EMBEDDING_MODEL": "test-model",
-            "EMBEDDING_DIMENSION": "4",
-        },
-        clear=False,
-    ):
-        importlib.reload(indexer_mod)
-        fake_embedding = [0.1, 0.2, 0.3, 0.4]
-        with patch("onec_help.indexer.urllib.request.urlopen") as mock_open:
-            mock_resp = MagicMock()
-            # 1-й вызов: GET /v1/models → список моделей; 2-й: POST /embeddings → ответ с вектором
-            mock_resp.read.side_effect = [
-                b'{"data":[{"id":"test-model"}]}',
-                b'{"data":[{"embedding":[0.1,0.2,0.3,0.4]}]}',
-            ]
-            mock_open.return_value.__enter__.return_value = mock_resp
-            mock_open.return_value.__exit__.return_value = False
-            vec = indexer_mod._get_embedding("hello")
-        assert vec == fake_embedding
-    # After exiting with, env is restored; reload so module sees default (local) backend
+    importlib.reload(embedding)
     importlib.reload(indexer_mod)
 
 
