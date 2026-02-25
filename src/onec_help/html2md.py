@@ -6,6 +6,7 @@ import html
 import os
 import unicodedata
 from pathlib import Path
+from typing import Optional, Tuple
 
 from bs4 import BeautifulSoup
 
@@ -60,19 +61,86 @@ def _legacy_body_to_md(body) -> str:
     return "\n".join(lines).strip()
 
 
-# Encodings to try when reading HTML (1C help may be UTF-8 or Windows-1251)
-_HTML_ENCODINGS = ("utf-8", "cp1251", "cp866", "latin-1")
+# Справка 1С: пробуем UTF-8, затем CP1251 (при ошибке декода UTF-8 для 1251-файлов)
+_ENCODINGS_UTF8_FIRST = ("utf-8", "cp1251", "cp866", "latin-1")
+
+
+def _looks_like_utf8_mojibake(text: str) -> bool:
+    """True, если текст похож на кракозябры: UTF-8 байты прочитаны как однобайтовая кодировка.
+    Признак 1: много символов Р (U+0420), С (U+0421) — байты 0xD0, 0xD1 в UTF-8 русских букв.
+    Признак 2: псевдографика (╨ ╤ и т.п. U+2500–U+257F) вперемешку с кириллицей."""
+    if len(text) < 20:
+        return False
+    cyrillic = sum(1 for c in text if "\u0400" <= c <= "\u04FF")
+    if cyrillic < 10:
+        return False
+    # Р и С как первый байт UTF-8 русских букв
+    bad = sum(1 for c in text if c in "\u0420\u0421")  # Р, С
+    if (bad / cyrillic) > 0.25:
+        return True
+    # Псевдографика (типично при неверной кодировке) вместе с кириллицей
+    box = sum(1 for c in text if "\u2500" <= c <= "\u257F")
+    return box > 5 and cyrillic > 5
+
+
+def _file_encodings() -> Tuple[str, ...]:
+    order = (os.environ.get("HELP_FILE_ENCODING") or "").strip().lower()
+    # HELP_FILE_ENCODING=cp1251 — сначала CP1251 (если точно знаете, что все файлы в 1251)
+    if order == "cp1251":
+        return ("cp1251", "utf-8", "cp866", "latin-1")
+    return _ENCODINGS_UTF8_FIRST
+
+
+def _try_fix_mojibake(text: str, raw: bytes) -> Optional[str]:
+    """Если текст похож на кракозябры — перекодировать или перечитать raw в другой кодировке."""
+    if not _looks_like_utf8_mojibake(text):
+        return None
+    # Случай: файл в UTF-8, но прочитан как CP1251 → перечитаем как UTF-8
+    try:
+        u8 = raw.decode("utf-8")
+        if not _looks_like_utf8_mojibake(u8):
+            return u8
+    except UnicodeDecodeError:
+        pass
+    # Случай: строка — UTF-8 байты, прочитанные как Latin-1 (двойная кодировка)
+    try:
+        fixed = text.encode("latin-1").decode("utf-8")
+        if not _looks_like_utf8_mojibake(fixed):
+            return fixed
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        pass
+    for alt in ("cp1251", "cp866"):
+        try:
+            alt_text = raw.decode(alt)
+            if not _looks_like_utf8_mojibake(alt_text):
+                return alt_text
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return None
+
+
+def read_file_with_encoding_fallback(
+    path: Path, encodings: Optional[Tuple[str, ...]] = None
+) -> str:
+    """Читает файл, пробуя кодировки по порядку. При признаках кракозябр пробует альтернативу."""
+    if encodings is None:
+        encodings = _file_encodings()
+    raw = path.read_bytes()
+    for enc in encodings:
+        try:
+            text = raw.decode(enc)
+            fixed = _try_fix_mojibake(text, raw)
+            if fixed is not None:
+                return fixed
+            return text
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", errors="replace")
 
 
 def _read_html_file(path: Path) -> str:
     """Read file content; try utf-8, then cp1251/cp866/latin-1 for legacy 1C help."""
-    raw = path.read_bytes()
-    for enc in _HTML_ENCODINGS:
-        try:
-            return raw.decode(enc)
-        except (UnicodeDecodeError, LookupError):
-            continue
-    return raw.decode("utf-8", errors="replace")
+    return read_file_with_encoding_fallback(path)
 
 
 def html_to_md_content(html_path) -> str:

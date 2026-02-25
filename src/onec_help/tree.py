@@ -63,6 +63,8 @@ def get_html_content(html_path: str, base_dir) -> str:
         return "<html><body>No content available</body></html>"
     if not file_path.exists() or file_path.suffix != ".html":
         return "<html><body>No content available</body></html>"
-    content = file_path.read_text(encoding="utf-8")
+    from .html2md import read_file_with_encoding_fallback
+
+    content = read_file_with_encoding_fallback(file_path)
     content = content.replace('href="', 'href="/content/').replace('src="', 'src="/download/')
     return content

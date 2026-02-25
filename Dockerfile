@@ -1,6 +1,11 @@
 # 1C Help: app container (Python + p7zip-full + cron для индексации по расписанию).
+# Зависимости для эмбеддингов ставятся только при EMBEDDING_BACKEND=local. Для openai_api или none:
+#   docker build --build-arg EMBEDDING_BACKEND=none -t onec-help .
 FROM python:3.12-slim
 
+ARG EMBEDDING_BACKEND=local
+
+# Базовый python:3.12-slim не содержит: 7z (распаковка .hbk), cron (ingest по расписанию), gosu (запуск не от root)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     p7zip-full \
     cron \
@@ -21,6 +26,7 @@ COPY templates/ templates/
 COPY entrypoint.sh crontab ./
 RUN chmod +x /app/entrypoint.sh \
     && pip install --no-cache-dir -e ".[mcp]" \
+    && if [ "$EMBEDDING_BACKEND" = "local" ]; then pip install --no-cache-dir -e ".[embed]"; fi \
     && mkdir -p /app/var/log \
     && chown -R app:app /app
 

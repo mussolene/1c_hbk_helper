@@ -27,9 +27,13 @@
 pip install -e .
 # С поддержкой MCP (Python 3.10+):
 pip install -e ".[mcp]"
+# Локальные эмбеддинги (EMBEDDING_BACKEND=local): добавьте extra [embed]
+pip install -e ".[mcp,embed]"
 # Для тестов и линтера:
 pip install -e ".[dev]"
 ```
+
+Без `[embed]` при `local` будет использоваться плейсхолдер (как при `none`). При `openai_api` или `none` extra `[embed]` не нужен.
 
 ## Команды CLI
 
@@ -64,6 +68,11 @@ pip install -e ".[dev]"
 | `MCP_PATH` | URL-путь эндпоинта MCP | `/mcp` |
 | `PORT` | Порт веб-сервера (serve) | `5000` |
 | `HELP_SERVE_ALLOWED_DIRS` | Список путей через запятую (serve): разрешённые базовые каталоги для формы; если задан, ввод вне списка отклоняется | — |
+| `EMBEDDING_BACKEND` | Эмбеддинги: `local` (sentence-transformers), `openai_api` (внешний API) или `none` (отключены — плейсхолдер, только поиск по ключевым словам) | `local` |
+| `EMBEDDING_MODEL` | Имя модели. Для openai_api (LM Studio): если такой модели нет на сервере, берётся первая из списка или популярная (nomic-embed-text, all-MiniLM-L6-v2); при необходимости выполняется запрос на загрузку через API LM Studio | `all-MiniLM-L6-v2` |
+| `EMBEDDING_API_URL` | Для openai_api: базовый URL (по умолчанию LM Studio: `http://localhost:1234/v1` локально, в контейнере — `http://host.docker.internal:1234/v1`) | LM Studio: 1234 |
+| `EMBEDDING_API_KEY` | Ключ API (если нужен для openai_api) | — |
+| `EMBEDDING_DIMENSION` | Размерность при openai_api (если не задана — определяется по первому ответу API) | — |
 
 ## Запуск из коробки (Docker Compose)
 
@@ -119,6 +128,7 @@ python -m onec_help unpack-dir /opt/1cv8 -o ./unpacked -l ru
 docker compose exec mcp python -m onec_help ingest --workers 4
 docker compose exec mcp python -m onec_help ingest --dry-run   # сколько .hbk будет обработано
 docker compose exec mcp python -m onec_help ingest --max-tasks 1  # ограничить объём за один запуск
+docker compose exec mcp python -m onec_help ingest --recreate  # пересоздать коллекцию (после смены модели/размерности)
 ```
 
 **Сколько топиков:** полная справка (один 1cv8_ru.hbk) — обычно 10–25 тыс. страниц. Проверка индексации: `docker compose exec mcp python -m onec_help index-status` или MCP **get_1c_help_index_status** (локально: `python -m onec_help index-status`).
@@ -129,6 +139,32 @@ docker compose exec mcp python -m onec_help ingest --max-tasks 1  # ограни
 docker compose exec -d mcp sh -c 'python -m onec_help ingest >> /app/var/log/ingest.log 2>&1'
 docker compose exec mcp tail -f /app/var/log/ingest.log
 ```
+
+### Эмбеддинги: отключение, локальная модель, внешний сервис
+
+- **Отключение эмбеддингов** (`EMBEDDING_BACKEND=none`): семантический поиск отключён, в индекс пишутся плейсхолдер-векторы; поиск по смыслу не работает, но **search_1c_help_keyword** (по ключевым словам) и остальные инструменты MCP работают. Подходит для экономии ресурсов или когда нужен только поиск по строкам.
+- **Локальная модель** (`local`, по умолчанию): sentence-transformers в контейнере. Нужна установка зависимостей для эмбеддингов (см. ниже).
+- **Внешний API** (`openai_api`): LM Studio, Ollama, llama.cpp server и т.п. Задайте в `.env`:
+
+```env
+EMBEDDING_BACKEND=openai_api
+EMBEDDING_API_URL=http://llama:8080/v1
+EMBEDDING_MODEL=your-embedding-model
+EMBEDDING_DIMENSION=768
+```
+
+Если сервис эмбеддингов в том же Compose, задайте `EMBEDDING_API_URL` по имени сервиса. Размерность вектора при openai_api определяется автоматически по первому ответу API; при смене модели пересоздайте коллекцию: `docker compose exec mcp python -m onec_help ingest --recreate`.
+
+**Нужно ли ставить зависимости для эмбеддингов (sentence-transformers), если используется сторонний сервис или `none`?** Нет. При `openai_api` или `none` sentence-transformers не используются. При сборке образа зависимости для эмбеддингов ставятся **только если** `EMBEDDING_BACKEND=local` (значение передаётся как build-arg). Если в `.env` задано `EMBEDDING_BACKEND=none` или `openai_api`, при `docker compose build` образ будет собран без sentence-transformers — меньше по размеру:
+
+```bash
+# В .env: EMBEDDING_BACKEND=none  (или openai_api)
+docker compose build
+# или явно:
+docker build --build-arg EMBEDDING_BACKEND=none -t onec-help .
+```
+
+Одна и та же переменная `EMBEDDING_BACKEND` задаёт и режим в рантайме, и необходимость установки зависимостей при сборке.
 
 ### Один контейнер без Compose
 

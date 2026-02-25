@@ -4,6 +4,8 @@ import os
 import re
 from pathlib import Path
 
+from .html2md import read_file_with_encoding_fallback
+
 
 def parse_content_file(content_path) -> list:
     """
@@ -14,7 +16,7 @@ def parse_content_file(content_path) -> list:
     path = Path(content_path)
     if not path.exists():
         return structure
-    content = path.read_text(encoding="utf-8")
+    content = read_file_with_encoding_fallback(path)
     # Match {num,"name" or },"name" (blocks separated by })
     for match in re.finditer(r'(?:\{\d+|}),"([^"]+)"', content):
         structure.append(match.group(1))
@@ -26,8 +28,7 @@ def extract_html_title(html_path) -> str:
     path = Path(html_path)
     if not path.exists():
         return "Untitled"
-    with open(path, "r", encoding="utf-8") as f:
-        content = f.read(2000)
+    content = read_file_with_encoding_fallback(path)[:2000]
     title_match = re.search(r"<h1[^>]*>(.*?)</h1>", content, re.IGNORECASE | re.DOTALL)
     if title_match:
         return re.sub(r"<[^>]+>", "", title_match.group(1)).strip()

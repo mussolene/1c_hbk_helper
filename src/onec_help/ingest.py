@@ -118,7 +118,7 @@ def run_ingest(
     from qdrant_client.models import Distance, VectorParams
 
     from .html2md import build_docs
-    from .indexer import VECTOR_SIZE, build_index
+    from .indexer import build_index, get_embedding_dimension
     from .unpack import unpack_hbk
 
     if not source_dirs_with_versions:
@@ -158,7 +158,7 @@ def run_ingest(
         if not client.collection_exists(collection):
             client.create_collection(
                 collection_name=collection,
-                vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
+                vectors_config=VectorParams(size=get_embedding_dimension(), distance=Distance.COSINE),
             )
             if verbose:
                 _log("[ingest] Created Qdrant collection")

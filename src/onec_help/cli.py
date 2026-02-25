@@ -217,7 +217,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             qdrant_host=os.environ.get("QDRANT_HOST", "localhost"),
             qdrant_port=int(os.environ.get("QDRANT_PORT", "6333")),
             collection=os.environ.get("QDRANT_COLLECTION", "onec_help"),
-            incremental=True,
+            incremental=not getattr(args, "recreate", False),
             max_workers=getattr(args, "workers", 4),
             max_tasks=getattr(args, "max_tasks", None),
             verbose=not getattr(args, "quiet", False),
@@ -387,6 +387,11 @@ def main() -> int:
         default=500,
         metavar="N",
         help="Index N files per upsert (default 500); smaller = more progress output, less memory",
+    )
+    p_ingest.add_argument(
+        "--recreate",
+        action="store_true",
+        help="Recreate Qdrant collection (e.g. after changing EMBEDDING_DIMENSION or model)",
     )
     p_ingest.set_defaults(func=cmd_ingest)
 

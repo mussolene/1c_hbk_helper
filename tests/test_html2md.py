@@ -7,11 +7,13 @@ from bs4 import BeautifulSoup
 from onec_help.html2md import (
     _legacy_body_to_md,
     _looks_like_html,
+    _looks_like_utf8_mojibake,
     _normalize_md_text,
     _read_html_file,
     _table_to_md,
     build_docs,
     html_to_md_content,
+    read_file_with_encoding_fallback,
 )
 
 
@@ -60,6 +62,24 @@ def test_read_html_file_fallback_replace(tmp_path: Path) -> None:
     text = _read_html_file(f)
     assert "<html>" in text
     assert "\ufffd" in text or "html" in text
+
+
+def test_looks_like_utf8_mojibake() -> None:
+    """Mojibake: Р/С as first UTF-8 byte of Russian letters, or box-drawing + Cyrillic."""
+    assert _looks_like_utf8_mojibake("Р—Р°РіСЂСѓР·РєР° канала") is True
+    assert _looks_like_utf8_mojibake("Редактирование параметра выбора типа") is False
+    assert _looks_like_utf8_mojibake("short") is False
+
+
+def test_read_file_utf8_file_read_as_cp1251_fixed(tmp_path: Path) -> None:
+    """File is UTF-8 'Загрузка'; when env forces cp1251 first we get mojibake, then fix by trying utf-8 on raw."""
+    f = tmp_path / "e.html"
+    f.write_text("Загрузка каналов внешнего сервиса", encoding="utf-8")
+    # Default (utf-8 first) returns correct
+    assert "Загрузка" in read_file_with_encoding_fallback(f)
+    # Force cp1251 first via raw decode order: read with cp1251 list
+    text = read_file_with_encoding_fallback(f, encodings=("cp1251", "utf-8"))
+    assert "Загрузка" in text or "канал" in text
 
 
 def test_looks_like_html(tmp_path: Path) -> None:

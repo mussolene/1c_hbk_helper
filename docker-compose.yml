@@ -28,7 +28,11 @@ services:
       start_period: 15s
 
   mcp:
-    build: .
+    build:
+      context: .
+      args:
+        # От этого значения зависит, ставится ли [embed] (sentence-transformers). Должно совпадать с runtime.
+        EMBEDDING_BACKEND: "${EMBEDDING_BACKEND:-openai_api}"
     ports:
       - "${MCP_PORT:-5050}:5050"
     environment:
@@ -43,6 +47,12 @@ services:
       HELP_LANGUAGES: ${HELP_LANGUAGES:-ru}
       HELP_INGEST_TEMP: ${HELP_INGEST_TEMP:-/tmp/help_ingest}
       INGEST_FAILED_LOG: ${INGEST_FAILED_LOG:-/var/log/ingest_failed.log}
+      # Эмбеддинги: local (по умолчанию) или openai_api; при openai_api задать EMBEDDING_API_URL и EMBEDDING_DIMENSION
+      EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-openai_api}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-text-embedding-mxbai-embed-large-v1}
+      EMBEDDING_API_URL: ${EMBEDDING_API_URL:-http://host.docker.internal:1234/v1}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-}
     volumes:
       - /opt/1cv8:/opt/1cv8:ro
     command: ["python", "-m", "onec_help", "mcp", "/data", "--transport", "http", "--host", "0.0.0.0", "--port", "5050"]
