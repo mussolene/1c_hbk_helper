@@ -38,7 +38,7 @@ pip install -e ".[dev]"
 | **`unpack <archive> [--output-dir]`** | Распаковать один .hbk через 7z |
 | **`unpack-dir [source_dir] [-o output]`** | Распаковать все .hbk из дерева каталогов в указанную директорию (без индексации). Источники: `source_dir`, `HELP_SOURCE_BASE` или `--sources` |
 | **`build-docs <project_dir> [--output]`** | Сгенерировать Markdown из HTML справки |
-| **`build-index <directory> [--incremental]`** | Построить векторный индекс в Qdrant по .md/.html |
+| **`build-index <directory> [--incremental]`** | Построить векторный индекс в Qdrant по .md/.html (эмбеддинги по умолчанию: sentence-transformers) |
 | **`ingest`** | Распаковать .hbk из мультикаталогов во временную папку, построить Markdown, проиндексировать в Qdrant, удалить временные данные |
 | **`index-status`** | Показать статус индекса (число тем, версии, языки) |
 | **`serve <directory>`** | Веб-просмотр справки (Flask) |

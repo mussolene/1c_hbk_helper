@@ -29,14 +29,19 @@ except ImportError:
 COLLECTION_NAME = "onec_help"
 VECTOR_SIZE = 384  # default for all-MiniLM-L6-v2; use same in search
 
+# One model per process; avoids loading weights on every _get_embedding() call
+_embedding_model = None
+
 
 def _get_embedding(text: str) -> list[float]:
-    """Produce embedding for text. Prefer sentence-transformers; fallback to simple placeholder."""
+    """Produce embedding for text. Prefer sentence-transformers (cached); fallback to simple placeholder."""
+    global _embedding_model
     try:
         from sentence_transformers import SentenceTransformer
 
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        return model.encode(text, convert_to_numpy=True).tolist()
+        if _embedding_model is None:
+            _embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+        return _embedding_model.encode(text, convert_to_numpy=True).tolist()
     except ImportError:
         # Placeholder: deterministic pseudo-vector so tests/indexing work without the model
         import hashlib

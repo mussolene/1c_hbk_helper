@@ -12,6 +12,7 @@ dependencies = [
     "flask>=3.0",
     "beautifulsoup4>=4.12",
     "qdrant-client>=1.7",
+    "sentence-transformers>=2.2",
 ]
 
 [project.optional-dependencies]
@@ -22,9 +23,6 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.4",
-]
-embed = [
-    "sentence-transformers>=2.2",
 ]
 
 [project.scripts]
