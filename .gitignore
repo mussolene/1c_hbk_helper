@@ -25,6 +25,7 @@ htmlcov/
 .tox/
 
 # Data / artifacts (do not commit)
+data/
 *.hbk
 functions_data.json
 unpacked/

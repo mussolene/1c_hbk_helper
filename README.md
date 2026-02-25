@@ -52,14 +52,16 @@ pip install -e ".[dev]"
 
 ```bash
 docker compose up -d
+# База Qdrant хранится в ./data/qdrant (в проекте, при перезапуске не теряется)
 # MCP: http://localhost:5050/mcp (подключить в Cursor через .cursor/mcp.json)
 # Индексация вручную: docker compose exec mcp python -m onec_help ingest
+# Проверка индекса: docker compose exec mcp python -m onec_help index-status
 # По расписанию: в контейнере mcp запущен cron — раз в сутки в 3:00 переиндексация из /opt/1cv8
 ```
 
 ### Контейнер только для распаковки
 
-Чтобы **только распаковать** .hbk в свою директорию (без Qdrant и MCP), используйте сервис **unpack** (профиль `unpack`):
+Чтобы **только распаковать** .hbk в свою директорию (без индексации), используйте сервис **unpack** вручную:
 
 ```bash
 # Смонтировать каталог с 1С и папку для результата; распаковать все .hbk в неё
@@ -97,7 +99,7 @@ docker compose exec mcp python -m onec_help ingest --dry-run   # сколько 
 docker compose exec mcp python -m onec_help ingest --max-tasks 1  # ограничить объём за один запуск
 ```
 
-**Сколько топиков:** полная справка (один 1cv8_ru.hbk) — обычно 10–25 тыс. страниц. Проверка: MCP **get_1c_help_index_status** или `python -m onec_help index-status`.
+**Сколько топиков:** полная справка (один 1cv8_ru.hbk) — обычно 10–25 тыс. страниц. Проверка индексации: `docker compose exec mcp python -m onec_help index-status` или MCP **get_1c_help_index_status** (локально: `python -m onec_help index-status`).
 
 **Таймаут:** полная индексация может занимать 15–60 минут. Запуск в фоне:
 
