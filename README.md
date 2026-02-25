@@ -1,5 +1,12 @@
 # 1C Help — MCP в Docker
 
+[![Test](https://github.com/OWNER/REPO/actions/workflows/test.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/test.yml)
+[![Lint](https://github.com/OWNER/REPO/actions/workflows/lint.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/lint.yml)
+[![Coverage](https://codecov.io/gh/OWNER/REPO/graph/badge.svg)](https://codecov.io/gh/OWNER/REPO)
+[![Release](https://github.com/OWNER/REPO/actions/workflows/release.yml/badge.svg)](https://github.com/OWNER/REPO/releases)
+
+> Замените `OWNER/REPO` в URL бейджей на ваш GitHub-репозиторий (например `myname/1c_hbk_helper`).
+
 Справка 1С: распаковка .hbk (7z), конвертация в Markdown, индексация в Qdrant, MCP-сервер для поиска и чтения справки.
 
 ## Требования
@@ -14,18 +21,22 @@
 pip install -e .
 # С поддержкой MCP (Python 3.10+):
 pip install -e ".[mcp]"
-# Для тестов:
+# Для тестов и линтера:
 pip install -e ".[dev]"
 ```
 
 ## Команды CLI
 
-- **`unpack <archive> [--output-dir]`** — распаковать .hbk через 7z
-- **`build-docs <project_dir> [--output]`** — сгенерировать Markdown из HTML справки (.html и файлы без расширения с HTML, например после распаковки .hbk)
-- **`build-index <directory> [--incremental]`** — построить векторный индекс в Qdrant по всем .md в каталоге; если .md нет — по .html и по файлам без расширения с HTML-содержимым (распакованный .hbk). `--incremental` — добавить/обновить без пересоздания коллекции.
-- **`ingest`** — мультикаталоги: из нескольких **только для чтения** каталогов собрать все .hbk, распаковать во временную папку в контейнере, построить Markdown, проиндексировать в Qdrant с полями `version` и `language`, затем удалить временные данные. Поддерживается фильтр по языку (по умолчанию из `HELP_LANGUAGES=ru`; если не задан — все языки) и параллельная обработка (`--workers`).
-- **`serve <directory>`** — запустить веб-просмотр справки (Flask)
-- **`mcp <directory>`** — запустить MCP-сервер (stdio; нужен fastmcp)
+| Команда | Описание |
+|--------|----------|
+| **`unpack <archive> [--output-dir]`** | Распаковать один .hbk через 7z |
+| **`unpack-dir [source_dir] [-o output]`** | Распаковать все .hbk из дерева каталогов в указанную директорию (без индексации). Источники: `source_dir`, `HELP_SOURCE_BASE` или `--sources` |
+| **`build-docs <project_dir> [--output]`** | Сгенерировать Markdown из HTML справки |
+| **`build-index <directory> [--incremental]`** | Построить векторный индекс в Qdrant по .md/.html |
+| **`ingest`** | Распаковать .hbk из мультикаталогов во временную папку, построить Markdown, проиндексировать в Qdrant, удалить временные данные |
+| **`index-status`** | Показать статус индекса (число тем, версии, языки) |
+| **`serve <directory>`** | Веб-просмотр справки (Flask) |
+| **`mcp <directory>`** | MCP-сервер (stdio/HTTP; нужен fastmcp) |
 
 Переменные окружения: `QDRANT_HOST`, `QDRANT_PORT`, `HELP_PATH`, `PORT`, `MCP_TRANSPORT`, `HELP_SOURCE_BASE`, `HELP_LANGUAGES`, `HELP_INGEST_TEMP`.
 
@@ -33,113 +44,125 @@ pip install -e ".[dev]"
 
 Данные справки берутся через **ingest**: монтируется один каталог (`HELP_SOURCE_BASE=/opt/1cv8`), в нём каждая подпапка считается версией 1С и сканируется автоматически. Поиск .hbk рекурсивный, в т.ч. в подпапке `bin/` (на Windows: `C:\Program Files\1cv8\8.3.27.1859\bin`).
 
-**macOS (Docker Desktop):** по умолчанию Docker не имеет доступа к `/opt`. Если у вас 1С в `/opt/1cv8/8.3.27.1719` и т.п., откройте **Docker Desktop → Settings (⚙️) → Resources → File sharing** и добавьте путь **`/opt`** (или только **`/opt/1cv8`**). Нажмите **Apply & Restart**. После этого `docker compose up -d` сможет примонтировать `/opt/1cv8`.
+**macOS (Docker Desktop):** по умолчанию Docker не имеет доступа к `/opt`. Откройте **Docker Desktop → Settings (⚙️) → Resources → File sharing** и добавьте путь **`/opt`** (или **`/opt/1cv8`**). Нажмите **Apply & Restart**.
 
-**Путь к .hbk:** на Linux/macOS файлы справки лежат в каталоге версии **без** подпапки `bin/`, например `/opt/1cv8/8.3.27.1859/1cv8_ru.hbk`. На Windows часто `...\8.3.27.1859\bin\1cv8_ru.hbk`. Ingest ищет `.hbk` рекурсивно, так что оба варианта поддерживаются.
+**Путь к .hbk:** на Linux/macOS часто `/opt/1cv8/8.3.27.1859/1cv8_ru.hbk`; на Windows — `...\8.3.27.1859\bin\1cv8_ru.hbk`. Ingest ищет `.hbk` рекурсивно, оба варианта поддерживаются.
 
 ### Быстрый старт
 
-   ```bash
-   docker compose up -d
-   # MCP: http://localhost:5050/mcp (подключить в Cursor через .cursor/mcp.json)
-   # Индексация вручную: docker compose exec mcp python -m onec_help ingest
-   # По расписанию: в контейнере mcp запущен cron — раз в сутки в 3:00 переиндексация из /opt/1cv8
-   ```
+```bash
+docker compose up -d
+# MCP: http://localhost:5050/mcp (подключить в Cursor через .cursor/mcp.json)
+# Индексация вручную: docker compose exec mcp python -m onec_help ingest
+# По расписанию: в контейнере mcp запущен cron — раз в сутки в 3:00 переиндексация из /opt/1cv8
+```
 
-### Мультикаталоги (ingest): несколько версий 1С, только чтение, очистка после
+### Контейнер только для распаковки
 
-Исходные каталоги **не изменяются**: из них читаются только файлы `*.hbk`, распаковка и временные файлы — только внутри контейнера, после индексации всё удаляется.
+Чтобы **только распаковать** .hbk в свою директорию (без Qdrant и MCP), используйте сервис **unpack** (профиль `unpack`):
 
-**Из коробки в compose** монтируется один каталог `/opt/1cv8` (только чтение). Ingest просматривает в нём подпапки (например `8.3.27.1859`, `8.3.27.1719`) и считает каждую подпапку отдельной версией 1С — дублировать список в конфиге не нужно. На Windows при монтировании укажите каталог установки 1С (например `C:\Program Files\1cv8`); внутри версий может быть подпапка `bin` — .hbk ищутся рекурсивно.
+```bash
+# Смонтировать каталог с 1С и папку для результата; распаковать все .hbk в неё
+docker compose run --rm \
+  -v /opt/1cv8:/input:ro \
+  -v $(pwd)/unpacked:/output \
+  -e HELP_SOURCE_BASE=/input \
+  -e HELP_LANGUAGES=ru \
+  unpack
+```
 
-Язык по имени файла (`*_ru.hbk` и т.д.): по умолчанию `HELP_LANGUAGES=ru` — только русские справки; если переменную не задавать — индексируются все языки.
+Структура выхода: `output/<версия>/<язык>/<имя_архива>/` (например `unpacked/8.3.27.1859/ru/1cv8_ru/`). Только распаковка, конвертация в Markdown и индексация не выполняются.
 
-Запуск индексации:
+Локально та же логика:
 
-   - **При старте контейнера:** если смонтирован `/opt/1cv8`, ingest один раз запускается **в фоне** (логи: `docker compose exec mcp tail -f /var/log/ingest.log`). MCP при этом стартует сразу.
-   - **Вручную:** `docker compose exec mcp python -m onec_help ingest` (смонтированный `/opt/1cv8` пересканируется, .hbk распаковываются во временную папку в контейнере, индекс в Qdrant обновляется).
-   - **По расписанию:** в контейнере **mcp** запущен **cron** — раз в сутки в **3:00** выполняется тот же ingest (расписание в `crontab` в корне репозитория).
+```bash
+python -m onec_help unpack-dir /opt/1cv8 -o ./unpacked -l ru
+```
 
-   Если 1С установлена в `/opt/1cv8`, подпапки считаются версиями и индексируются. Свой каталог: задайте `HELP_SOURCE_BASE` и смонтируйте его в volumes для mcp.
+### Мультикаталоги (ingest): несколько версий 1С
 
-   Дополнительно:
+Исходные каталоги **не изменяются**: из них читаются только `*.hbk`, распаковка и временные файлы — только внутри контейнера, после индексации всё удаляется.
 
-   ```bash
-   docker compose exec mcp python -m onec_help ingest --workers 4
-   docker compose exec -e HELP_SOURCE_BASE=/other/1cv8 mcp python -m onec_help ingest
-   # Сколько архивов будет обработано (без распаковки):
-   docker compose exec mcp python -m onec_help ingest --dry-run
-   # Размер порции индексации (по умолчанию 500 файлов за раз):
-   docker compose exec mcp python -m onec_help ingest --index-batch-size 500
-   ```
+**Из коробки** монтируется `/opt/1cv8` (только чтение). Ingest просматривает подпапки (`8.3.27.1859`, `8.3.27.1719`) и считает каждую версией 1С. Язык по имени файла (`*_ru.hbk` и т.д.): по умолчанию `HELP_LANGUAGES=ru`.
 
-   **Какие файлы попадают в индекс:** при распаковке .hbk извлекаются **все** файлы (в т.ч. из подпапок вроде PayloadData, FileStorage и т.п.). В Markdown конвертируются: **.html**, **.htm**, файлы **без расширения** и **.xml/.xhtml/.st**, если содержимое похоже на HTML. Остальные (картинки, .css, .js, .db и т.д.) не обрабатываются. Папки по имени не пропускаются — обход рекурсивный по всем каталогам.
+- **При старте контейнера:** если смонтирован `/opt/1cv8`, ingest один раз запускается **в фоне** (логи: `docker compose exec mcp tail -f /var/log/ingest.log`).
+- **Вручную:** `docker compose exec mcp python -m onec_help ingest`
+- **По расписанию:** cron в контейнере mcp — раз в сутки в 3:00.
 
-   **Сколько топиков должно быть:** полная справка 1С (один архив 1cv8_ru.hbk) обычно даёт **10–25 тыс.** страниц. Если в индексе всего 1–2 тыс., скорее всего обработан только один .hbk или индексация прервалась. Проверка: **get_1c_help_index_status** (MCP) или `python -m onec_help index-status`; сколько архивов будет обработано: `python -m onec_help ingest --dry-run`.
+Дополнительно:
 
-   **Таймаут при ручном запуске:** полная индексация (несколько .hbk, эмбеддинги) может занимать **15–60 минут**. Если `docker compose exec ... ingest` обрывается по таймауту:
+```bash
+docker compose exec mcp python -m onec_help ingest --workers 4
+docker compose exec mcp python -m onec_help ingest --dry-run   # сколько .hbk будет обработано
+docker compose exec mcp python -m onec_help ingest --max-tasks 1  # ограничить объём за один запуск
+```
 
-   - Запускайте ingest **в фоне** (логи в файл):
-     ```bash
-     docker compose exec -d mcp sh -c 'python -m onec_help ingest >> /var/log/ingest.log 2>&1'
-     docker compose exec mcp tail -f /var/log/ingest.log
-     ```
-   - Или ограничьте объём за один запуск и вызывайте несколько раз:
-     ```bash
-     docker compose exec mcp python -m onec_help ingest --max-tasks 1
-     docker compose exec mcp python -m onec_help ingest --max-tasks 2
-     ```
-   - Прогресс по умолчанию выводится в stderr (`[ingest] ...`) — при длительном запуске без `-d` это снижает риск обрыва по «нет вывода».
+**Сколько топиков:** полная справка (один 1cv8_ru.hbk) — обычно 10–25 тыс. страниц. Проверка: MCP **get_1c_help_index_status** или `python -m onec_help index-status`.
 
-   В индекс в Qdrant попадают поля `version` и `language` — по ним можно фильтровать поиск по версии и языку.
+**Таймаут:** полная индексация может занимать 15–60 минут. Запуск в фоне:
 
+```bash
+docker compose exec -d mcp sh -c 'python -m onec_help ingest >> /var/log/ingest.log 2>&1'
+docker compose exec mcp tail -f /var/log/ingest.log
+```
 
 ### Один контейнер без Compose
 
-Запуск только MCP (подключиться к Qdrant на хосте):
+Только MCP (Qdrant на хосте):
 
-   ```bash
-   docker run --rm -d -p 5050:5050 \
-     -v /opt/1cv8:/opt/1cv8:ro \
-     -e QDRANT_HOST=host.docker.internal \
-     -e QDRANT_PORT=6333 \
-     -e HELP_SOURCE_BASE=/opt/1cv8 \
-     --name onec-help-mcp \
-     $(docker build -q .) \
-     /app/entrypoint.sh python -m onec_help mcp /data --transport http --host 0.0.0.0 --port 5050
-   ```
+```bash
+docker run --rm -d -p 5050:5050 \
+  -v /opt/1cv8:/opt/1cv8:ro \
+  -e QDRANT_HOST=host.docker.internal \
+  -e QDRANT_PORT=6333 \
+  -e HELP_SOURCE_BASE=/opt/1cv8 \
+  --name onec-help-mcp \
+  $(docker build -q .) \
+  /app/entrypoint.sh python -m onec_help mcp /data --transport http --host 0.0.0.0 --port 5050
+```
 
-   MCP: http://localhost:5050/mcp. Qdrant на хосте — порт 6333.
+MCP: http://localhost:5050/mcp.
 
 ## MCP
 
-Инструменты:
-
 | Инструмент | Назначение |
 |------------|------------|
-| **search_1c_help** | Семантический поиск по справке (запрос на естественном языке). |
-| **search_1c_help_keyword** | Поиск по вхождению строки в заголовок и текст (например «МенеджерКриптографии», «интерактивный режим»). Использовать, когда семантический поиск не находит точный термин. |
-| **get_1c_help_topic** | Получить полный текст темы по пути из результатов поиска. Контент берётся с диска или из индекса Qdrant, если файлы не сохранялись. |
-| **get_1c_function_info** | Описание функции/метода 1С по имени (сначала ключевой поиск, затем семантический). |
-| **list_1c_help_titles** | Список заголовков и путей для просмотра; опционально фильтр по началу пути (например `zif` — параметры командной строки). |
-| **get_1c_help_index_status** | Проверить, проиндексирована ли справка: число тем, имя коллекции, версии и языки (по выборке). |
+| **search_1c_help** | Семантический поиск по справке. |
+| **search_1c_help_keyword** | Поиск по вхождению строки (точные термины: «МенеджерКриптографии», параметры запуска). |
+| **get_1c_help_topic** | Полный текст темы по пути (с диска или из Qdrant). |
+| **get_1c_function_info** | Описание функции/метода 1С по имени. |
+| **list_1c_help_titles** | Список заголовков и путей; фильтр по началу пути (например `zif`). |
+| **get_1c_help_index_status** | Статус индекса: число тем, версии, языки. |
 
-**Проверка индекса:** вызовите **get_1c_help_index_status** в MCP или в терминале: `docker compose exec mcp python -m onec_help index-status`.
+**Рекомендация:** для точных имён — сначала **search_1c_help_keyword**; для общих вопросов — **search_1c_help**.
 
-**Рекомендация:** для точных имён (МенеджерКриптографии, параметры запуска и т.п.) сначала вызывайте **search_1c_help_keyword**; для общих вопросов — **search_1c_help**.
+Конфиг Cursor: **`.cursor/mcp.json`** (пример — `docs/mcp.json.example`). MCP по HTTP (порт 5050). После правок конфига Cursor перезапускают.
 
-Конфиг Cursor: **`.cursor/mcp.json`** (пример — `docs/mcp.json.example`). MCP работает **внутри контейнера** по HTTP (порт **5050**). После `docker compose up -d` Cursor подключается по URL `http://localhost:5050/mcp`. Для локального запуска без Docker — `scripts/run_mcp.sh` и Python 3.10+ с fastmcp. После правок конфига Cursor перезапускают.
+**Если Cursor пишет «connect ECONNREFUSED 127.0.0.1:5050»:** проверьте `docker compose up -d`, `docker compose ps`, `docker compose logs mcp`.
 
-**Если Cursor пишет «connect ECONNREFUSED 127.0.0.1:5050»:** убедитесь, что контейнеры запущены: `docker compose up -d`. Проверьте, что сервис `mcp` работает: `docker compose ps`; если контейнер `mcp` падает — смотрите логи: `docker compose logs mcp`.
-
-## Тесты
+## Тесты и линт
 
 ```bash
 pip install -e ".[dev]"
-PYTHONPATH=src pytest tests --cov=src/onec_help --cov-report=term-missing --cov-fail-under=79
+PYTHONPATH=src python -m pytest tests -v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=90
+ruff check src tests && ruff format --check src tests
 ```
 
-Целевое покрытие — не менее 90% (см. план); в конфиге задан порог 79% для прохождения сборки.
+Покрытие не менее 90% (в расчёт не входят `__main__.py` и `mcp_server.py`).
+
+## CI (GitHub Actions)
+
+- **test** — pytest, покрытие ≥90%, матрица Python 3.10–3.12.
+- **lint** — ruff check и ruff format.
+- **deploy** — сборка и push Docker-образа в GHCR (при push в main/master или вручную).
+- **release** — при push тега `v*`: сборка sdist и создание GitHub Release; отдельно — сборка и push Docker-образа с тегом версии.
+
+## Документация
+
+- [docs/run.md](docs/run.md) — запуск локально и в Docker.
+- [docs/search-and-mcp.md](docs/search-and-mcp.md) — поиск и рекомендации по MCP.
+- [docs/help_formats.md](docs/help_formats.md) — форматы справки (.hbk, HTML, Markdown).
+- [docs/mcp.json.example](docs/mcp.json.example) — пример конфига MCP для Cursor.
 
 ## Дальнейшие этапы
 

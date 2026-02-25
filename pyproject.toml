@@ -21,6 +21,7 @@ mcp = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "ruff>=0.4",
 ]
 embed = [
     "sentence-transformers>=2.2",
@@ -34,10 +35,19 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=79"
-# Target 90% (see README); mcp_server.py omitted; reach 90% in CI with full test suite
+addopts = "-v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=90"
+# mcp_server.py omitted from coverage (optional MCP runtime)
 filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.coverage.run]
 omit = ["src/onec_help/__main__.py", "src/onec_help/mcp_server.py", "*/tests/*"]
 source = ["src/onec_help"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"

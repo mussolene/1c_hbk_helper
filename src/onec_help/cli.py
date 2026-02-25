@@ -89,6 +89,54 @@ def cmd_index_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_unpack_dir(args: argparse.Namespace) -> int:
+    """Unpack all .hbk from source dir(s) into output_dir (no indexing)."""
+    from pathlib import Path
+    from .ingest import run_unpack_only, discover_version_dirs, parse_source_dirs_env, parse_languages_env
+    import os
+
+    sources: list[tuple[str, str]] = []
+    if getattr(args, "sources", None):
+        for s in args.sources:
+            s = s.strip()
+            if ":" in s:
+                p, v = s.split(":", 1)
+                sources.append((p.strip(), v.strip()))
+            else:
+                sources.append((s, Path(s).name or "default"))
+    if not sources:
+        base = os.environ.get("HELP_SOURCE_BASE") or os.environ.get("HELP_SOURCES_DIR")
+        if base and base.strip():
+            discovered = discover_version_dirs(base.strip())
+            sources = [(str(p), v) for p, v in discovered]
+        if not sources:
+            sources = parse_source_dirs_env(os.environ.get("HELP_SOURCE_DIRS"))
+    if not sources:
+        # Single directory as version
+        src = getattr(args, "source_dir", None) or ""
+        if src and Path(src).is_dir():
+            sources = [(src, Path(src).name or "default")]
+    if not sources:
+        print("Error: no source directories. Set HELP_SOURCE_BASE or use --sources or pass source_dir", file=sys.stderr)
+        return 1
+    raw_lang = getattr(args, "languages", None)
+    languages = parse_languages_env(raw_lang if raw_lang is not None and raw_lang.strip() else os.environ.get("HELP_LANGUAGES"))
+    out = Path(args.output_dir or "./unpacked").resolve()
+    try:
+        n = run_unpack_only(
+            source_dirs_with_versions=sources,
+            output_dir=out,
+            languages=languages,
+            max_workers=getattr(args, "workers", 4),
+            verbose=not getattr(args, "quiet", False),
+        )
+        print(f"Unpacked {n} archive(s) to {out}")
+        return 0
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
     """Ingest .hbk from multiple read-only source dirs: unpack to temp, build docs, index, cleanup."""
     from pathlib import Path
@@ -179,6 +227,16 @@ def main() -> int:
     p_unpack.add_argument("archive", type=str, help="Path to .hbk file")
     p_unpack.add_argument("--output-dir", "-o", type=str, default="./unpacked", help="Output directory")
     p_unpack.set_defaults(func=cmd_unpack)
+
+    # unpack-dir — only unpack all .hbk into a directory (no build-docs, no index)
+    p_unpack_dir = sub.add_parser("unpack-dir", help="Unpack all .hbk from source tree into output dir (no indexing)")
+    p_unpack_dir.add_argument("source_dir", type=str, nargs="?", default="", help="Root dir with version subdirs (or set HELP_SOURCE_BASE)")
+    p_unpack_dir.add_argument("--output-dir", "-o", type=str, default="./unpacked", help="Output directory")
+    p_unpack_dir.add_argument("--sources", "-s", type=str, nargs="*", help="path:version pairs (overrides source_dir / HELP_SOURCE_BASE)")
+    p_unpack_dir.add_argument("--languages", "-l", type=str, default=None, help="Comma-separated, e.g. ru (default: HELP_LANGUAGES or all)")
+    p_unpack_dir.add_argument("--workers", "-w", type=int, default=4, help="Parallel workers")
+    p_unpack_dir.add_argument("--quiet", "-q", action="store_true", help="Less output")
+    p_unpack_dir.set_defaults(func=cmd_unpack_dir)
 
     # build-docs
     p_docs = sub.add_parser("build-docs", help="Generate Markdown from HTML")

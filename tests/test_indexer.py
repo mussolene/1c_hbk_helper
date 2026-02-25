@@ -6,6 +6,8 @@ import pytest
 
 from onec_help.indexer import (
     _get_embedding,
+    _path_to_point_id,
+    get_index_status,
     get_topic_by_path,
     search_index,
     build_index,
@@ -57,3 +59,44 @@ def test_build_index_html_only(mock_client: MagicMock, help_sample_dir: Path) ->
     n = build_index(help_sample_dir, qdrant_host="localhost", qdrant_port=6333)
     assert n >= 1
     mock_instance.upsert.assert_called_once()
+
+
+def test_path_to_point_id() -> None:
+    a = _path_to_point_id("a.md", version="8.3", language="ru")
+    b = _path_to_point_id("a.md", version="8.3", language="ru")
+    assert a == b
+    c = _path_to_point_id("b.md", version="8.3", language="ru")
+    assert a != c
+    assert isinstance(a, int)
+    assert 0 <= a < 2**63
+
+
+@patch("onec_help.indexer.QdrantClient")
+def test_get_index_status_no_collection(mock_client: MagicMock) -> None:
+    mock_instance = MagicMock()
+    mock_client.return_value = mock_instance
+    mock_instance.collection_exists.return_value = False
+    s = get_index_status(qdrant_host="localhost", qdrant_port=6333)
+    assert s["exists"] is False
+    assert s.get("points_count", 0) == 0
+
+
+@patch("onec_help.indexer.QdrantClient")
+def test_get_index_status_exists(mock_client: MagicMock) -> None:
+    mock_instance = MagicMock()
+    mock_client.return_value = mock_instance
+    mock_instance.collection_exists.return_value = True
+    mock_instance.get_collection.return_value = MagicMock(points_count=100)
+    mock_instance.scroll.return_value = (
+        [
+            MagicMock(payload={"version": "8.3", "language": "ru"}),
+            MagicMock(payload={"version": "8.3", "language": "en"}),
+        ],
+        None,
+    )
+    s = get_index_status(qdrant_host="localhost", qdrant_port=6333)
+    assert s["exists"] is True
+    assert s["points_count"] == 100
+    assert "8.3" in s.get("versions", [])
+    assert "ru" in s.get("languages", [])
+    assert "en" in s.get("languages", [])

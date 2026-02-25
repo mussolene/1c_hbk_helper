@@ -2,6 +2,10 @@
 # На Mac: Docker Desktop → Settings → Resources → File sharing — добавьте /opt (или /opt/1cv8).
 # При старте контейнера (если есть /opt/1cv8) ingest запускается в фоне; логи: docker compose exec mcp tail -f /var/log/ingest.log
 # Индексация вручную: docker compose exec mcp python -m onec_help ingest
+#
+# Контейнер только для распаковки: сервис unpack. Запуск вручную:
+#   docker compose run --rm -e HELP_SOURCE_BASE=/input -v /path/to/1cv8:/input:ro -v /path/to/output:/output unpack
+# Или с профилем: docker compose --profile unpack run --rm unpack
 
 services:
   qdrant:
@@ -45,5 +49,24 @@ services:
       retries: 3
       start_period: 10s
 
+  # Контейнер только для распаковки .hbk в указанную директорию (без индексации и MCP).
+  # Запуск: docker compose run --rm -v /opt/1cv8:/input:ro -v ./unpacked:/output unpack
+  # Или с переменной: HELP_SOURCE_BASE=/input, выход в /output.
+  unpack:
+    build: .
+    profile:
+      - unpack
+    environment:
+      HELP_SOURCE_BASE: /input
+      HELP_LANGUAGES: ru
+    volumes:
+      - unpack_input:/input:ro
+      - unpack_output:/output
+    command: ["python", "-m", "onec_help", "unpack-dir", "/input", "-o", "/output"]
+    # Для разового запуска с хоста: смонтируйте свои каталоги:
+    # docker compose run --rm -v /opt/1cv8:/input:ro -v $(pwd)/unpacked:/output unpack
+
 volumes:
   qdrant_storage:
+  unpack_input:
+  unpack_output:

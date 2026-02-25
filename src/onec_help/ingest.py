@@ -231,6 +231,68 @@ def run_ingest(
     return total_indexed
 
 
+def _unpack_one(
+    path: Path,
+    version: str,
+    lang: str,
+    output_base: Path,
+    unpack_fn: Any,
+    verbose: bool,
+) -> Tuple[bool, str]:
+    """Unpack one .hbk. Returns (success, message)."""
+    safe_name = re.sub(r"[^\w\-]", "_", path.stem)
+    out_sub = output_base / version / lang / safe_name
+    try:
+        out_sub.mkdir(parents=True, exist_ok=True)
+        unpack_fn(path, out_sub)
+        msg = f"{version}/{lang} → {out_sub.relative_to(output_base)}"
+        if verbose:
+            _log(f"[unpack] {msg}")
+        return (True, msg)
+    except Exception as e:
+        if verbose:
+            _log(f"[unpack] skip {path}: {e}")
+        return (False, str(e))
+
+
+def run_unpack_only(
+    source_dirs_with_versions: List[Tuple[Union[Path, str], str]],
+    output_dir: Union[Path, str],
+    languages: Optional[List[str]] = None,
+    max_workers: int = 4,
+    verbose: bool = True,
+) -> int:
+    """
+    Only unpack .hbk files into output_dir (no build-docs, no indexing).
+    Structure: output_dir / version / language / safe_stem / (unpacked files).
+    Returns number of .hbk archives unpacked.
+    """
+    from .unpack import unpack_hbk
+
+    output_base = Path(output_dir).resolve()
+    pairs = [(Path(p).resolve(), v) for p, v in source_dirs_with_versions]
+    tasks = collect_hbk_tasks(pairs, languages)
+    if not tasks:
+        return 0
+    count = 0
+    if max_workers <= 1:
+        for path, version, lang in tasks:
+            ok, _ = _unpack_one(path, version, lang, output_base, unpack_hbk, verbose)
+            if ok:
+                count += 1
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futs = [
+                executor.submit(_unpack_one, path, version, lang, output_base, unpack_hbk, verbose)
+                for path, version, lang in tasks
+            ]
+            for fut in as_completed(futs):
+                ok, _ = fut.result()
+                if ok:
+                    count += 1
+    return count
+
+
 def discover_version_dirs(base_path: Union[Path, str]) -> List[Tuple[Path, str]]:
     """
     Сканировать базовый каталог: каждая прямая подпапка = версия 1С.
