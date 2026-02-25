@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 .venv/
+.venv_lock/
 venv/
 ENV/
 *.egg-info/
@@ -23,6 +24,10 @@ build/
 htmlcov/
 .pytest_cache/
 .tox/
+
+# Local env / secrets (do not commit)
+.env
+.env.*
 
 # Data / artifacts (do not commit)
 data/

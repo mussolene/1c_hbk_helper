@@ -8,6 +8,13 @@
 
 Справка 1С: распаковка .hbk (7z), конвертация в Markdown, индексация в Qdrant, MCP-сервер для поиска и чтения справки.
 
+## Безопасность
+
+- **Веб (serve)** и **MCP по HTTP** не имеют встроенной аутентификации. Предназначены для использования только в доверенной среде (localhost, VPN, внутренняя сеть).
+- Не выставляйте порты 5000 (Flask) и 5050 (MCP) в интернет без обратного прокси с аутентификацией (например nginx + Basic Auth или API key).
+- Секреты и пароли задавайте только через переменные окружения, не храните в коде или в репозитории.
+- CLI (аргументы `--sources-file`, пути к каталогам) предназначен для доверенного запуска; не передавайте недоверенный ввод в аргументы.
+
 ## Требования
 
 - Python 3.9+ (для MCP с fastmcp — 3.10+)
@@ -37,7 +44,26 @@ pip install -e ".[dev]"
 | **`serve <directory>`** | Веб-просмотр справки (Flask) |
 | **`mcp <directory>`** | MCP-сервер (stdio/HTTP; нужен fastmcp) |
 
-Переменные окружения: `QDRANT_HOST`, `QDRANT_PORT`, `HELP_PATH`, `PORT`, `MCP_TRANSPORT`, `HELP_SOURCE_BASE`, `HELP_LANGUAGES`, `HELP_INGEST_TEMP`.
+Переменные окружения (подробнее — см. таблицу ниже): `QDRANT_HOST`, `QDRANT_PORT`, `QDRANT_COLLECTION`, `HELP_PATH`, `HELP_SOURCE_BASE`, `HELP_SOURCES_DIR`, `HELP_SOURCE_DIRS`, `HELP_LANGUAGES`, `HELP_INGEST_TEMP`, `INGEST_FAILED_LOG`, `MCP_TRANSPORT`, `MCP_HOST`, `MCP_PORT`, `MCP_PATH`, `PORT`.
+
+| Переменная | Описание | Пример / по умолчанию |
+|------------|----------|------------------------|
+| `QDRANT_HOST` | Хост Qdrant | `localhost` |
+| `QDRANT_PORT` | Порт Qdrant | `6333` |
+| `QDRANT_COLLECTION` | Имя коллекции в Qdrant | `onec_help` |
+| `HELP_PATH` | Базовый каталог справки (для MCP/serve) | `/data` |
+| `HELP_SOURCE_BASE` | Корень каталогов с версиями 1С (ingest) | — |
+| `HELP_SOURCES_DIR` | То же, альтернативное имя | — |
+| `HELP_SOURCE_DIRS` | Список путей через запятую (ingest) | — |
+| `HELP_LANGUAGES` | Языки справки (ingest) | `ru` |
+| `HELP_INGEST_TEMP` | Временный каталог для ingest | `/tmp/help_ingest` |
+| `INGEST_FAILED_LOG` | Файл для списка неудачных .hbk | — |
+| `MCP_TRANSPORT` | Транспорт MCP: `stdio` или `http` | `stdio` |
+| `MCP_HOST` | Хост для MCP HTTP | `127.0.0.1` |
+| `MCP_PORT` | Порт для MCP HTTP | `5050` |
+| `MCP_PATH` | URL-путь эндпоинта MCP | `/mcp` |
+| `PORT` | Порт веб-сервера (serve) | `5000` |
+| `HELP_SERVE_ALLOWED_DIRS` | Список путей через запятую (serve): разрешённые базовые каталоги для формы; если задан, ввод вне списка отклоняется | — |
 
 ## Запуск из коробки (Docker Compose)
 
@@ -58,18 +84,15 @@ docker compose up -d
 # По расписанию: в контейнере mcp запущен cron — раз в сутки в 3:00 переиндексация из /opt/1cv8
 ```
 
-### Контейнер только для распаковки
+### Только распаковка .hbk
 
-Чтобы **только распаковать** .hbk в свою директорию (без индексации), используйте сервис **unpack** вручную:
+Чтобы **только распаковать** .hbk в свою директорию (без индексации и MCP), используйте тот же образ **mcp** с другой командой:
 
 ```bash
-# Смонтировать каталог с 1С и папку для результата; распаковать все .hbk в неё
 docker compose run --rm \
   -v /opt/1cv8:/input:ro \
   -v $(pwd)/unpacked:/output \
-  -e HELP_SOURCE_BASE=/input \
-  -e HELP_LANGUAGES=ru \
-  unpack
+  mcp python -m onec_help unpack-dir /input -o /output -l ru
 ```
 
 Структура выхода: `output/<версия>/<язык>/<имя_архива>/` (например `unpacked/8.3.27.1859/ru/1cv8_ru/`). Только распаковка, конвертация в Markdown и индексация не выполняются.
@@ -86,7 +109,7 @@ python -m onec_help unpack-dir /opt/1cv8 -o ./unpacked -l ru
 
 **Из коробки** монтируется `/opt/1cv8` (только чтение). Ingest просматривает подпапки (`8.3.27.1859`, `8.3.27.1719`) и считает каждую версией 1С. Язык по имени файла (`*_ru.hbk` и т.д.): по умолчанию `HELP_LANGUAGES=ru`.
 
-- **При старте контейнера:** если смонтирован `/opt/1cv8`, ingest один раз запускается **в фоне** (логи: `docker compose exec mcp tail -f /var/log/ingest.log`).
+- **При старте контейнера:** если смонтирован `/opt/1cv8`, ingest один раз запускается **в фоне** (логи: `docker compose exec mcp tail -f /app/var/log/ingest.log`).
 - **Вручную:** `docker compose exec mcp python -m onec_help ingest`
 - **По расписанию:** cron в контейнере mcp — раз в сутки в 3:00.
 
@@ -103,8 +126,8 @@ docker compose exec mcp python -m onec_help ingest --max-tasks 1  # ограни
 **Таймаут:** полная индексация может занимать 15–60 минут. Запуск в фоне:
 
 ```bash
-docker compose exec -d mcp sh -c 'python -m onec_help ingest >> /var/log/ingest.log 2>&1'
-docker compose exec mcp tail -f /var/log/ingest.log
+docker compose exec -d mcp sh -c 'python -m onec_help ingest >> /app/var/log/ingest.log 2>&1'
+docker compose exec mcp tail -f /app/var/log/ingest.log
 ```
 
 ### Один контейнер без Compose

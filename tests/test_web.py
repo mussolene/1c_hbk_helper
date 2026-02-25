@@ -1,11 +1,12 @@
 """Tests for web module."""
 
+import os
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from onec_help.web import app
+from onec_help.web import _allowed_base_dirs, _directory_allowed, app
 
 
 @pytest.fixture
@@ -76,3 +77,80 @@ def test_download_with_dir(client, help_sample_dir: Path) -> None:
     app.config["BASE_DIR"] = str(help_sample_dir)
     r = client.get("/download/field626.html")
     assert r.status_code == 200
+
+
+def test_security_headers_present(client) -> None:
+    """Response includes security headers from after_request."""
+    r = client.get("/ready")
+    assert r.headers.get("X-Content-Type-Options") == "nosniff"
+    assert r.headers.get("X-Frame-Options") == "DENY"
+    assert "Content-Security-Policy" in r.headers
+
+
+def test_allowed_base_dirs_empty() -> None:
+    """When HELP_SERVE_ALLOWED_DIRS is unset or empty, _allowed_base_dirs returns empty list."""
+    with patch.dict(os.environ, {"HELP_SERVE_ALLOWED_DIRS": ""}, clear=False):
+        assert _allowed_base_dirs() == []
+
+
+def test_allowed_base_dirs_from_env(tmp_path: Path) -> None:
+    """When HELP_SERVE_ALLOWED_DIRS is set, returns resolved paths."""
+    with patch.dict(os.environ, {"HELP_SERVE_ALLOWED_DIRS": str(tmp_path)}):
+        result = _allowed_base_dirs()
+    assert len(result) == 1
+    assert result[0] == tmp_path.resolve()
+
+
+def test_directory_allowed_no_restriction(tmp_path: Path) -> None:
+    """When no allowed dirs set, any existing directory is allowed."""
+    with patch.dict(os.environ, {}, clear=False):
+        if "HELP_SERVE_ALLOWED_DIRS" in os.environ:
+            del os.environ["HELP_SERVE_ALLOWED_DIRS"]
+    assert _directory_allowed(str(tmp_path)) is True
+
+
+def test_directory_allowed_inside_list(tmp_path: Path, help_sample_dir: Path) -> None:
+    """Directory under allowed base is allowed."""
+    with patch.dict(os.environ, {"HELP_SERVE_ALLOWED_DIRS": str(tmp_path)}):
+        assert _directory_allowed(str(help_sample_dir)) is False
+    with patch.dict(os.environ, {"HELP_SERVE_ALLOWED_DIRS": str(help_sample_dir.parent)}):
+        assert _directory_allowed(str(help_sample_dir)) is True
+
+
+def test_directory_allowed_resolve_error(tmp_path: Path) -> None:
+    """When Path(directory).resolve() raises, _directory_allowed returns False."""
+    allowed_dir = tmp_path / "allowed"
+    allowed_dir.mkdir()
+    with patch.dict(os.environ, {"HELP_SERVE_ALLOWED_DIRS": str(allowed_dir)}):
+        with patch("onec_help.web.Path") as MockPath:
+            from pathlib import Path as RealPath
+
+            def path_side_effect(p):
+                if p == "/nonexistent_bad_path":
+                    m = MagicMock()
+                    m.resolve.side_effect = OSError("resolve failed")
+                    return m
+                return RealPath(p)
+
+            MockPath.side_effect = path_side_effect
+            assert _directory_allowed("/nonexistent_bad_path") is False
+
+
+def test_index_post_directory_not_in_allowed_list(
+    client, help_sample_dir: Path, tmp_path: Path
+) -> None:
+    """POST with directory outside HELP_SERVE_ALLOWED_DIRS returns error."""
+    other = tmp_path / "other"
+    other.mkdir()
+    with patch.dict(os.environ, {"HELP_SERVE_ALLOWED_DIRS": str(other)}):
+        r = client.post("/", data={"directory": str(help_sample_dir)})
+    assert r.status_code == 200
+    assert b"allowed" in r.data or b"HELP_SERVE" in r.data
+
+
+def test_index_post_directory_in_allowed_list(client, help_sample_dir: Path) -> None:
+    """POST with directory inside HELP_SERVE_ALLOWED_DIRS succeeds."""
+    with patch.dict(os.environ, {"HELP_SERVE_ALLOWED_DIRS": str(help_sample_dir.parent)}):
+        r = client.post("/", data={"directory": str(help_sample_dir)})
+    assert r.status_code == 200
+    assert b"Invalid" not in r.data or b"tree" in r.data

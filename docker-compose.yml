@@ -6,14 +6,17 @@
 #
 # База Qdrant: ./data/qdrant (в проекте, в .gitignore) — при перезапуске не теряется.
 #
-# Контейнер только для распаковки: сервис unpack. Запуск вручную (не стартует с up):
-#   docker compose run --rm -v /path/to/1cv8:/input:ro -v $(pwd)/unpacked:/output -e HELP_SOURCE_BASE=/input unpack
+# Только распаковка .hbk (тот же образ mcp, другая команда):
+#   docker compose run --rm -v /path/to/1cv8:/input:ro -v $(pwd)/unpacked:/output mcp python -m onec_help unpack-dir /input -o /output -l ru
+#
+# Переменные окружения берутся из .env в корне проекта (скопируйте env.example в .env).
+# Значения ниже — подстановка ${VAR:-default}; при отсутствии .env используются defaults.
 
 services:
   qdrant:
     image: qdrant/qdrant:v1.12.0
     ports:
-      - "6333:6333"
+      - "${QDRANT_PORT:-6333}:6333"
     volumes:
       # База Qdrant в папке проекта — не теряется при перезапуске и видна в репозитории
       - ./data/qdrant:/qdrant/storage
@@ -27,18 +30,19 @@ services:
   mcp:
     build: .
     ports:
-      - "5050:5050"
+      - "${MCP_PORT:-5050}:5050"
     environment:
-      QDRANT_HOST: qdrant
-      QDRANT_PORT: "6333"
-      MCP_TRANSPORT: "http"
-      MCP_HOST: "0.0.0.0"
+      QDRANT_HOST: ${QDRANT_HOST:-qdrant}
+      QDRANT_PORT: ${QDRANT_PORT:-6333}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-onec_help}
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-http}
+      MCP_HOST: ${MCP_HOST:-0.0.0.0}
       MCP_PORT: "5050"
-      MCP_PATH: "/mcp"
-      HELP_SOURCE_BASE: /opt/1cv8
-      HELP_LANGUAGES: ru
-      # Optional: write list of failed .hbk (unpack/build errors) to this file
-      INGEST_FAILED_LOG: /var/log/ingest_failed.log
+      MCP_PATH: ${MCP_PATH:-/mcp}
+      HELP_SOURCE_BASE: ${HELP_SOURCE_BASE:-/opt/1cv8}
+      HELP_LANGUAGES: ${HELP_LANGUAGES:-ru}
+      HELP_INGEST_TEMP: ${HELP_INGEST_TEMP:-/tmp/help_ingest}
+      INGEST_FAILED_LOG: ${INGEST_FAILED_LOG:-/var/log/ingest_failed.log}
     volumes:
       - /opt/1cv8:/opt/1cv8:ro
     command: ["python", "-m", "onec_help", "mcp", "/data", "--transport", "http", "--host", "0.0.0.0", "--port", "5050"]
@@ -51,22 +55,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-
-  # Контейнер только для распаковки .hbk в указанную директорию (без индексации и MCP).
-  # Запуск: docker compose run --rm -v /opt/1cv8:/input:ro -v ./unpacked:/output unpack
-  # Или с переменной: HELP_SOURCE_BASE=/input, выход в /output.
-  unpack:
-    build: .
-    environment:
-      HELP_SOURCE_BASE: /input
-      HELP_LANGUAGES: ru
-    volumes:
-      - unpack_input:/input:ro
-      - unpack_output:/output
-    command: ["python", "-m", "onec_help", "unpack-dir", "/input", "-o", "/output"]
-    # Для разового запуска с хоста: смонтируйте свои каталоги:
-    # docker compose run --rm -v /opt/1cv8:/input:ro -v $(pwd)/unpacked:/output unpack
-
-volumes:
-  unpack_input:
-  unpack_output:

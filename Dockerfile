@@ -4,19 +4,25 @@ FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     p7zip-full \
     cron \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
+
+# Non-root user for app and cron jobs
+RUN groupadd -r app --gid=1000 && useradd -r -g app --uid=1000 --create-home app
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 
 COPY pyproject.toml .
 COPY src/ src/
 COPY templates/ templates/
 COPY entrypoint.sh crontab ./
 RUN chmod +x /app/entrypoint.sh \
-    && pip install --no-cache-dir -e .
+    && pip install --no-cache-dir -e ".[mcp]" \
+    && mkdir -p /app/var/log \
+    && chown -R app:app /app
 
 ENV PORT=5000
 EXPOSE 5000
@@ -25,8 +31,7 @@ EXPOSE 5000
 ENV HELP_PATH=/data
 VOLUME ["/data"]
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/ready')" || exit 1
+# Healthcheck removed from image — set per-service in docker-compose (Flask :5000 vs MCP :5050)
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python", "-m", "onec_help", "serve", "/data"]

@@ -43,11 +43,18 @@ def cmd_build_docs(args: argparse.Namespace) -> int:
 
 def cmd_serve(args: argparse.Namespace) -> int:
     """Run Flask web viewer."""
+    import logging
+
     from .web import app
 
     port = int(_env_path("PORT", "5000") or "5000")
     app.config["BASE_DIR"] = args.directory
-    app.run(host="0.0.0.0", port=port, debug=args.debug)
+    use_debug = args.debug and os.environ.get("PRODUCTION") != "1"
+    if args.debug and not use_debug:
+        logging.warning("PRODUCTION=1 is set; debug mode disabled for security.")
+    elif use_debug:
+        logging.warning("Running with debug=True. Do not use in production (exposes tracebacks).")
+    app.run(host="0.0.0.0", port=port, debug=use_debug)
     return 0
 
 
@@ -174,6 +181,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             else:
                 sources.append((s, Path(s).name or "default"))
     if not sources and getattr(args, "sources_file", None):
+        # sources_file path is from CLI args; CLI is intended for trusted operator use only
         for line in Path(args.sources_file).read_text(encoding="utf-8").strip().splitlines():
             line = line.strip()
             if not line or line.startswith("#"):

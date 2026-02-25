@@ -22,8 +22,8 @@
 - Данные справки: монтируется `/opt/1cv8` в контейнер mcp, подпапки = версии 1С. Индексация вручную: `docker compose exec mcp python -m onec_help ingest`; по расписанию в mcp запущен cron (раз в сутки в 3:00). На Windows при монтировании `C:\Program Files\1cv8` учтите подпапку `bin` — поиск .hbk рекурсивный.
 - `docker compose up -d` — поднимает Qdrant и MCP-сервер (mcp; в нём же cron для индексации).
 - Порты: 5050 (MCP, streamable-http), 6333 (Qdrant).
-- **Только распаковка:** сервис `unpack` — распаковывает все .hbk в смонтированную директорию без индексации. Запуск вручную. Пример:  
-  `docker compose run --rm -v /opt/1cv8:/input:ro -v $(pwd)/unpacked:/output -e HELP_SOURCE_BASE=/input unpack`
+- **Только распаковка:** тот же образ `mcp`, команда `unpack-dir`. Запуск вручную:  
+  `docker compose run --rm -v /opt/1cv8:/input:ro -v $(pwd)/unpacked:/output mcp python -m onec_help unpack-dir /input -o /output -l ru`
 
 ## Подключение MCP к Cursor
 

@@ -46,6 +46,12 @@ def test_get_topic_by_path_missing(help_sample_dir: Path) -> None:
     assert get_topic_by_path(help_sample_dir, "nonexistent") == ""
 
 
+def test_get_topic_by_path_traversal_rejected(help_sample_dir: Path) -> None:
+    """Path traversal outside help_path returns empty string (no file read)."""
+    assert get_topic_by_path(help_sample_dir, "../../../etc/passwd") == ""
+    assert get_topic_by_path(help_sample_dir, "..") == ""
+
+
 @patch("onec_help.indexer.QdrantClient")
 def test_search_index(mock_client: MagicMock) -> None:
     mock_client.return_value.search.return_value = []

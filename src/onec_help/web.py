@@ -1,17 +1,46 @@
 """Flask web app for 1C Help viewer."""
 
 import logging
+import os
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from .tree import build_tree, get_html_content
 
+
+def _allowed_base_dirs():
+    """If HELP_SERVE_ALLOWED_DIRS is set (comma-separated), return list of resolved paths; else empty (no restriction)."""
+    raw = os.environ.get("HELP_SERVE_ALLOWED_DIRS", "").strip()
+    if not raw:
+        return []
+    return [Path(p.strip()).resolve() for p in raw.split(",") if p.strip()]
+
+
+def _directory_allowed(directory: str) -> bool:
+    allowed = _allowed_base_dirs()
+    if not allowed:
+        return True
+    try:
+        resolved = Path(directory).resolve()
+        return any(resolved == d or resolved.is_relative_to(d) for d in allowed)
+    except (ValueError, OSError):
+        return False
+
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, template_folder=Path(__file__).resolve().parent.parent.parent / "templates")
 app.config["BASE_DIR"] = None
+
+
+@app.after_request
+def _security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
+    return response
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -21,6 +50,10 @@ def index():
         directory = request.form.get("directory")
         if not directory or not Path(directory).is_dir():
             return render_template("index.html", error="Invalid directory path")
+        if not _directory_allowed(directory):
+            return render_template(
+                "index.html", error="Directory not in allowed list (HELP_SERVE_ALLOWED_DIRS)"
+            )
         app.config["BASE_DIR"] = directory
         tree_elements = build_tree(directory)
         import json

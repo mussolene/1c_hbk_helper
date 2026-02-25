@@ -25,6 +25,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      - name: Audit dependencies for vulnerabilities
+        run: |
+          pip install pip-audit
+          pip-audit
+
       - name: Run tests
         run: |
           PYTHONPATH=src python -m pytest tests -v --cov=src/onec_help --cov-report=xml --cov-report=term-missing --cov-fail-under=90

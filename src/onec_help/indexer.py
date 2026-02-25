@@ -408,9 +408,19 @@ def list_index_titles(
     return out[:limit]
 
 
+def _path_inside_base(path: Path, base: Path) -> bool:
+    """Return True if path resolves to a location under base (prevents path traversal)."""
+    try:
+        resolved = path.resolve()
+        base_resolved = base.resolve()
+        return resolved.is_relative_to(base_resolved) or resolved == base_resolved
+    except (ValueError, OSError):
+        return False
+
+
 def get_topic_by_path(help_path, topic_path) -> str:
     """Read topic content: .md first, then .html converted to Markdown."""
-    base = Path(help_path)
+    base = Path(help_path).resolve()
     topic_path = topic_path.lstrip("/")
     # Try as given, then .md, then .html
     candidates = [base / topic_path]
@@ -423,6 +433,8 @@ def get_topic_by_path(help_path, topic_path) -> str:
         candidates.append(base / f"{topic_path}.md")
         candidates.append(base / f"{topic_path}.html")
     for p in candidates:
+        if not _path_inside_base(p, base):
+            continue
         if p.exists() and p.is_file():
             if p.suffix == ".md":
                 return p.read_text(encoding="utf-8")

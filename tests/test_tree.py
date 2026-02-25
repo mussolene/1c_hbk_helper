@@ -1,8 +1,9 @@
 """Tests for tree module."""
 
 from pathlib import Path
+from unittest.mock import patch
 
-from onec_help.tree import build_tree, get_html_content
+from onec_help.tree import _path_inside_base, build_tree, get_html_content
 
 
 def test_build_tree(help_sample_dir: Path) -> None:
@@ -31,6 +32,26 @@ def test_get_html_content_non_html_suffix(tmp_path: Path) -> None:
     (tmp_path / "readme.txt").write_text("text")
     content = get_html_content("readme.txt", tmp_path)
     assert "No content" in content
+
+
+def test_path_inside_base_resolve_raises_returns_false(tmp_path: Path) -> None:
+    """When resolve() raises ValueError/OSError, _path_inside_base returns False."""
+    base = tmp_path / "base"
+    base.mkdir()
+    path = base / "file.html"
+    with patch.object(Path, "resolve", side_effect=OSError("resolve failed")):
+        assert _path_inside_base(path, base) is False
+
+
+def test_get_html_content_path_traversal_rejected(tmp_path: Path) -> None:
+    """Path traversal (../) outside base_dir is rejected and returns safe default."""
+    (tmp_path / "valid.html").write_text("<html>valid</html>")
+    # Attempt to read from a path that escapes base
+    content = get_html_content("../../../etc/passwd", tmp_path)
+    assert "No content" in content
+    # Valid relative path still works
+    content_valid = get_html_content("valid.html", tmp_path)
+    assert "valid" in content_valid
 
 
 def test_build_tree_with_html_and_same_name_folder(tmp_path: Path) -> None:
