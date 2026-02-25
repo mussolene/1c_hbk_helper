@@ -16,6 +16,7 @@ def _env_path(name: str, default=None):
 def cmd_unpack(args: argparse.Namespace) -> int:
     """Unpack .hbk with 7z."""
     from .unpack import unpack_hbk
+
     try:
         unpack_hbk(args.archive, args.output_dir)
         print(f"Unpacked to {args.output_dir}")
@@ -28,6 +29,7 @@ def cmd_unpack(args: argparse.Namespace) -> int:
 def cmd_build_docs(args: argparse.Namespace) -> int:
     """Generate Markdown from HTML in project dir."""
     from .html2md import build_docs
+
     out = args.output or Path(args.project_dir) / "docs_md"
     out = Path(out)
     try:
@@ -42,6 +44,7 @@ def cmd_build_docs(args: argparse.Namespace) -> int:
 def cmd_serve(args: argparse.Namespace) -> int:
     """Run Flask web viewer."""
     from .web import app
+
     port = int(_env_path("PORT", "5000") or "5000")
     app.config["BASE_DIR"] = args.directory
     app.run(host="0.0.0.0", port=port, debug=args.debug)
@@ -51,6 +54,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def cmd_build_index(args: argparse.Namespace) -> int:
     """Build Qdrant index from Markdown (or HTML) in directory."""
     from .indexer import build_index
+
     docs_dir = args.docs_dir or args.directory
     try:
         count = build_index(
@@ -70,6 +74,7 @@ def cmd_build_index(args: argparse.Namespace) -> int:
 def cmd_index_status(args: argparse.Namespace) -> int:
     """Print index status: points count, versions, languages."""
     from .indexer import get_index_status
+
     host = os.environ.get("QDRANT_HOST", "localhost")
     port = int(os.environ.get("QDRANT_PORT", "6333"))
     collection = os.environ.get("QDRANT_COLLECTION", "onec_help")
@@ -123,10 +128,15 @@ def cmd_unpack_dir(args: argparse.Namespace) -> int:
         if src and Path(src).is_dir():
             sources = [(src, Path(src).name or "default")]
     if not sources:
-        print("Error: no source directories. Set HELP_SOURCE_BASE or use --sources or pass source_dir", file=sys.stderr)
+        print(
+            "Error: no source directories. Set HELP_SOURCE_BASE or use --sources or pass source_dir",
+            file=sys.stderr,
+        )
         return 1
     raw_lang = getattr(args, "languages", None)
-    languages = parse_languages_env(raw_lang if raw_lang is not None and raw_lang.strip() else os.environ.get("HELP_LANGUAGES"))
+    languages = parse_languages_env(
+        raw_lang if raw_lang is not None and raw_lang.strip() else os.environ.get("HELP_LANGUAGES")
+    )
     out = Path(args.output_dir or "./unpacked").resolve()
     try:
         n = run_unpack_only(
@@ -181,7 +191,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         if not sources:
             sources = parse_source_dirs_env(os.environ.get("HELP_SOURCE_DIRS"))
     if not sources:
-        print("Error: no source directories. Set HELP_SOURCE_BASE (path to folder with version subdirs) or use --sources / --sources-file", file=sys.stderr)
+        print(
+            "Error: no source directories. Set HELP_SOURCE_BASE (path to folder with version subdirs) or use --sources / --sources-file",
+            file=sys.stderr,
+        )
         return 1
     raw_lang = getattr(args, "languages", None)
     if raw_lang is not None:
@@ -221,32 +234,64 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     host = getattr(args, "host", None) or os.environ.get("MCP_HOST", "127.0.0.1")
     port = int(getattr(args, "port", None) or os.environ.get("MCP_PORT", "5050"))
     path = getattr(args, "path", None) or os.environ.get("MCP_PATH", "/mcp")
-    run_mcp(
-        help_path=Path(args.directory),
-        transport=transport,
-        host=host,
-        port=port,
-        path=path,
-    )
+    try:
+        run_mcp(
+            help_path=Path(args.directory),
+            transport=transport,
+            host=host,
+            port=port,
+            path=path,
+        )
+    except RuntimeError as e:
+        if "fastmcp" in str(e).lower():
+            print("MCP requires fastmcp (Python 3.10+): pip install fastmcp", file=sys.stderr)
+            return 1
+        raise
     return 0
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="onec_help", description="1C Help: unpack, docs, index, MCP")
+    parser = argparse.ArgumentParser(
+        prog="onec_help", description="1C Help: unpack, docs, index, MCP"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     # unpack
     p_unpack = sub.add_parser("unpack", help="Unpack .hbk with 7z")
     p_unpack.add_argument("archive", type=str, help="Path to .hbk file")
-    p_unpack.add_argument("--output-dir", "-o", type=str, default="./unpacked", help="Output directory")
+    p_unpack.add_argument(
+        "--output-dir", "-o", type=str, default="./unpacked", help="Output directory"
+    )
     p_unpack.set_defaults(func=cmd_unpack)
 
     # unpack-dir — only unpack all .hbk into a directory (no build-docs, no index)
-    p_unpack_dir = sub.add_parser("unpack-dir", help="Unpack all .hbk from source tree into output dir (no indexing)")
-    p_unpack_dir.add_argument("source_dir", type=str, nargs="?", default="", help="Root dir with version subdirs (or set HELP_SOURCE_BASE)")
-    p_unpack_dir.add_argument("--output-dir", "-o", type=str, default="./unpacked", help="Output directory")
-    p_unpack_dir.add_argument("--sources", "-s", type=str, nargs="*", help="path:version pairs (overrides source_dir / HELP_SOURCE_BASE)")
-    p_unpack_dir.add_argument("--languages", "-l", type=str, default=None, help="Comma-separated, e.g. ru (default: HELP_LANGUAGES or all)")
+    p_unpack_dir = sub.add_parser(
+        "unpack-dir", help="Unpack all .hbk from source tree into output dir (no indexing)"
+    )
+    p_unpack_dir.add_argument(
+        "source_dir",
+        type=str,
+        nargs="?",
+        default="",
+        help="Root dir with version subdirs (or set HELP_SOURCE_BASE)",
+    )
+    p_unpack_dir.add_argument(
+        "--output-dir", "-o", type=str, default="./unpacked", help="Output directory"
+    )
+    p_unpack_dir.add_argument(
+        "--sources",
+        "-s",
+        type=str,
+        nargs="*",
+        help="path:version pairs (overrides source_dir / HELP_SOURCE_BASE)",
+    )
+    p_unpack_dir.add_argument(
+        "--languages",
+        "-l",
+        type=str,
+        default=None,
+        help="Comma-separated, e.g. ru (default: HELP_LANGUAGES or all)",
+    )
     p_unpack_dir.add_argument("--workers", "-w", type=int, default=4, help="Parallel workers")
     p_unpack_dir.add_argument("--quiet", "-q", action="store_true", help="Less output")
     p_unpack_dir.set_defaults(func=cmd_unpack_dir)
@@ -254,7 +299,9 @@ def main() -> int:
     # build-docs
     p_docs = sub.add_parser("build-docs", help="Generate Markdown from HTML")
     p_docs.add_argument("project_dir", type=str, help="Directory with HTML files")
-    p_docs.add_argument("--output", "-o", type=str, help="Output directory (default: project_dir/docs_md)")
+    p_docs.add_argument(
+        "--output", "-o", type=str, help="Output directory (default: project_dir/docs_md)"
+    )
     p_docs.set_defaults(func=cmd_build_docs)
 
     # serve
@@ -267,32 +314,93 @@ def main() -> int:
     p_idx = sub.add_parser("build-index", help="Build Qdrant index from Markdown/docs (recursive)")
     p_idx.add_argument("directory", type=str, help="Directory with .md or HTML")
     p_idx.add_argument("--docs-dir", type=str, help="Alias for directory (optional)")
-    p_idx.add_argument("--incremental", action="store_true", help="Add/update only, do not recreate collection (new files in folder will be indexed)")
+    p_idx.add_argument(
+        "--incremental",
+        action="store_true",
+        help="Add/update only, do not recreate collection (new files in folder will be indexed)",
+    )
     p_idx.set_defaults(func=cmd_build_index)
 
     # index-status
-    p_status = sub.add_parser("index-status", help="Show 1C help index status (topic count, versions, languages)")
+    p_status = sub.add_parser(
+        "index-status", help="Show 1C help index status (topic count, versions, languages)"
+    )
     p_status.set_defaults(func=cmd_index_status)
 
     # ingest
-    p_ingest = sub.add_parser("ingest", help="Ingest .hbk from multiple read-only dirs (temp unpack, index, cleanup)")
-    p_ingest.add_argument("--sources", "-s", type=str, nargs="*", help="Alternating path:version (or set HELP_SOURCE_BASE to scan a folder of version subdirs)")
+    p_ingest = sub.add_parser(
+        "ingest", help="Ingest .hbk from multiple read-only dirs (temp unpack, index, cleanup)"
+    )
+    p_ingest.add_argument(
+        "--sources",
+        "-s",
+        type=str,
+        nargs="*",
+        help="Alternating path:version (or set HELP_SOURCE_BASE to scan a folder of version subdirs)",
+    )
     p_ingest.add_argument("--sources-file", type=str, help="File with lines: path or path:version")
-    p_ingest.add_argument("--languages", "-l", type=str, default=None, help="Comma-separated, e.g. ru or ru,en; default from HELP_LANGUAGES; empty=all")
-    p_ingest.add_argument("--temp-base", type=str, default=None, help="Temp dir in container (default HELP_INGEST_TEMP or /tmp/help_ingest)")
-    p_ingest.add_argument("--workers", "-w", type=int, default=4, help="Parallel workers for unpack/build (default 4)")
-    p_ingest.add_argument("--max-tasks", "-n", type=int, default=None, help="Process only first N .hbk files (avoids timeout; run multiple times for full index)")
-    p_ingest.add_argument("--quiet", "-q", action="store_true", help="No progress output (default: print progress to stderr)")
-    p_ingest.add_argument("--dry-run", action="store_true", help="Only report how many .hbk tasks would be processed (no unpack/index)")
-    p_ingest.add_argument("--index-batch-size", type=int, default=500, metavar="N", help="Index N files per upsert (default 500); smaller = more progress output, less memory")
+    p_ingest.add_argument(
+        "--languages",
+        "-l",
+        type=str,
+        default=None,
+        help="Comma-separated, e.g. ru or ru,en; default from HELP_LANGUAGES; empty=all",
+    )
+    p_ingest.add_argument(
+        "--temp-base",
+        type=str,
+        default=None,
+        help="Temp dir in container (default HELP_INGEST_TEMP or /tmp/help_ingest)",
+    )
+    p_ingest.add_argument(
+        "--workers", "-w", type=int, default=4, help="Parallel workers for unpack/build (default 4)"
+    )
+    p_ingest.add_argument(
+        "--max-tasks",
+        "-n",
+        type=int,
+        default=None,
+        help="Process only first N .hbk files (avoids timeout; run multiple times for full index)",
+    )
+    p_ingest.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="No progress output (default: print progress to stderr)",
+    )
+    p_ingest.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Only report how many .hbk tasks would be processed (no unpack/index)",
+    )
+    p_ingest.add_argument(
+        "--index-batch-size",
+        type=int,
+        default=500,
+        metavar="N",
+        help="Index N files per upsert (default 500); smaller = more progress output, less memory",
+    )
     p_ingest.set_defaults(func=cmd_ingest)
 
     # mcp
     p_mcp = sub.add_parser("mcp", help="Run MCP server (stdio, sse, http, streamable-http)")
     p_mcp.add_argument("directory", type=str, help="Directory with help (.md or HTML)")
-    p_mcp.add_argument("--transport", "-t", type=str, default=None, help="Transport: stdio (default), sse, http, streamable-http")
-    p_mcp.add_argument("--host", type=str, default=None, help="Host for sse/http (default: 127.0.0.1). Use 0.0.0.0 in Docker.")
-    p_mcp.add_argument("--port", "-p", type=int, default=None, help="Port for sse/http (default: 5050)")
+    p_mcp.add_argument(
+        "--transport",
+        "-t",
+        type=str,
+        default=None,
+        help="Transport: stdio (default), sse, http, streamable-http",
+    )
+    p_mcp.add_argument(
+        "--host",
+        type=str,
+        default=None,
+        help="Host for sse/http (default: 127.0.0.1). Use 0.0.0.0 in Docker.",
+    )
+    p_mcp.add_argument(
+        "--port", "-p", type=int, default=None, help="Port for sse/http (default: 5050)"
+    )
     p_mcp.add_argument("--path", type=str, default=None, help="URL path (default: /mcp)")
     p_mcp.set_defaults(func=cmd_mcp)
 

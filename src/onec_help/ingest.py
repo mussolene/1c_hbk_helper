@@ -9,13 +9,14 @@ import os
 import re
 import shutil
 import sys
-from concurrent.futures import as_completed, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
 
 
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
+
 
 # Language: filename pattern like 1cv8_ru.hbk, shcntx_en.hbk
 LANG_PATTERN = re.compile(r"_([a-z]{2})\.hbk$", re.IGNORECASE)
@@ -137,14 +138,14 @@ def run_ingest(
     if dry_run:
         if verbose:
             _log(f"[ingest] DRY RUN: would process {len(tasks)} .hbk task(s)")
-            for i, (path, version, lang) in enumerate(tasks[: 25], 1):
+            for i, (path, version, lang) in enumerate(tasks[:25], 1):
                 _log(f"  {i}. {version}/{lang}  {path.name}")
             if len(tasks) > 25:
                 _log(f"  ... and {len(tasks) - 25} more")
         return 0
 
     if max_tasks is not None and max_tasks > 0:
-        tasks = tasks[: max_tasks]
+        tasks = tasks[:max_tasks]
         if verbose:
             _log(f"[ingest] Limiting to first {max_tasks} task(s)")
 
@@ -186,12 +187,16 @@ def run_ingest(
                 reason = (err_msg or "unknown").split("\n")[0].strip()[:200]
                 failed.append((path_hbk, version, language, err_msg or "unknown"))
                 if verbose:
-                    _log(f"[ingest] [{done}/{len(tasks)}] skip (unpack/build failed) {version}/{language} — {path_hbk}")
+                    _log(
+                        f"[ingest] [{done}/{len(tasks)}] skip (unpack/build failed) {version}/{language} — {path_hbk}"
+                    )
                     _log(f"[ingest]   reason: {reason}")
                 continue
             try:
                 if verbose:
-                    _log(f"[ingest] [{done}/{len(tasks)}] indexing {version}/{language} — {path_hbk}")
+                    _log(
+                        f"[ingest] [{done}/{len(tasks)}] indexing {version}/{language} — {path_hbk}"
+                    )
                 n = build_index(
                     docs_dir=md_dir,
                     qdrant_host=qdrant_host,
@@ -203,7 +208,9 @@ def run_ingest(
                 )
                 total_indexed += n
                 if verbose:
-                    _log(f"[ingest] [{done}/{len(tasks)}] indexed {n} points ({version}/{language}) — {path_hbk}, total={total_indexed}")
+                    _log(
+                        f"[ingest] [{done}/{len(tasks)}] indexed {n} points ({version}/{language}) — {path_hbk}, total={total_indexed}"
+                    )
             finally:
                 try:
                     shutil.rmtree(md_dir.parent)

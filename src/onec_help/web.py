@@ -24,6 +24,7 @@ def index():
         app.config["BASE_DIR"] = directory
         tree_elements = build_tree(directory)
         import json
+
         return render_template(
             "index.html",
             success=True,

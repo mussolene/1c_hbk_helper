@@ -1,4 +1,5 @@
 """Tests for categories module."""
+
 from pathlib import Path
 
 from onec_help.categories import (
@@ -32,7 +33,9 @@ def test_extract_html_title_missing() -> None:
 def test_extract_html_title_from_title_tag(tmp_path: Path) -> None:
     """When no h1, extract from <title>."""
     f = tmp_path / "page.html"
-    f.write_text("<html><head><title>Page Title Here</title></head><body></body></html>", encoding="utf-8")
+    f.write_text(
+        "<html><head><title>Page Title Here</title></head><body></body></html>", encoding="utf-8"
+    )
     assert extract_html_title(f) == "Page Title Here"
 
 

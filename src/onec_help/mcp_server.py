@@ -6,6 +6,7 @@ from typing import Any
 # Prefer fastmcp; fallback to mcp package
 try:
     from fastmcp import FastMCP
+
     _HAS_FASTMCP = True
 except ImportError:
     FastMCP = None  # type: ignore
@@ -17,6 +18,7 @@ _HELP_PATH = None  # Path | None
 def _get_help_path() -> Path:
     if _HELP_PATH is None:
         import os
+
         p = os.environ.get("HELP_PATH")
         if not p:
             raise RuntimeError("HELP_PATH not set")
@@ -26,26 +28,31 @@ def _get_help_path() -> Path:
 
 def _search(query: str, limit: int = 10) -> list[dict[str, Any]]:
     from .indexer import search_index
+
     return search_index(query, limit=limit)
 
 
 def _search_keyword(query: str, limit: int = 15) -> list[dict[str, Any]]:
     from .indexer import search_index_keyword
+
     return search_index_keyword(query, limit=limit)
 
 
 def _list_titles(limit: int = 100, path_prefix: str = "") -> list[dict[str, Any]]:
     from .indexer import list_index_titles
+
     return list_index_titles(limit=limit, path_prefix=path_prefix or "")
 
 
 def _index_status() -> dict[str, Any]:
     from .indexer import get_index_status
+
     return get_index_status()
 
 
 def _get_topic(topic_path: str) -> str:
     from .indexer import get_topic_content
+
     base = _get_help_path()
     return get_topic_content(base, topic_path)
 
@@ -106,7 +113,9 @@ def run_mcp(
         items = _list_titles(limit=limit, path_prefix=path_prefix)
         if not items:
             return "No topics in index or prefix filter too strict."
-        lines = [f"{i}. **{r.get('title', '')}** — `{r.get('path', '')}`" for i, r in enumerate(items, 1)]
+        lines = [
+            f"{i}. **{r.get('title', '')}** — `{r.get('path', '')}`" for i, r in enumerate(items, 1)
+        ]
         return "\n".join(lines)
 
     @mcp.tool()

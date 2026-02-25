@@ -9,8 +9,8 @@ from onec_help.cli import (
     _env_path,
     cmd_build_docs,
     cmd_build_index,
-    cmd_ingest,
     cmd_index_status,
+    cmd_ingest,
     cmd_unpack,
     cmd_unpack_dir,
     main,
@@ -21,6 +21,7 @@ def test_cmd_build_docs(help_sample_dir: Path, tmp_path: Path) -> None:
     class Args:
         project_dir = str(help_sample_dir)
         output = str(tmp_path / "out_md")
+
     assert cmd_build_docs(Args()) == 0
     assert (tmp_path / "out_md").exists()
 
@@ -28,9 +29,11 @@ def test_cmd_build_docs(help_sample_dir: Path, tmp_path: Path) -> None:
 @patch("onec_help.html2md.build_docs")
 def test_cmd_build_docs_error(mock_build_docs, tmp_path: Path) -> None:
     mock_build_docs.side_effect = RuntimeError("disk full")
+
     class Args:
         project_dir = str(tmp_path)
         output = str(tmp_path / "out_md")
+
     tmp_path.mkdir(exist_ok=True)
     assert cmd_build_docs(Args()) == 1
 
@@ -39,6 +42,7 @@ def test_cmd_unpack_fail() -> None:
     class Args:
         archive = "/nonexistent.hbk"
         output_dir = "/tmp/out"
+
     assert cmd_unpack(Args()) == 1
 
 
@@ -47,6 +51,7 @@ def test_cmd_unpack_success(mock_unpack, tmp_path: Path) -> None:
     class Args:
         archive = str(tmp_path / "fake.hbk")
         output_dir = str(tmp_path / "out")
+
     (tmp_path / "fake.hbk").write_bytes(b"x")
     assert cmd_unpack(Args()) == 0
     mock_unpack.assert_called_once()
@@ -55,9 +60,11 @@ def test_cmd_unpack_success(mock_unpack, tmp_path: Path) -> None:
 @patch("onec_help.indexer.build_index")
 def test_cmd_build_index(mock_build, help_sample_dir: Path) -> None:
     mock_build.return_value = 5
+
     class Args:
         directory = str(help_sample_dir)
         docs_dir = None
+
     with patch.dict("os.environ", {"QDRANT_HOST": "localhost", "QDRANT_PORT": "6333"}):
         assert cmd_build_index(Args()) == 0
 
@@ -65,9 +72,11 @@ def test_cmd_build_index(mock_build, help_sample_dir: Path) -> None:
 @patch("onec_help.indexer.build_index")
 def test_cmd_build_index_error(mock_build, help_sample_dir: Path) -> None:
     mock_build.side_effect = RuntimeError("Qdrant unavailable")
+
     class Args:
         directory = str(help_sample_dir)
         docs_dir = None
+
     with patch.dict("os.environ", {"QDRANT_HOST": "localhost", "QDRANT_PORT": "6333"}):
         assert cmd_build_index(Args()) == 1
 
@@ -91,7 +100,9 @@ def test_cmd_serve(mock_web_app, help_sample_dir: Path) -> None:
     class Args:
         directory = str(help_sample_dir)
         debug = False
+
     from onec_help.cli import cmd_serve
+
     mock_web_app.config = {}
     mock_web_app.run = lambda **kw: None
     assert cmd_serve(Args()) == 0
@@ -106,8 +117,10 @@ def test_cmd_index_status_exists(mock_status) -> None:
         "versions": ["8.3.27"],
         "languages": ["ru"],
     }
+
     class Args:
         pass
+
     with patch.dict("os.environ", {"QDRANT_HOST": "localhost", "QDRANT_PORT": "6333"}):
         assert cmd_index_status(Args()) == 0
 
@@ -115,22 +128,27 @@ def test_cmd_index_status_exists(mock_status) -> None:
 @patch("onec_help.indexer.get_index_status")
 def test_cmd_index_status_not_exists(mock_status) -> None:
     mock_status.return_value = {"exists": False}
+
     class Args:
         pass
+
     assert cmd_index_status(Args()) == 0
 
 
 @patch("onec_help.indexer.get_index_status")
 def test_cmd_index_status_error(mock_status) -> None:
     mock_status.return_value = {"error": "connection refused"}
+
     class Args:
         pass
+
     assert cmd_index_status(Args()) == 1
 
 
 @patch("onec_help.ingest.run_ingest")
 def test_cmd_ingest_with_sources_env(mock_run_ingest, tmp_path: Path) -> None:
     mock_run_ingest.return_value = 10
+
     class Args:
         sources = None
         sources_file = None
@@ -141,8 +159,12 @@ def test_cmd_ingest_with_sources_env(mock_run_ingest, tmp_path: Path) -> None:
         quiet = False
         dry_run = False
         index_batch_size = 500
+
     (tmp_path / "ver").mkdir()
-    with patch.dict("os.environ", {"HELP_SOURCE_BASE": str(tmp_path), "QDRANT_HOST": "localhost", "QDRANT_PORT": "6333"}):
+    with patch.dict(
+        "os.environ",
+        {"HELP_SOURCE_BASE": str(tmp_path), "QDRANT_HOST": "localhost", "QDRANT_PORT": "6333"},
+    ):
         with patch("onec_help.ingest.discover_version_dirs") as mock_disc:
             mock_disc.return_value = [(tmp_path / "ver", "ver")]
             assert cmd_ingest(Args()) == 0
@@ -152,6 +174,7 @@ def test_cmd_ingest_with_sources_env(mock_run_ingest, tmp_path: Path) -> None:
 @patch("onec_help.ingest.run_ingest")
 def test_cmd_ingest_sources_arg(mock_run_ingest) -> None:
     mock_run_ingest.return_value = 5
+
     class Args:
         sources = ["/path/to/1cv8:8.3"]
         sources_file = None
@@ -162,6 +185,7 @@ def test_cmd_ingest_sources_arg(mock_run_ingest) -> None:
         quiet = True
         dry_run = False
         index_batch_size = 500
+
     with patch.dict("os.environ", {"QDRANT_HOST": "localhost", "QDRANT_PORT": "6333"}, clear=False):
         assert cmd_ingest(Args()) == 0
     mock_run_ingest.assert_called_once()
@@ -189,6 +213,7 @@ def test_cmd_ingest_no_sources_returns_error() -> None:
         quiet = False
         dry_run = False
         index_batch_size = 500
+
     with patch.dict("os.environ", {}, clear=True):
         assert cmd_ingest(Args()) == 1
 
@@ -196,6 +221,7 @@ def test_cmd_ingest_no_sources_returns_error() -> None:
 @patch("onec_help.ingest.run_unpack_only")
 def test_cmd_unpack_dir_success(mock_run, tmp_path: Path) -> None:
     mock_run.return_value = 2
+
     class Args:
         source_dir = str(tmp_path)
         output_dir = str(tmp_path / "out")
@@ -203,6 +229,7 @@ def test_cmd_unpack_dir_success(mock_run, tmp_path: Path) -> None:
         languages = "ru"
         workers = 1
         quiet = True
+
     assert cmd_unpack_dir(Args()) == 0
     mock_run.assert_called_once()
 
@@ -212,6 +239,7 @@ def test_cmd_ingest_sources_file(mock_run, tmp_path: Path) -> None:
     mock_run.return_value = 3
     sf = tmp_path / "sources.txt"
     sf.write_text("/path/1:ver1\n/path/2:ver2\n", encoding="utf-8")
+
     class Args:
         sources = None
         sources_file = str(sf)
@@ -222,6 +250,7 @@ def test_cmd_ingest_sources_file(mock_run, tmp_path: Path) -> None:
         quiet = True
         dry_run = False
         index_batch_size = 500
+
     with patch.dict("os.environ", {"QDRANT_HOST": "localhost", "QDRANT_PORT": "6333"}, clear=False):
         assert cmd_ingest(Args()) == 0
     call_kw = mock_run.call_args[1]
@@ -231,6 +260,7 @@ def test_cmd_ingest_sources_file(mock_run, tmp_path: Path) -> None:
 @patch("onec_help.ingest.run_ingest")
 def test_cmd_ingest_exception(mock_run) -> None:
     mock_run.side_effect = RuntimeError("Qdrant down")
+
     class Args:
         sources = ["/x:v"]
         sources_file = None
@@ -241,25 +271,14 @@ def test_cmd_ingest_exception(mock_run) -> None:
         quiet = True
         dry_run = False
         index_batch_size = 500
+
     with patch.dict("os.environ", {"QDRANT_HOST": "localhost", "QDRANT_PORT": "6333"}, clear=False):
         assert cmd_ingest(Args()) == 1
 
 
 def test_cmd_mcp_import_error() -> None:
-    """When mcp_server import fails, cmd_mcp returns 1."""
-    import builtins
-    import sys
-
+    """When mcp_server import fails or run_mcp raises (no fastmcp), cmd_mcp returns 1."""
     from onec_help.cli import cmd_mcp
-
-    # Unload so that cmd_mcp's "from .mcp_server import run_mcp" actually calls __import__
-    sys.modules.pop("onec_help.mcp_server", None)
-    real_import = builtins.__import__
-
-    def raise_for_mcp(name, *args, **kwargs):
-        if name == "onec_help.mcp_server":
-            raise ImportError("No module named 'fastmcp'")
-        return real_import(name, *args, **kwargs)
 
     class Args:
         directory = "/tmp"
@@ -268,12 +287,10 @@ def test_cmd_mcp_import_error() -> None:
         port = None
         path = None
 
-    try:
-        with patch("builtins.__import__", side_effect=raise_for_mcp):
-            result = cmd_mcp(Args())
-        assert result == 1
-    finally:
-        sys.modules.pop("onec_help.mcp_server", None)
+    with patch("onec_help.mcp_server.run_mcp") as mock_run:
+        mock_run.side_effect = RuntimeError("fastmcp required: pip install fastmcp")
+        result = cmd_mcp(Args())
+    assert result == 1
 
 
 @patch("onec_help.indexer.get_index_status")
@@ -282,5 +299,6 @@ def test_main_index_status(mock_status) -> None:
     mock_status.return_value = {"exists": True, "points_count": 10, "collection": "onec_help"}
     with patch("sys.argv", ["onec_help", "index-status"]):
         from onec_help.cli import main
+
         assert main() == 0
     mock_status.assert_called_once()

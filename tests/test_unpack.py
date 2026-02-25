@@ -1,4 +1,5 @@
 """Tests for unpack module."""
+
 import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -57,7 +58,11 @@ def test_unpack_hbk_error_message(tmp_path: Path) -> None:
     out = tmp_path / "out"
     with patch("onec_help.unpack.subprocess.run") as run:
         run.return_value = MagicMock(returncode=2, stderr="Headers Error", stdout="")
-        run.side_effect = [MagicMock(returncode=2), MagicMock(returncode=2), MagicMock(returncode=1)]
+        run.side_effect = [
+            MagicMock(returncode=2),
+            MagicMock(returncode=2),
+            MagicMock(returncode=1),
+        ]
         with pytest.raises(RuntimeError) as exc_info:
             unpack_hbk(archive, out)
         msg = str(exc_info.value)

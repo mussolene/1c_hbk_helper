@@ -1,4 +1,5 @@
 """Tests for tree module."""
+
 from pathlib import Path
 
 from onec_help.tree import build_tree, get_html_content

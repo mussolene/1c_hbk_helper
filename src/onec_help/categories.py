@@ -56,27 +56,29 @@ def build_tree(
                 sub_structure = parse_content_file(sub_categories)
             else:
                 sub_structure = [
-                    f.name
-                    for f in full_path.iterdir()
-                    if f.suffix == ".html" or f.is_dir()
+                    f.name for f in full_path.iterdir() if f.suffix == ".html" or f.is_dir()
                 ]
-            tree.append({
-                "title": item,
-                "path": "",
-                "children": build_tree(
-                    base_dir,
-                    sub_structure,
-                    os.path.join(current_path, item),
-                ),
-            })
+            tree.append(
+                {
+                    "title": item,
+                    "path": "",
+                    "children": build_tree(
+                        base_dir,
+                        sub_structure,
+                        os.path.join(current_path, item),
+                    ),
+                }
+            )
         elif item.endswith(".html") and full_path.is_file():
             title = extract_html_title(full_path)
             rel_path = os.path.join(current_path, item).replace("\\", "/")
-            tree.append({
-                "title": title,
-                "path": rel_path,
-                "children": [],
-            })
+            tree.append(
+                {
+                    "title": title,
+                    "path": rel_path,
+                    "children": [],
+                }
+            )
     return tree
 
 

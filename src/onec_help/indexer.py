@@ -34,11 +34,13 @@ def _get_embedding(text: str) -> list[float]:
     """Produce embedding for text. Prefer sentence-transformers; fallback to simple placeholder."""
     try:
         from sentence_transformers import SentenceTransformer
+
         model = SentenceTransformer("all-MiniLM-L6-v2")
         return model.encode(text, convert_to_numpy=True).tolist()
     except ImportError:
         # Placeholder: deterministic pseudo-vector so tests/indexing work without the model
         import hashlib
+
         h = hashlib.sha256(text.encode()).digest()
         # Extend to VECTOR_SIZE by repeating
         return [(h[i % len(h)] - 128) / 128.0 for i in range(VECTOR_SIZE)]
@@ -47,6 +49,7 @@ def _get_embedding(text: str) -> list[float]:
 def _path_to_point_id(rel_path: str, version: str = "", language: str = "") -> int:
     """Stable integer id from path (and optional version/language) for incremental upsert."""
     import hashlib
+
     key = f"{version}|{language}|{rel_path}"
     h = hashlib.sha256(key.encode()).hexdigest()[:14]
     return int(h, 16) % (2**63)
@@ -75,9 +78,15 @@ def build_index(
     version = extra.get("version", "")
     language = extra.get("language", "")
 
-    def make_point(path: Path, rel_str: str, text: str, title: str, point_index: int) -> PointStruct:
+    def make_point(
+        path: Path, rel_str: str, text: str, title: str, point_index: int
+    ) -> PointStruct:
         vector = _get_embedding(text[:8000])
-        point_id = _path_to_point_id(rel_str, version=version, language=language) if incremental else point_index
+        point_id = (
+            _path_to_point_id(rel_str, version=version, language=language)
+            if incremental
+            else point_index
+        )
         payload = {"path": rel_str, "text": text[:50000], "title": title}
         payload.update(extra)
         return PointStruct(id=point_id, vector=vector, payload=payload)
@@ -110,7 +119,11 @@ def build_index(
                 if path.suffix == ".md":
                     text = path.read_text(encoding="utf-8")
                 else:
-                    text = html_to_md_content(path) if path.suffix == ".html" or not path.suffix else ""
+                    text = (
+                        html_to_md_content(path)
+                        if path.suffix == ".html" or not path.suffix
+                        else ""
+                    )
                     if not text:
                         try:
                             text = path.read_text(encoding="utf-8", errors="ignore")[:8000]
@@ -120,7 +133,9 @@ def build_index(
                     continue
                 rel = path.relative_to(docs_dir)
                 rel_str = str(rel).replace("\\", "/")
-                title = text.split("\n")[0].strip().lstrip("#").strip() or (path.stem if path.suffix else path.name)
+                title = text.split("\n")[0].strip().lstrip("#").strip() or (
+                    path.stem if path.suffix else path.name
+                )
                 points.append(make_point(path, rel_str, text, title, total + len(points)))
             except Exception:
                 continue
@@ -279,7 +294,11 @@ def get_topic_from_index(
         for point in res or []:
             payload = getattr(point, "payload", None) or {}
             p = (payload.get("path") or "").replace("\\", "/")
-            if p == topic_path_norm or p.endswith("/" + topic_path_norm) or p.endswith(topic_path_norm):
+            if (
+                p == topic_path_norm
+                or p.endswith("/" + topic_path_norm)
+                or p.endswith(topic_path_norm)
+            ):
                 text = payload.get("text") or ""
                 if text:
                     return text
@@ -330,12 +349,14 @@ def search_index_keyword(
             text = (payload.get("text") or "").lower()
             if q_lower in title or q_lower in text:
                 seen_paths.add(path)
-                out.append({
-                    "path": path,
-                    "title": payload.get("title", ""),
-                    "text": (payload.get("text") or "")[:500],
-                    "score": None,
-                })
+                out.append(
+                    {
+                        "path": path,
+                        "title": payload.get("title", ""),
+                        "text": (payload.get("text") or "")[:500],
+                        "score": None,
+                    }
+                )
                 if len(out) >= limit:
                     break
         if next_offset is None:
@@ -407,6 +428,7 @@ def get_topic_by_path(help_path, topic_path) -> str:
                 return p.read_text(encoding="utf-8")
             if p.suffix == ".html":
                 from .html2md import html_to_md_content
+
                 return html_to_md_content(p)
     return ""
 

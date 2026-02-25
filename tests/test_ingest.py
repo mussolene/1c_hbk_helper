@@ -1,4 +1,5 @@
 """Tests for ingest module: collect tasks, discover versions, parse env, run_ingest (dry_run / empty)."""
+
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -286,7 +287,9 @@ def test_run_ingest_integration_mock(
     md_dir = tmp_path / "temp" / "v" / "ru" / "1cv8_ru" / "md"
     md_dir.mkdir(parents=True)
     (md_dir / "one.md").write_text("# One\n\nBody.", encoding="utf-8")
-    mock_build_docs.side_effect = lambda src, out: (out / "one.md").write_text("# One\n\nBody.", encoding="utf-8")
+    mock_build_docs.side_effect = lambda src, out: (out / "one.md").write_text(
+        "# One\n\nBody.", encoding="utf-8"
+    )
 
     mock_build_index.return_value = 1
     mock_qdrant.return_value.collection_exists.return_value = False

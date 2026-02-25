@@ -31,7 +31,7 @@ def _try_zipfile_from_offset(
             f.seek(offset)
             data = f.read()
         if truncate_tail and len(data) > truncate_tail:
-            data = data[: -truncate_tail]
+            data = data[:-truncate_tail]
         if not data:
             return False
         with zipfile.ZipFile(BytesIO(data), "r") as zf:
@@ -69,15 +69,19 @@ def unpack_hbk(path_to_hbk, output_dir) -> None:
         except OSError:
             return False
 
-    # 1) 7z
-    cmd = ["7z", "x", str(path_to_hbk), f"-o{output_dir}", "-y"]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode == 0 or _7z_extracted():
-        return
-    cmd_alt = ["7z", "x", "-t*", str(path_to_hbk), f"-o{output_dir}", "-y"]
-    result = subprocess.run(cmd_alt, capture_output=True, text=True)
-    if result.returncode == 0 or _7z_extracted():
-        return
+    # 1) 7z (may be missing; then fall through to zipfile)
+    result = None
+    try:
+        cmd = ["7z", "x", str(path_to_hbk), f"-o{output_dir}", "-y"]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0 or _7z_extracted():
+            return
+        cmd_alt = ["7z", "x", "-t*", str(path_to_hbk), f"-o{output_dir}", "-y"]
+        result = subprocess.run(cmd_alt, capture_output=True, text=True)
+        if result.returncode == 0 or _7z_extracted():
+            return
+    except FileNotFoundError:
+        result = None
 
     # 2) Python zipfile (ZIP/deflate)
     if _try_zipfile(path_to_hbk, output_dir):
@@ -94,7 +98,7 @@ def unpack_hbk(path_to_hbk, output_dir) -> None:
     if _try_unzip(path_to_hbk, output_dir):
         return
 
-    err = (result.stderr or result.stdout or "").strip()
+    err = (result.stderr or result.stdout or "").strip() if result else ""
     tried = "Tried: 7z, Python zipfile, zip from offset, unzip."
     if path_to_hbk.suffix.lower() == ".hbk":
         raise RuntimeError(

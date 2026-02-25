@@ -40,7 +40,9 @@ def _legacy_body_to_md(body) -> str:
         tag = elem.name.lower()
         if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
             level = int(tag[1])
-            lines.append("\n" + "#" * level + " " + elem.get_text(separator=" ", strip=True) + "\n\n")
+            lines.append(
+                "\n" + "#" * level + " " + elem.get_text(separator=" ", strip=True) + "\n\n"
+            )
         elif tag == "table":
             tbl = _table_to_md(elem)
             if tbl:
@@ -100,7 +102,11 @@ def html_to_md_content(html_path) -> str:
     lines.append(f"# {title}\n")
 
     # Description
-    desc_tag = soup.find("p", class_="V8SH_chapter", string=lambda t: t and "Описание:" in (t if isinstance(t, str) else t))
+    desc_tag = soup.find(
+        "p",
+        class_="V8SH_chapter",
+        string=lambda t: t and "Описание:" in (t if isinstance(t, str) else t),
+    )
     if not desc_tag and soup.find("p", class_="V8SH_chapter"):
         for p in soup.find_all("p", class_="V8SH_chapter"):
             if p.get_text(strip=True) == "Описание:":
@@ -118,7 +124,11 @@ def html_to_md_content(html_path) -> str:
                 lines.append(n.get_text(separator=" ", strip=True) + "\n\n")
 
     # Syntax
-    syntax_heading = soup.find("p", class_="V8SH_chapter", string=lambda t: t and "Синтаксис:" in (t if isinstance(t, str) else t))
+    syntax_heading = soup.find(
+        "p",
+        class_="V8SH_chapter",
+        string=lambda t: t and "Синтаксис:" in (t if isinstance(t, str) else t),
+    )
     if not syntax_heading:
         for p in soup.find_all("p", class_="V8SH_chapter"):
             if p.get_text(strip=True) == "Синтаксис:":
@@ -138,7 +148,11 @@ def html_to_md_content(html_path) -> str:
         lines.append("```\n\n")
 
     # Parameters
-    params_heading = soup.find("p", class_="V8SH_chapter", string=lambda t: t and "Параметры:" in (t if isinstance(t, str) else t))
+    params_heading = soup.find(
+        "p",
+        class_="V8SH_chapter",
+        string=lambda t: t and "Параметры:" in (t if isinstance(t, str) else t),
+    )
     if not params_heading:
         for p in soup.find_all("p", class_="V8SH_chapter"):
             if p.get_text(strip=True) == "Параметры:":
@@ -157,7 +171,11 @@ def html_to_md_content(html_path) -> str:
         lines.append("\n")
 
     # Return value
-    ret_heading = soup.find("p", class_="V8SH_chapter", string=lambda t: t and "Возвращаемое значение:" in (t if isinstance(t, str) else t))
+    ret_heading = soup.find(
+        "p",
+        class_="V8SH_chapter",
+        string=lambda t: t and "Возвращаемое значение:" in (t if isinstance(t, str) else t),
+    )
     if not ret_heading:
         for p in soup.find_all("p", class_="V8SH_chapter"):
             if p.get_text(strip=True) == "Возвращаемое значение:":
@@ -179,7 +197,11 @@ def html_to_md_content(html_path) -> str:
                     lines.append(ret_text + "\n\n")
 
     # Examples
-    ex_heading = soup.find("p", class_="V8SH_chapter", string=lambda t: t and "Пример:" in (t if isinstance(t, str) else t))
+    ex_heading = soup.find(
+        "p",
+        class_="V8SH_chapter",
+        string=lambda t: t and "Пример:" in (t if isinstance(t, str) else t),
+    )
     if not ex_heading:
         for p in soup.find_all("p", class_="V8SH_chapter"):
             if p.get_text(strip=True) == "Пример:":
@@ -193,7 +215,11 @@ def html_to_md_content(html_path) -> str:
             lines.append("```\n\n")
 
     # See also
-    see_heading = soup.find("p", class_="V8SH_chapter", string=lambda t: t and "См. также:" in (t if isinstance(t, str) else t))
+    see_heading = soup.find(
+        "p",
+        class_="V8SH_chapter",
+        string=lambda t: t and "См. также:" in (t if isinstance(t, str) else t),
+    )
     if not see_heading:
         for p in soup.find_all("p", class_="V8SH_chapter"):
             if p.get_text(strip=True) == "См. также:":
@@ -228,10 +254,33 @@ def _looks_like_html(path: Path) -> bool:
 # Extensions we never treat as HTML (binary or non-content)
 _SKIP_EXTENSIONS = frozenset(
     {
-        ".hbk", ".zip", ".7z", ".exe", ".dll", ".so", ".dylib",
-        ".css", ".js", ".json", ".woff", ".woff2", ".ttf", ".otf", ".eot",
-        ".png", ".gif", ".jpg", ".jpeg", ".ico", ".bmp", ".webp", ".svg",
-        ".db", ".dat", ".bin", ".idx",
+        ".hbk",
+        ".zip",
+        ".7z",
+        ".exe",
+        ".dll",
+        ".so",
+        ".dylib",
+        ".css",
+        ".js",
+        ".json",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".otf",
+        ".eot",
+        ".png",
+        ".gif",
+        ".jpg",
+        ".jpeg",
+        ".ico",
+        ".bmp",
+        ".webp",
+        ".svg",
+        ".db",
+        ".dat",
+        ".bin",
+        ".idx",
     }
 )
 
@@ -255,9 +304,8 @@ def build_docs(project_dir, output_dir):
             ext = html_path.suffix.lower() if html_path.suffix else ""
             if ext in _SKIP_EXTENSIONS:
                 continue
-            is_html = (
-                ext in (".html", ".htm")
-                or (ext in ("", ".xml", ".xhtml", ".st") and _looks_like_html(html_path))
+            is_html = ext in (".html", ".htm") or (
+                ext in ("", ".xml", ".xhtml", ".st") and _looks_like_html(html_path)
             )
             if not is_html:
                 continue

@@ -1,4 +1,5 @@
 """Tests for web module."""
+
 from pathlib import Path
 from unittest.mock import patch
 
@@ -32,6 +33,7 @@ def test_content_no_dir(client) -> None:
 
 def test_content_with_dir(client, help_sample_dir: Path) -> None:
     from onec_help.web import app
+
     app.config["BASE_DIR"] = str(help_sample_dir)
     r = client.get("/content/field626.html")
     assert r.status_code == 200
@@ -41,6 +43,7 @@ def test_content_with_dir(client, help_sample_dir: Path) -> None:
 
 def test_content_exception_returns_500(client, help_sample_dir: Path) -> None:
     from onec_help.web import app
+
     app.config["BASE_DIR"] = str(help_sample_dir)
     with patch("onec_help.web.get_html_content") as mock_get:
         mock_get.side_effect = OSError("file not found")
@@ -69,6 +72,7 @@ def test_download_no_dir(client) -> None:
 
 def test_download_with_dir(client, help_sample_dir: Path) -> None:
     from onec_help.web import app
+
     app.config["BASE_DIR"] = str(help_sample_dir)
     r = client.get("/download/field626.html")
     assert r.status_code == 200
