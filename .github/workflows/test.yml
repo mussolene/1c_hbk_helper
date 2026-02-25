@@ -36,9 +36,10 @@ jobs:
         env:
           COVERAGE_FILE: .coverage.${{ matrix.python-version }}
 
-      - name: Upload coverage (primary)
+      # v3: загрузка без токена для публичных репо; для бейджа добавьте репо на codecov.io
+      - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v3
         with:
-          file: ./coverage.xml
+          files: ./coverage.xml
           fail_ci_if_error: false

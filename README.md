@@ -176,7 +176,7 @@ ruff check src tests && ruff format --check src tests
 
 ## CI (GitHub Actions)
 
-- **test** — pytest, покрытие ≥90%, матрица Python 3.10–3.12.
+- **test** — pytest, покрытие ≥90%, матрица Python 3.10–3.12; отчёт загружается в Codecov (action v3, для публичного репо токен не нужен). Чтобы плашка Coverage отображала процент, один раз добавьте репозиторий на [codecov.io](https://codecov.io) (вход через GitHub).
 - **lint** — ruff check и ruff format.
 - **deploy** — сборка и push Docker-образа в GHCR (при push в main/master или вручную).
 - **release** — при push тега `v*`: сборка sdist и создание GitHub Release; отдельно — сборка и push Docker-образа с тегом версии.
