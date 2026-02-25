@@ -8,7 +8,14 @@ from typing import Any, Dict, List, Optional
 # For minimal deps we use a simple hash-based placeholder; replace with real embeddings for production.
 try:
     from qdrant_client import QdrantClient
-    from qdrant_client.models import Distance, FieldCondition, Filter, MatchValue, PointStruct, VectorParams
+    from qdrant_client.models import (
+        Distance,
+        FieldCondition,
+        Filter,
+        MatchValue,
+        PointStruct,
+        VectorParams,
+    )
 except ImportError:
     QdrantClient = None  # type: ignore
     PointStruct = None  # type: ignore

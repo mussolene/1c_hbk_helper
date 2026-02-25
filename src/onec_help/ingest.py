@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
 
 
+
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
@@ -48,7 +49,7 @@ def collect_hbk_tasks(
             lang = _language_from_filename(path.name)
             if lang is None:
                 continue
-            if languages and lang not in [l.lower() for l in languages]:
+            if languages and lang not in [x.lower() for x in languages]:
                 continue
             tasks.append((path, version, lang))
     return tasks
@@ -113,9 +114,9 @@ def run_ingest(
     index_batch_size: number of files per index upsert (smaller = more progress, less memory per step).
     Returns total points indexed (0 if dry_run).
     """
-    from .unpack import unpack_hbk
     from .html2md import build_docs
-    from .indexer import build_index, VECTOR_SIZE
+    from .indexer import VECTOR_SIZE, build_index
+    from .unpack import unpack_hbk
     from qdrant_client import QdrantClient
     from qdrant_client.models import Distance, VectorParams
 

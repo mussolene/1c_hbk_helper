@@ -4,7 +4,6 @@ See docs/help_formats.md for formal spec."""
 
 import html
 import os
-import re
 import unicodedata
 from pathlib import Path
 

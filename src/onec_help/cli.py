@@ -91,9 +91,15 @@ def cmd_index_status(args: argparse.Namespace) -> int:
 
 def cmd_unpack_dir(args: argparse.Namespace) -> int:
     """Unpack all .hbk from source dir(s) into output_dir (no indexing)."""
-    from pathlib import Path
-    from .ingest import run_unpack_only, discover_version_dirs, parse_source_dirs_env, parse_languages_env
     import os
+    from pathlib import Path
+
+    from .ingest import (
+        discover_version_dirs,
+        parse_languages_env,
+        parse_source_dirs_env,
+        run_unpack_only,
+    )
 
     sources: list[tuple[str, str]] = []
     if getattr(args, "sources", None):
@@ -140,7 +146,14 @@ def cmd_unpack_dir(args: argparse.Namespace) -> int:
 def cmd_ingest(args: argparse.Namespace) -> int:
     """Ingest .hbk from multiple read-only source dirs: unpack to temp, build docs, index, cleanup."""
     from pathlib import Path
-    from .ingest import run_ingest, discover_version_dirs, parse_source_dirs_env, parse_languages_env
+
+    from .ingest import (
+        discover_version_dirs,
+        parse_languages_env,
+        parse_source_dirs_env,
+        run_ingest,
+    )
+
     sources: list[tuple[str, str]] = []
     if getattr(args, "sources", None):
         for s in args.sources:

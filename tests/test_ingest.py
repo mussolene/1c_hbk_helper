@@ -1,9 +1,6 @@
 """Tests for ingest module: collect tasks, discover versions, parse env, run_ingest (dry_run / empty)."""
-import os
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from onec_help.ingest import (
     _language_from_filename,
@@ -193,8 +190,35 @@ def test_run_unpack_only_one_archive(mock_unpack: MagicMock, tmp_path: Path) -> 
     assert (out / "v" / "ru" / "1cv8_ru").exists()
 
 
-@patch("onec_help.ingest.build_index")
-@patch("onec_help.ingest.build_docs")
+@patch("onec_help.indexer.build_index")
+@patch("onec_help.html2md.build_docs")
+@patch("onec_help.unpack.unpack_hbk")
+@patch("qdrant_client.QdrantClient")
+def test_run_ingest_unpack_fails_one_task(
+    mock_qdrant: MagicMock,
+    mock_unpack: MagicMock,
+    mock_build_docs: MagicMock,
+    mock_build_index: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """When unpack raises, task is skipped and no index call for that task."""
+    (tmp_path / "v").mkdir()
+    (tmp_path / "v" / "1cv8_ru.hbk").write_bytes(b"x")
+    mock_unpack.side_effect = RuntimeError("7z failed")
+    mock_qdrant.return_value.collection_exists.return_value = True
+    n = run_ingest(
+        source_dirs_with_versions=[(tmp_path, "v")],
+        languages=["ru"],
+        temp_base=tmp_path / "temp",
+        max_workers=1,
+        verbose=False,
+    )
+    assert n == 0
+    mock_build_index.assert_not_called()
+
+
+@patch("onec_help.indexer.build_index")
+@patch("onec_help.html2md.build_docs")
 @patch("onec_help.unpack.unpack_hbk")
 @patch("qdrant_client.QdrantClient")
 def test_run_ingest_integration_mock(

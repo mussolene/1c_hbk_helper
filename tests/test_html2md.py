@@ -1,9 +1,12 @@
 """Tests for html2md module."""
 from pathlib import Path
 
-import pytest
-
-from onec_help.html2md import _normalize_md_text, html_to_md_content, build_docs
+from onec_help.html2md import (
+    _looks_like_html,
+    _normalize_md_text,
+    build_docs,
+    html_to_md_content,
+)
 
 
 def test_normalize_md_text() -> None:
@@ -25,6 +28,23 @@ def test_html_to_md_content(sample_html: Path) -> None:
 
 def test_html_to_md_content_missing() -> None:
     assert html_to_md_content(Path("/nonexistent")) == ""
+
+
+def test_looks_like_html(tmp_path: Path) -> None:
+    html_file = tmp_path / "f.html"
+    html_file.write_text("<html><body>x</body></html>", encoding="utf-8")
+    assert _looks_like_html(html_file) is True
+    bin_file = tmp_path / "f.bin"
+    bin_file.write_bytes(b"\x00\x01\x02")
+    assert _looks_like_html(bin_file) is False
+
+
+def test_build_docs_empty_dir(tmp_path: Path) -> None:
+    """Empty dir yields no .md files."""
+    out = tmp_path / "out"
+    out.mkdir()
+    created = build_docs(tmp_path, out)
+    assert created == []
 
 
 def test_build_docs(help_sample_dir: Path, tmp_path: Path) -> None:

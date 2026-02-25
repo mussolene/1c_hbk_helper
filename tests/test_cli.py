@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from onec_help.cli import (
+    _env_path,
     cmd_build_docs,
     cmd_build_index,
     cmd_ingest,
@@ -22,11 +23,31 @@ def test_cmd_build_docs(help_sample_dir: Path, tmp_path: Path) -> None:
     assert (tmp_path / "out_md").exists()
 
 
+@patch("onec_help.html2md.build_docs")
+def test_cmd_build_docs_error(mock_build_docs, tmp_path: Path) -> None:
+    mock_build_docs.side_effect = RuntimeError("disk full")
+    class Args:
+        project_dir = str(tmp_path)
+        output = str(tmp_path / "out_md")
+    tmp_path.mkdir(exist_ok=True)
+    assert cmd_build_docs(Args()) == 1
+
+
 def test_cmd_unpack_fail() -> None:
     class Args:
         archive = "/nonexistent.hbk"
         output_dir = "/tmp/out"
     assert cmd_unpack(Args()) == 1
+
+
+@patch("onec_help.unpack.unpack_hbk")
+def test_cmd_unpack_success(mock_unpack, tmp_path: Path) -> None:
+    class Args:
+        archive = str(tmp_path / "fake.hbk")
+        output_dir = str(tmp_path / "out")
+    (tmp_path / "fake.hbk").write_bytes(b"x")
+    assert cmd_unpack(Args()) == 0
+    mock_unpack.assert_called_once()
 
 
 @patch("onec_help.indexer.build_index")
@@ -37,6 +58,16 @@ def test_cmd_build_index(mock_build, help_sample_dir: Path) -> None:
         docs_dir = None
     with patch.dict("os.environ", {"QDRANT_HOST": "localhost", "QDRANT_PORT": "6333"}):
         assert cmd_build_index(Args()) == 0
+
+
+@patch("onec_help.indexer.build_index")
+def test_cmd_build_index_error(mock_build, help_sample_dir: Path) -> None:
+    mock_build.side_effect = RuntimeError("Qdrant unavailable")
+    class Args:
+        directory = str(help_sample_dir)
+        docs_dir = None
+    with patch.dict("os.environ", {"QDRANT_HOST": "localhost", "QDRANT_PORT": "6333"}):
+        assert cmd_build_index(Args()) == 1
 
 
 def test_main_help() -> None:
@@ -87,6 +118,14 @@ def test_cmd_index_status_not_exists(mock_status) -> None:
     assert cmd_index_status(Args()) == 0
 
 
+@patch("onec_help.indexer.get_index_status")
+def test_cmd_index_status_error(mock_status) -> None:
+    mock_status.return_value = {"error": "connection refused"}
+    class Args:
+        pass
+    assert cmd_index_status(Args()) == 1
+
+
 @patch("onec_help.ingest.run_ingest")
 def test_cmd_ingest_with_sources_env(mock_run_ingest, tmp_path: Path) -> None:
     mock_run_ingest.return_value = 10
@@ -126,6 +165,15 @@ def test_cmd_ingest_sources_arg(mock_run_ingest) -> None:
     mock_run_ingest.assert_called_once()
     call_kw = mock_run_ingest.call_args[1]
     assert call_kw["source_dirs_with_versions"] == [("/path/to/1cv8", "8.3")]
+
+
+def test_env_path() -> None:
+    assert _env_path("NONEXISTENT_VAR") is None
+    with patch.dict("os.environ", {"TEST_VAR": "/path"}):
+        assert _env_path("TEST_VAR") == "/path"
+    with patch.dict("os.environ", {"PORT": "8080"}):
+        assert _env_path("PORT", "5000") == "8080"
+    assert _env_path("MISSING", "default") == "default"
 
 
 def test_cmd_ingest_no_sources_returns_error() -> None:

@@ -1,6 +1,6 @@
 """Tests for MCP server (tools logic with mocked FastMCP)."""
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
