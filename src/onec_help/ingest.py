@@ -5,12 +5,12 @@ Supports language filter (e.g. only *_ru.hbk) and concurrent processing.
 Progress is printed to stderr so long runs are not killed by "no output" timeouts.
 """
 
-from concurrent.futures import as_completed, ThreadPoolExecutor
 import os
-from pathlib import Path
 import re
 import shutil
 import sys
+from concurrent.futures import as_completed, ThreadPoolExecutor
+from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
 
 

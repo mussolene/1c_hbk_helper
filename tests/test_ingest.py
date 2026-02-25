@@ -154,8 +154,9 @@ def test_run_ingest_dry_run_many_tasks(tmp_path: Path) -> None:
 def test_run_ingest_max_tasks(mock_qdrant: MagicMock, mock_task: MagicMock, tmp_path: Path) -> None:
     """max_tasks limits how many .hbk are processed."""
     (tmp_path / "v").mkdir()
-    for i in range(5):
-        (tmp_path / "v" / f"1cv8_ru_{i}.hbk").write_bytes(b"x")
+    # Names must match LANG_PATTERN (*_ru.hbk) so collect_hbk_tasks returns them
+    for name in ("a_ru.hbk", "b_ru.hbk", "c_ru.hbk", "d_ru.hbk", "e_ru.hbk"):
+        (tmp_path / "v" / name).write_bytes(b"x")
     mock_task.return_value = (None, "v", "ru", "skip")
     mock_qdrant.return_value.collection_exists.return_value = True
     n = run_ingest(
@@ -166,7 +167,7 @@ def test_run_ingest_max_tasks(mock_qdrant: MagicMock, mock_task: MagicMock, tmp_
         max_workers=1,
         verbose=False,
     )
-    assert mock_task.call_count == 2
+    assert mock_task.call_count == 2, "_unpack_and_build_docs should be called max_tasks=2 times"
     assert n == 0
 
 

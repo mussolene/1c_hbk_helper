@@ -1,4 +1,5 @@
 """Tests for CLI."""
+
 from pathlib import Path
 from unittest.mock import patch
 
@@ -246,22 +247,33 @@ def test_cmd_ingest_exception(mock_run) -> None:
 
 def test_cmd_mcp_import_error() -> None:
     """When mcp_server import fails, cmd_mcp returns 1."""
-    from onec_help.cli import cmd_mcp
     import builtins
+    import sys
+
+    from onec_help.cli import cmd_mcp
+
+    # Unload so that cmd_mcp's "from .mcp_server import run_mcp" actually calls __import__
+    sys.modules.pop("onec_help.mcp_server", None)
     real_import = builtins.__import__
+
     def raise_for_mcp(name, *args, **kwargs):
         if name == "onec_help.mcp_server":
             raise ImportError("No module named 'fastmcp'")
         return real_import(name, *args, **kwargs)
+
     class Args:
         directory = "/tmp"
         transport = None
         host = None
         port = None
         path = None
-    with patch("builtins.__import__", side_effect=raise_for_mcp):
-        result = cmd_mcp(Args())
-    assert result == 1
+
+    try:
+        with patch("builtins.__import__", side_effect=raise_for_mcp):
+            result = cmd_mcp(Args())
+        assert result == 1
+    finally:
+        sys.modules.pop("onec_help.mcp_server", None)
 
 
 @patch("onec_help.indexer.get_index_status")
