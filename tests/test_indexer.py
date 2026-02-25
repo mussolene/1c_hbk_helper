@@ -3,6 +3,8 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from onec_help import indexer as indexer_mod
 from onec_help.indexer import (
     _get_embedding,
@@ -23,6 +25,14 @@ def test_get_embedding() -> None:
     assert isinstance(vec, list)
     assert len(vec) == indexer_mod.VECTOR_SIZE
     assert all(isinstance(x, float) for x in vec)
+
+
+def test_build_index_no_qdrant_client(tmp_path: Path) -> None:
+    """When QdrantClient is not available, build_index raises RuntimeError."""
+    (tmp_path / "a.md").write_text("# A\n\nBody.", encoding="utf-8")
+    with patch.object(indexer_mod, "QdrantClient", None):
+        with pytest.raises(RuntimeError, match="qdrant-client"):
+            build_index(tmp_path)
 
 
 def test_get_topic_by_path(help_sample_dir: Path) -> None:
@@ -60,6 +70,17 @@ def test_build_index_html_only(mock_client: MagicMock, help_sample_dir: Path) ->
     mock_instance = MagicMock()
     mock_client.return_value = mock_instance
     n = build_index(help_sample_dir, qdrant_host="localhost", qdrant_port=6333)
+    assert n >= 1
+    mock_instance.upsert.assert_called_once()
+
+
+@patch("onec_help.indexer.QdrantClient")
+def test_build_index_extensionless_html(mock_client: MagicMock, tmp_path: Path) -> None:
+    """Index when only extension-less file that looks like HTML exists."""
+    (tmp_path / "noext").write_text("<html><body><h1>Title</h1></body></html>", encoding="utf-8")
+    mock_instance = MagicMock()
+    mock_client.return_value = mock_instance
+    n = build_index(tmp_path, qdrant_host="localhost", qdrant_port=6333)
     assert n >= 1
     mock_instance.upsert.assert_called_once()
 

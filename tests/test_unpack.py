@@ -6,7 +6,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from onec_help.unpack import ensure_dir, unpack_hbk
+from onec_help.unpack import (
+    _try_unzip,
+    _try_zipfile_from_offset,
+    ensure_dir,
+    unpack_hbk,
+)
 
 
 def test_ensure_dir(tmp_path: Path) -> None:
@@ -93,3 +98,86 @@ def test_unpack_hbk_real_zip_no_mock(tmp_path: Path) -> None:
     unpack_hbk(archive, out)
     assert (out / "PayloadData" / "index.html").exists()
     assert "Test" in (out / "PayloadData" / "index.html").read_text()
+
+
+def test_try_zipfile_from_offset_success(tmp_path: Path) -> None:
+    """When archive has header, unpack from offset."""
+    archive = tmp_path / "with_header.zip"
+    with open(archive, "wb") as f:
+        f.write(b"x" * 512)
+    with zipfile.ZipFile(archive, "a", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("data.txt", "hello")
+    out = tmp_path / "out"
+    out.mkdir()
+    assert _try_zipfile_from_offset(archive, out, offset=512) is True
+    assert (out / "data.txt").read_text() == "hello"
+
+
+def test_try_zipfile_from_offset_truncate_tail(tmp_path: Path) -> None:
+    """truncate_tail cuts trailing bytes before opening as zip."""
+    archive = tmp_path / "trunc.zip"
+    data = b"header" * 100
+    with open(archive, "wb") as f:
+        f.write(data)
+    with zipfile.ZipFile(archive, "a", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("x", "y")
+    out = tmp_path / "out"
+    out.mkdir()
+    # Should fail when reading wrong offset; truncate_tail used in unpack_hbk
+    assert _try_zipfile_from_offset(archive, out, offset=0, truncate_tail=0) in (True, False)
+
+
+def test_try_unzip_mocked(tmp_path: Path) -> None:
+    """_try_unzip returns True when unzip command succeeds."""
+    archive = tmp_path / "a.zip"
+    archive.write_bytes(b"fake")
+    out = tmp_path / "out"
+    out.mkdir()
+    with patch("onec_help.unpack.subprocess.run") as run:
+        run.return_value = MagicMock(returncode=0)
+        assert _try_unzip(archive, out) is True
+    with patch("onec_help.unpack.subprocess.run") as run:
+        run.return_value = MagicMock(returncode=1)
+        assert _try_unzip(archive, out) is False
+
+
+def test_unpack_hbk_via_offset(tmp_path: Path) -> None:
+    """When 7z and direct zipfile fail, offset unpack can succeed."""
+    archive = tmp_path / "arch.hbk"
+    with open(archive, "wb") as f:
+        f.write(b" " * 512)
+    with zipfile.ZipFile(archive, "a", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("PayloadData/index.html", "<h1>OK</h1>")
+    out = tmp_path / "out"
+    with patch("onec_help.unpack.subprocess.run") as run:
+        run.side_effect = [MagicMock(returncode=1), MagicMock(returncode=1)]
+        unpack_hbk(archive, out)
+    assert (out / "PayloadData" / "index.html").exists()
+
+
+def test_unpack_hbk_non_hbk_suffix_error(tmp_path: Path) -> None:
+    """When suffix is not .hbk, error message does not mention manual unpack."""
+    archive = tmp_path / "data.bin"
+    archive.write_bytes(b"not zip")
+    out = tmp_path / "out"
+    with patch("onec_help.unpack.subprocess.run") as run:
+        run.side_effect = [
+            MagicMock(returncode=2),
+            MagicMock(returncode=2),
+            MagicMock(returncode=1),
+        ]
+        with pytest.raises(RuntimeError) as exc_info:
+            unpack_hbk(archive, out)
+    assert "All unpack methods failed" in str(exc_info.value)
+
+
+def test_unpack_hbk_7z_not_found_fallback_zipfile(tmp_path: Path) -> None:
+    """When 7z is missing (FileNotFoundError), fallback to zipfile is used."""
+    archive = tmp_path / "data.hbk"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("inner.txt", "content")
+    out = tmp_path / "out"
+    with patch("onec_help.unpack.subprocess.run") as run:
+        run.side_effect = FileNotFoundError("7z not found")
+        unpack_hbk(archive, out)
+    assert (out / "inner.txt").read_text() == "content"

@@ -219,6 +219,59 @@ def test_cmd_ingest_no_sources_returns_error() -> None:
 
 
 @patch("onec_help.ingest.run_unpack_only")
+def test_cmd_unpack_dir_sources_path_version(mock_run, tmp_path: Path) -> None:
+    """cmd_unpack_dir parses sources as path:version."""
+    mock_run.return_value = 1
+    out = tmp_path / "out"
+    out.mkdir()
+
+    class Args:
+        source_dir = ""
+        output_dir = str(out)
+        sources = ["/path/to/1cv8:8.3"]
+        languages = None
+        workers = 1
+
+    assert cmd_unpack_dir(Args()) == 0
+    call_kw = mock_run.call_args[1]
+    assert call_kw["source_dirs_with_versions"] == [("/path/to/1cv8", "8.3")]
+
+
+@patch("onec_help.ingest.run_unpack_only")
+def test_cmd_unpack_dir_sources_path_only(mock_run, tmp_path: Path) -> None:
+    """cmd_unpack_dir with single path (no colon) uses path name as version."""
+    mock_run.return_value = 1
+    out = tmp_path / "out"
+    out.mkdir()
+
+    class Args:
+        source_dir = ""
+        output_dir = str(out)
+        sources = ["/single/path"]
+        languages = None
+        workers = 1
+
+    assert cmd_unpack_dir(Args()) == 0
+    call_kw = mock_run.call_args[1]
+    assert len(call_kw["source_dirs_with_versions"]) == 1
+    assert call_kw["source_dirs_with_versions"][0][0] == "/single/path"
+
+
+def test_cmd_unpack_dir_no_sources_error(tmp_path: Path) -> None:
+    """When no sources and no HELP_SOURCE_BASE, cmd_unpack_dir returns 1."""
+
+    class Args:
+        source_dir = ""
+        output_dir = str(tmp_path / "out")
+        sources = None
+        languages = None
+        workers = 1
+
+    with patch.dict("os.environ", {}, clear=True):
+        assert cmd_unpack_dir(Args()) == 1
+
+
+@patch("onec_help.ingest.run_unpack_only")
 def test_cmd_unpack_dir_success(mock_run, tmp_path: Path) -> None:
     mock_run.return_value = 2
 
@@ -258,6 +311,31 @@ def test_cmd_ingest_sources_file(mock_run, tmp_path: Path) -> None:
 
 
 @patch("onec_help.ingest.run_ingest")
+def test_cmd_ingest_sources_file_path_only(mock_run, tmp_path: Path) -> None:
+    """sources_file with lines without colon uses path name as version."""
+    mock_run.return_value = 1
+    sf = tmp_path / "list.txt"
+    sf.write_text("/only/path\n", encoding="utf-8")
+
+    class Args:
+        sources = None
+        sources_file = str(sf)
+        languages = None
+        temp_base = None
+        workers = 1
+        max_tasks = None
+        quiet = True
+        dry_run = False
+        index_batch_size = 500
+
+    with patch.dict("os.environ", {"QDRANT_HOST": "localhost", "QDRANT_PORT": "6333"}, clear=False):
+        assert cmd_ingest(Args()) == 0
+    call_kw = mock_run.call_args[1]
+    assert len(call_kw["source_dirs_with_versions"]) == 1
+    assert call_kw["source_dirs_with_versions"][0][0] == "/only/path"
+
+
+@patch("onec_help.ingest.run_ingest")
 def test_cmd_ingest_exception(mock_run) -> None:
     mock_run.side_effect = RuntimeError("Qdrant down")
 
@@ -278,6 +356,8 @@ def test_cmd_ingest_exception(mock_run) -> None:
 
 def test_cmd_mcp_import_error() -> None:
     """When mcp_server import fails or run_mcp raises (no fastmcp), cmd_mcp returns 1."""
+    import sys
+
     from onec_help.cli import cmd_mcp
 
     class Args:
@@ -289,6 +369,21 @@ def test_cmd_mcp_import_error() -> None:
 
     with patch("onec_help.mcp_server.run_mcp") as mock_run:
         mock_run.side_effect = RuntimeError("fastmcp required: pip install fastmcp")
+        result = cmd_mcp(Args())
+    assert result == 1
+
+    # Cover ImportError when mcp_server fails to load (e.g. fastmcp missing)
+    import builtins
+
+    sys.modules.pop("onec_help.mcp_server", None)
+    real_import = builtins.__import__
+
+    def raise_for_fastmcp(name, *args, **kwargs):
+        if name == "fastmcp":
+            raise ImportError("No module named 'fastmcp'")
+        return real_import(name, *args, **kwargs)
+
+    with patch("builtins.__import__", side_effect=raise_for_fastmcp):
         result = cmd_mcp(Args())
     assert result == 1
 

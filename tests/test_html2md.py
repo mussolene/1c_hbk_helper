@@ -2,10 +2,14 @@
 
 from pathlib import Path
 
+from bs4 import BeautifulSoup
+
 from onec_help.html2md import (
+    _legacy_body_to_md,
     _looks_like_html,
     _normalize_md_text,
     _read_html_file,
+    _table_to_md,
     build_docs,
     html_to_md_content,
 )
@@ -67,6 +71,12 @@ def test_looks_like_html(tmp_path: Path) -> None:
     assert _looks_like_html(bin_file) is False
 
 
+def test_looks_like_html_exception_returns_false(tmp_path: Path) -> None:
+    """When _read_html_file raises (e.g. directory), _looks_like_html returns False."""
+    tmp_path.mkdir(exist_ok=True)
+    assert _looks_like_html(tmp_path) is False
+
+
 def test_build_docs_empty_dir(tmp_path: Path) -> None:
     """Empty dir yields no .md files."""
     out = tmp_path / "out"
@@ -106,3 +116,101 @@ def test_function_sample_md_structure(help_sample_dir: Path) -> None:
     assert "## См. также" in md
     assert "Формат(Значение, ФорматнаяСтрока)" in md or "Формат" in md
     assert "Значение" in md and "ФорматнаяСтрока" in md
+
+
+def test_table_to_md() -> None:
+    """_table_to_md converts table to Markdown."""
+    soup = BeautifulSoup(
+        "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>",
+        "html.parser",
+    )
+    md = _table_to_md(soup.find("table"))
+    assert "| A | B |" in md
+    assert "| 1 | 2 |" in md
+    assert "---" in md
+
+
+def test_table_to_md_empty_rows() -> None:
+    """_table_to_md with no rows returns empty string."""
+    soup = BeautifulSoup("<table></table>", "html.parser")
+    assert _table_to_md(soup.find("table")) == ""
+
+
+def test_legacy_body_to_md() -> None:
+    """_legacy_body_to_md converts H1–H6, table, pre, p with links."""
+    soup = BeautifulSoup(
+        """
+        <body>
+        <h1>Title</h1>
+        <p>Para with <a href='x'>link</a> text.</p>
+        <table><tr><td>Cell</td></tr></table>
+        <pre>code</pre>
+        </body>
+        """,
+        "html.parser",
+    )
+    md = _legacy_body_to_md(soup.find("body"))
+    assert "# Title" in md
+    assert "link" in md and "x" in md
+    assert "| Cell |" in md
+    assert "```" in md and "code" in md
+
+
+def test_html_to_md_legacy_no_v8sh(tmp_path: Path) -> None:
+    """When no V8SH_pagetitle, legacy body conversion is used."""
+    f = tmp_path / "legacy.html"
+    f.write_text(
+        "<html><body><h1>Legacy Title</h1><p>Paragraph.</p></body></html>",
+        encoding="utf-8",
+    )
+    md = html_to_md_content(f)
+    assert "Legacy Title" in md
+    assert "Paragraph" in md
+
+
+def test_html_to_md_fallback_body_text(tmp_path: Path) -> None:
+    """When V8SH output is only title, fallback to body text."""
+    f = tmp_path / "minimal.html"
+    f.write_text(
+        "<html><body><h1 class='V8SH_pagetitle'>Only Title</h1></body></html>",
+        encoding="utf-8",
+    )
+    md = html_to_md_content(f)
+    assert "Only Title" in md
+
+
+def test_build_docs_extensionless_html(tmp_path: Path) -> None:
+    """build_docs processes extension-less files that look like HTML."""
+    (tmp_path / "noext").write_text("<html><body><h1>No Ext</h1></body></html>", encoding="utf-8")
+    out = tmp_path / "out"
+    out.mkdir()
+    created = build_docs(tmp_path, out)
+    assert len(created) >= 1
+    assert any("noext" in str(p) for p in created)
+
+
+def test_html_to_md_v8sh_fallback_loop(tmp_path: Path) -> None:
+    """V8SH sections found via fallback loop (get_text == 'Описание:') when string= doesn't match."""
+    f = tmp_path / "v8sh.html"
+    f.write_text(
+        """
+<html><body>
+<h1 class="V8SH_pagetitle">TestFunc</h1>
+<p class="V8SH_chapter"><span>Описание:</span></p>
+<p>Description text here.</p>
+<p class="V8SH_chapter"><span>Синтаксис:</span></p>
+<pre>TestFunc(x)</pre>
+<p class="V8SH_chapter"><span>Возвращаемое значение:</span></p>
+<p>Number.</p>
+<p class="V8SH_chapter"><span>См. также:</span></p>
+<a href="#">Other</a>
+</body></html>
+""",
+        encoding="utf-8",
+    )
+    md = html_to_md_content(f)
+    assert "TestFunc" in md
+    assert "Description text" in md or "Описание" in md
+    assert "Синтаксис" in md or "TestFunc(x)" in md
+    assert "Возвращаемое значение" in md or "Number" in md
+    assert "См. также" in md or "Other" in md

@@ -72,3 +72,15 @@ def test_build_tree_dir_without_categories(tmp_path: Path) -> None:
     # One child for a.html
     assert len(tree[0]["children"]) == 1
     assert tree[0]["children"][0]["path"] == "subdir/a.html"
+
+
+def test_find_categories_root_via_common_subdir(tmp_path: Path) -> None:
+    """find_categories_root finds __categories__ in source/FileStorage/objects."""
+    objects_dir = tmp_path / "source" / "FileStorage" / "objects"
+    objects_dir.mkdir(parents=True)
+    (objects_dir / "__categories__").write_text("item.html\n", encoding="utf-8")
+    deep = tmp_path / "source" / "FileStorage" / "objects" / "deep"
+    deep.mkdir()
+    root = find_categories_root(deep)
+    assert root is not None
+    assert (root / "__categories__").exists()
