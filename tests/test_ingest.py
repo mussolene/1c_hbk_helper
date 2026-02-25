@@ -2,6 +2,8 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from onec_help.ingest import (
     _language_from_filename,
     collect_hbk_tasks,
@@ -132,6 +134,54 @@ def test_run_ingest_dry_run(tmp_path: Path) -> None:
     assert n == 0
 
 
+def test_run_ingest_dry_run_many_tasks(tmp_path: Path) -> None:
+    """Dry run with >25 tasks hits the '... and N more' log branch."""
+    (tmp_path / "v").mkdir()
+    for i in range(30):
+        (tmp_path / "v" / f"1cv8_ru_{i}.hbk").write_bytes(b"x")
+    n = run_ingest(
+        source_dirs_with_versions=[(tmp_path, "v")],
+        languages=["ru"],
+        temp_base=tmp_path / "temp",
+        dry_run=True,
+        verbose=True,
+    )
+    assert n == 0
+
+
+@patch("onec_help.ingest._unpack_and_build_docs")
+@patch("qdrant_client.QdrantClient")
+def test_run_ingest_max_tasks(mock_qdrant: MagicMock, mock_task: MagicMock, tmp_path: Path) -> None:
+    """max_tasks limits how many .hbk are processed."""
+    (tmp_path / "v").mkdir()
+    for i in range(5):
+        (tmp_path / "v" / f"1cv8_ru_{i}.hbk").write_bytes(b"x")
+    mock_task.return_value = (None, "v", "ru", "skip")
+    mock_qdrant.return_value.collection_exists.return_value = True
+    n = run_ingest(
+        source_dirs_with_versions=[(tmp_path, "v")],
+        languages=["ru"],
+        temp_base=tmp_path / "temp",
+        max_tasks=2,
+        max_workers=1,
+        verbose=False,
+    )
+    assert mock_task.call_count == 2
+    assert n == 0
+
+
+def test_discover_version_dirs_not_dir(tmp_path: Path) -> None:
+    """When base is a file or missing, returns []."""
+    assert discover_version_dirs(tmp_path / "missing") == []
+    (tmp_path / "file").write_text("x")
+    assert discover_version_dirs(tmp_path / "file") == []
+
+
+def test_parse_source_dirs_env_blank_parts() -> None:
+    """Blank and comma-only parts are skipped."""
+    assert parse_source_dirs_env("  ,  /a:v1  ,  ") == [("/a", "v1")]
+
+
 def test_run_ingest_empty_sources() -> None:
     n = run_ingest(
         source_dirs_with_versions=[],
@@ -252,3 +302,110 @@ def test_run_ingest_integration_mock(
     assert mock_unpack.called
     assert mock_build_index.return_value == 1
     assert n >= 1
+
+
+@patch("onec_help.unpack.unpack_hbk")
+def test_run_unpack_only_two_workers(mock_unpack: MagicMock, tmp_path: Path) -> None:
+    """run_unpack_only with max_workers=2 uses thread pool."""
+    (tmp_path / "v").mkdir()
+    (tmp_path / "v" / "1cv8_ru.hbk").write_bytes(b"x")
+    (tmp_path / "v" / "1cv8_en.hbk").write_bytes(b"y")
+    out = tmp_path / "out"
+    n = run_unpack_only(
+        source_dirs_with_versions=[(tmp_path, "v")],
+        output_dir=out,
+        languages=None,
+        max_workers=2,
+        verbose=False,
+    )
+    assert n == 2
+    assert mock_unpack.call_count == 2
+
+
+def test_run_ingest_temp_base_creation_fails(tmp_path: Path) -> None:
+    """When temp_base cannot be created, run_ingest raises RuntimeError."""
+    (tmp_path / "v").mkdir()
+    (tmp_path / "v" / "1cv8_ru.hbk").write_bytes(b"x")
+    real_mkdir = Path.mkdir
+    first_call = [True]
+
+    def mkdir_raise_first(self, *args, **kwargs):
+        if first_call[0]:
+            first_call[0] = False
+            raise OSError(13, "Permission denied")
+        return real_mkdir(self, *args, **kwargs)
+
+    with patch.object(Path, "mkdir", mkdir_raise_first):
+        with pytest.raises(RuntimeError, match="Cannot create temp dir"):
+            run_ingest(
+                source_dirs_with_versions=[(tmp_path, "v")],
+                languages=["ru"],
+                temp_base=tmp_path / "temp",
+                max_workers=1,
+            )
+
+
+@patch("onec_help.indexer.build_index")
+@patch("onec_help.html2md.build_docs")
+@patch("onec_help.unpack.unpack_hbk")
+@patch("qdrant_client.QdrantClient")
+def test_run_ingest_failed_log(
+    mock_qdrant: MagicMock,
+    mock_unpack: MagicMock,
+    mock_build_docs: MagicMock,
+    mock_build_index: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """When some tasks fail, INGEST_FAILED_LOG is written if set."""
+    (tmp_path / "v").mkdir()
+    (tmp_path / "v" / "1cv8_ru.hbk").write_bytes(b"x")
+    mock_unpack.side_effect = RuntimeError("7z failed")
+    mock_qdrant.return_value.collection_exists.return_value = True
+    fail_log = tmp_path / "failed.txt"
+    with patch.dict("os.environ", {"INGEST_FAILED_LOG": str(fail_log)}, clear=False):
+        n = run_ingest(
+            source_dirs_with_versions=[(tmp_path, "v")],
+            languages=["ru"],
+            temp_base=tmp_path / "temp",
+            max_workers=1,
+            verbose=True,
+        )
+    assert n == 0
+    assert fail_log.exists()
+    assert "1cv8_ru" in fail_log.read_text()
+
+
+@patch("onec_help.indexer.build_index")
+@patch("onec_help.html2md.build_docs")
+@patch("onec_help.unpack.unpack_hbk")
+@patch("qdrant_client.QdrantClient")
+def test_run_ingest_failed_log_write_raises(
+    mock_qdrant: MagicMock,
+    mock_unpack: MagicMock,
+    mock_build_docs: MagicMock,
+    mock_build_index: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """When writing INGEST_FAILED_LOG raises OSError, ingest still completes and logs the error."""
+    (tmp_path / "v").mkdir()
+    (tmp_path / "v" / "1cv8_ru.hbk").write_bytes(b"x")
+    mock_unpack.side_effect = RuntimeError("7z failed")
+    mock_qdrant.return_value.collection_exists.return_value = True
+    fail_log = tmp_path / "failed.txt"
+    real_open = open
+
+    def open_raise_for_fail_log(path, mode="r", *args, **kwargs):
+        if path == str(fail_log) and "w" in mode:
+            raise OSError(13, "Permission denied")
+        return real_open(path, mode, *args, **kwargs)
+
+    with patch.dict("os.environ", {"INGEST_FAILED_LOG": str(fail_log)}, clear=False):
+        with patch("builtins.open", open_raise_for_fail_log):
+            n = run_ingest(
+                source_dirs_with_versions=[(tmp_path, "v")],
+                languages=["ru"],
+                temp_base=tmp_path / "temp",
+                max_workers=1,
+                verbose=True,
+            )
+    assert n == 0

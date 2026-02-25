@@ -4,6 +4,7 @@ from pathlib import Path
 from onec_help.html2md import (
     _looks_like_html,
     _normalize_md_text,
+    _read_html_file,
     build_docs,
     html_to_md_content,
 )
@@ -28,6 +29,29 @@ def test_html_to_md_content(sample_html: Path) -> None:
 
 def test_html_to_md_content_missing() -> None:
     assert html_to_md_content(Path("/nonexistent")) == ""
+
+
+def test_read_html_file_utf8(tmp_path: Path) -> None:
+    f = tmp_path / "a.html"
+    f.write_text("<html><body>Test</body></html>", encoding="utf-8")
+    assert "Test" in _read_html_file(f)
+
+
+def test_read_html_file_cp1251(tmp_path: Path) -> None:
+    """Legacy 1C help may be in cp1251."""
+    f = tmp_path / "c.html"
+    f.write_bytes("<html><body>".encode("utf-8") + "Русский".encode("cp1251") + b"</body></html>")
+    text = _read_html_file(f)
+    assert "Русский" in text
+
+
+def test_read_html_file_fallback_replace(tmp_path: Path) -> None:
+    """When no encoding works, decode with errors=replace."""
+    f = tmp_path / "d.html"
+    f.write_bytes(b"<html>\xff\xfe</html>")
+    text = _read_html_file(f)
+    assert "<html>" in text
+    assert "\ufffd" in text or "html" in text
 
 
 def test_looks_like_html(tmp_path: Path) -> None:

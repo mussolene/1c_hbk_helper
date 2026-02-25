@@ -242,3 +242,50 @@ def test_get_topic_content_fallback_to_index(
     content = get_topic_content("/none", "path/to/topic")
     assert content == "From index"
     mock_from_index.assert_called_once()
+
+
+@patch("onec_help.indexer.QdrantClient")
+def test_get_index_status_scroll_raises(mock_client: MagicMock) -> None:
+    """When scroll raises, status still returns exists/points_count without versions."""
+    mock_instance = MagicMock()
+    mock_client.return_value = mock_instance
+    mock_instance.collection_exists.return_value = True
+    mock_instance.get_collection.return_value = MagicMock(points_count=50)
+    mock_instance.scroll.side_effect = RuntimeError("scroll error")
+    s = get_index_status(qdrant_host="localhost", qdrant_port=6333)
+    assert s["exists"] is True
+    assert s["points_count"] == 50
+    assert "versions" not in s or s.get("versions") is None
+
+
+@patch("onec_help.indexer.QdrantClient")
+@patch("onec_help.indexer.Filter")
+@patch("onec_help.indexer.FieldCondition")
+@patch("onec_help.indexer.MatchValue")
+def test_get_topic_from_index_fallback_scroll(
+    mock_mv: MagicMock,
+    mock_fc: MagicMock,
+    mock_f: MagicMock,
+    mock_client: MagicMock,
+) -> None:
+    """First scroll (with filter) returns empty; fallback scroll finds by path."""
+    mock_instance = MagicMock()
+    mock_client.return_value = mock_instance
+    mock_instance.scroll.side_effect = [
+        ([], None),
+        ([MagicMock(payload={"path": "sub/topic.html", "text": "Fallback text"})], None),
+    ]
+    text = get_topic_from_index("topic.html", qdrant_host="localhost", qdrant_port=6333)
+    assert text == "Fallback text"
+
+
+@patch("onec_help.indexer.QdrantClient")
+def test_build_index_multiple_batches(mock_client: MagicMock, tmp_path: Path) -> None:
+    """Multiple .md files trigger multiple upsert batches when batch_size is small."""
+    for i in range(5):
+        (tmp_path / f"doc{i}.md").write_text(f"# Doc {i}\n\nBody.", encoding="utf-8")
+    mock_instance = MagicMock()
+    mock_client.return_value = mock_instance
+    n = build_index(tmp_path, qdrant_host="localhost", qdrant_port=6333, batch_size=2)
+    assert n == 5
+    assert mock_instance.upsert.call_count >= 2

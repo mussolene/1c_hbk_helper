@@ -5,14 +5,13 @@ Supports language filter (e.g. only *_ru.hbk) and concurrent processing.
 Progress is printed to stderr so long runs are not killed by "no output" timeouts.
 """
 
+from concurrent.futures import as_completed, ThreadPoolExecutor
 import os
+from pathlib import Path
 import re
 import shutil
 import sys
-from concurrent.futures import as_completed, ThreadPoolExecutor
-from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
-
 
 
 def _log(msg: str) -> None:
@@ -114,11 +113,12 @@ def run_ingest(
     index_batch_size: number of files per index upsert (smaller = more progress, less memory per step).
     Returns total points indexed (0 if dry_run).
     """
+    from qdrant_client import QdrantClient
+    from qdrant_client.models import Distance, VectorParams
+
     from .html2md import build_docs
     from .indexer import VECTOR_SIZE, build_index
     from .unpack import unpack_hbk
-    from qdrant_client import QdrantClient
-    from qdrant_client.models import Distance, VectorParams
 
     if not source_dirs_with_versions:
         return 0
