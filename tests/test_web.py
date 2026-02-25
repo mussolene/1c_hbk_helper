@@ -1,6 +1,7 @@
 """Tests for web module."""
-import pytest
 from pathlib import Path
+
+import pytest
 
 from onec_help.web import app
 

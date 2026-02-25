@@ -1,6 +1,7 @@
 """Tests for categories module."""
-import pytest
 from pathlib import Path
+
+import pytest
 
 from onec_help.categories import (
     parse_content_file,

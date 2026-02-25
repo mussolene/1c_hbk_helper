@@ -1,6 +1,7 @@
 """Tests for html2md module."""
-import pytest
 from pathlib import Path
+
+import pytest
 
 from onec_help.html2md import _normalize_md_text, html_to_md_content, build_docs
 

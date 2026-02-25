@@ -1,5 +1,6 @@
 """Test __main__ entry point."""
 from unittest.mock import patch
+
 import pytest
 
 

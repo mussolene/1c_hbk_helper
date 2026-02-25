@@ -9,8 +9,8 @@ from onec_help.ingest import (
     _language_from_filename,
     collect_hbk_tasks,
     discover_version_dirs,
-    parse_source_dirs_env,
     parse_languages_env,
+    parse_source_dirs_env,
     run_ingest,
     run_unpack_only,
 )
@@ -174,7 +174,7 @@ def test_run_unpack_only_no_tasks(tmp_path: Path) -> None:
     assert n == 0
 
 
-@patch("onec_help.ingest.unpack_hbk")
+@patch("onec_help.unpack.unpack_hbk")
 def test_run_unpack_only_one_archive(mock_unpack: MagicMock, tmp_path: Path) -> None:
     (tmp_path / "v").mkdir()
     (tmp_path / "v" / "1cv8_ru.hbk").write_bytes(b"x")
@@ -195,8 +195,8 @@ def test_run_unpack_only_one_archive(mock_unpack: MagicMock, tmp_path: Path) -> 
 
 @patch("onec_help.ingest.build_index")
 @patch("onec_help.ingest.build_docs")
-@patch("onec_help.ingest.unpack_hbk")
-@patch("onec_help.ingest.QdrantClient")
+@patch("onec_help.unpack.unpack_hbk")
+@patch("qdrant_client.QdrantClient")
 def test_run_ingest_integration_mock(
     mock_qdrant: MagicMock,
     mock_unpack: MagicMock,

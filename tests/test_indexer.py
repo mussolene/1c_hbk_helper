@@ -4,15 +4,15 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from onec_help import indexer as indexer_mod
 from onec_help.indexer import (
     _get_embedding,
     _path_to_point_id,
+    build_index,
     get_index_status,
     get_topic_by_path,
     search_index,
-    build_index,
 )
-from onec_help import indexer as indexer_mod
 
 
 def test_get_embedding() -> None:
