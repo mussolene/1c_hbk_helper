@@ -24,3 +24,15 @@ def test_search_and_get_topic(mock_get, mock_search, help_sample_dir: Path) -> N
     assert mcp_server._search("query", limit=5)
     assert mcp_server._get_topic("field626.html") == "# Test\n\nContent"
     mcp_server._HELP_PATH = None
+
+
+@patch.object(mcp_server, "_search_keyword")
+@patch.object(mcp_server, "_search")
+def test_hybrid_search_handles_score_none(mock_search, mock_search_keyword) -> None:
+    """_hybrid_search must not fail when keyword results have score=None."""
+    mock_search.return_value = [{"path": "a.md", "title": "A", "text": "x", "score": 0.9}]
+    mock_search_keyword.return_value = [{"path": "b.md", "title": "B", "text": "y", "score": None}]
+    results = mcp_server._hybrid_search("test", limit=5)
+    paths = [r.get("path") for r in results]
+    assert "a.md" in paths
+    assert "b.md" in paths

@@ -110,7 +110,10 @@ def _hybrid_search(
             elif path and seen[path][1] is False:
                 seen[path] = (r, True)
 
-    keyword_first = sorted(seen.items(), key=lambda x: (0 if x[1][1] else 1, -x[1][0].get("score", 0) or 0))
+    keyword_first = sorted(
+        seen.items(),
+        key=lambda x: (0 if x[1][1] else 1, -(x[1][0].get("score") or 0)),
+    )
     return [item[1][0] for item in keyword_first[:limit]]
 
 
