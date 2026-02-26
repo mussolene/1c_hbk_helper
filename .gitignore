@@ -13,9 +13,13 @@ ENV/
 dist/
 build/
 
-# IDE
+# IDE / editor
 .idea/
 .vscode/
+.cursor/
+
+# Linter / tools cache
+.ruff_cache/
 *.swp
 *.swo
 
