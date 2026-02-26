@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from onec_help.snippets_loader import collect_from_folder
 
 

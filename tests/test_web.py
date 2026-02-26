@@ -55,7 +55,8 @@ def test_content_exception_returns_500(client, help_sample_dir: Path) -> None:
 
 
 def test_index_post_success(client, help_sample_dir: Path) -> None:
-    r = client.post("/", data={"directory": str(help_sample_dir)})
+    with patch.dict(os.environ, {"HELP_SERVE_ALLOWED_DIRS": str(help_sample_dir.parent)}):
+        r = client.post("/", data={"directory": str(help_sample_dir)})
     assert r.status_code == 200
     assert b"tree_elements" in r.data or b"tree" in r.data
 
@@ -101,12 +102,10 @@ def test_allowed_base_dirs_from_env(tmp_path: Path) -> None:
     assert result[0] == tmp_path.resolve()
 
 
-def test_directory_allowed_no_restriction(tmp_path: Path) -> None:
-    """When no allowed dirs set, any existing directory is allowed."""
-    with patch.dict(os.environ, {}, clear=False):
-        if "HELP_SERVE_ALLOWED_DIRS" in os.environ:
-            del os.environ["HELP_SERVE_ALLOWED_DIRS"]
-    assert _directory_allowed(str(tmp_path)) is True
+def test_directory_allowed_empty_allowlist_blocks(tmp_path: Path) -> None:
+    """When no allowed dirs set, any directory is rejected (security: require allowlist)."""
+    with patch.dict(os.environ, {"HELP_SERVE_ALLOWED_DIRS": ""}, clear=False):
+        assert _directory_allowed(str(tmp_path)) is False
 
 
 def test_directory_allowed_inside_list(tmp_path: Path, help_sample_dir: Path) -> None:

@@ -20,8 +20,6 @@ _DETAIL_LINK_RE = re.compile(r"/Templates/(\d+)/")
 
 def _create_opener() -> urllib.request.OpenerDirector:
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
     return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
 
 
@@ -151,7 +149,7 @@ def run_parse(
     detail_err = 0
 
     total_pages = len(pages)
-    progress_line("parse-fastcode │ Listing 0/{} │ 0 items │ 0 err".format(total_pages))
+    progress_line(f"parse-fastcode │ Listing 0/{total_pages} │ 0 items │ 0 err")
 
     for i, page in enumerate(pages):
         try:
@@ -170,9 +168,7 @@ def run_parse(
             all_items.append(it)
             added += 1
         progress_line(
-            "parse-fastcode │ Listing {}/{} │ {} items │ {} err".format(
-                i + 1, total_pages, len(all_items), list_err
-            )
+            f"parse-fastcode │ Listing {i + 1}/{total_pages} │ {len(all_items)} items │ {list_err} err"
         )
         if i < len(pages) - 1:
             time.sleep(delay)
@@ -182,7 +178,7 @@ def run_parse(
         total_detail = len(to_fetch)
         if total_detail > 0:
             progress_done(
-                "parse-fastcode │ Detail 0/{} │ fetching full code...".format(total_detail)
+                f"parse-fastcode │ Detail 0/{total_detail} │ fetching full code..."
             )
         for di, (idx, it) in enumerate(to_fetch):
             url = it.pop("detail_url", None)
@@ -198,9 +194,7 @@ def run_parse(
             except Exception:
                 detail_err += 1
             progress_line(
-                "parse-fastcode │ Detail {}/{} │ {} ok │ {} err".format(
-                    di + 1, total_detail, di + 1 - detail_err, detail_err
-                )
+                f"parse-fastcode │ Detail {di + 1}/{total_detail} │ {di + 1 - detail_err} ok │ {detail_err} err"
             )
             time.sleep(delay)
 
@@ -210,8 +204,8 @@ def run_parse(
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(all_items, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    summary = "parse-fastcode │ ✓ {} snippets → {}".format(len(all_items), out.name)
+    summary = f"parse-fastcode │ ✓ {len(all_items)} snippets → {out.name}"
     if list_err or detail_err:
-        summary += " │ {} list err, {} detail err".format(list_err, detail_err)
+        summary += f" │ {list_err} list err, {detail_err} detail err"
     progress_done(summary)
     return 0

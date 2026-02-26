@@ -21,6 +21,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from ._utils import mask_path_for_log, safe_error_message
+
 # Path for ingest status (read by index-status). Default under /tmp so it works without /app.
 DEFAULT_INDEX_STATUS_FILE = "/tmp/onec_help_ingest_status.json"
 # How often to write status file while ingest runs (seconds); env INDEX_STATUS_INTERVAL_SEC
@@ -58,7 +60,9 @@ def _log_cache_error(op: str, path: str, err: Exception) -> None:
     key = (op, path)
     if key not in _log_cache_error._warned:  # type: ignore[attr-defined]
         _log_cache_error._warned.add(key)  # type: ignore[attr-defined]
-        _log(f"[ingest] WARN: ingest cache {op} failed for {path}: {err}. Re-indexing will not be skipped.")
+        _log(
+            f"[ingest] WARN: ingest cache {op} failed for {mask_path_for_log(path)}: {safe_error_message(err)}. Re-indexing will not be skipped."
+        )
 
 
 def _load_ingest_cache() -> dict[str, dict[str, Any]]:
@@ -626,7 +630,7 @@ def run_ingest(
                         f.write(f"{version}\t{language}\t{path_hbk}\t{err or ''}\n")
                 _log(f"[ingest] Wrote failure list to {fail_log}")
             except OSError as e:
-                _log(f"[ingest] Could not write failure log {fail_log}: {e}")
+                _log(f"[ingest] Could not write failure log {mask_path_for_log(fail_log)}: {safe_error_message(e)}")
     return total_indexed
 
 
@@ -650,7 +654,7 @@ def _unpack_one(
         return (True, msg)
     except Exception as e:
         if verbose:
-            _log(f"[unpack] skip {path}: {e}")
+            _log(f"[unpack] skip {mask_path_for_log(str(path))}: {safe_error_message(e)}")
         return (False, str(e))
 
 

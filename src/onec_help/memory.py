@@ -10,8 +10,9 @@ import threading
 import time
 import uuid
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal, Optional
 
 _MEMORY_COLLECTION = "onec_help_memory"
 _store: Optional["MemoryStore"] = None

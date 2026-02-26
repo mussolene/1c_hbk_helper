@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from ._utils import safe_error_message
+
 SNIPPET_MAX_CHARS = 850
 
 # Prefer fastmcp; fallback to mcp package
@@ -356,7 +358,7 @@ def run_mcp(
             )
             return "Snippet saved to memory."
         except Exception as e:
-            return f"Failed to save: {e}"
+            return f"Failed to save: {safe_error_message(e)}"
 
     @mcp.tool()
     def get_1c_help_related(
@@ -429,7 +431,7 @@ def run_mcp(
             )
             return "Reindex started in background. Check get_1c_help_index_status for progress."
         except Exception as e:
-            return f"Failed to start reindex: {e}"
+            return f"Failed to start reindex: {safe_error_message(e)}"
 
     @mcp.tool()
     def get_1c_help_index_status() -> str:

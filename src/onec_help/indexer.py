@@ -26,7 +26,7 @@ except ImportError:
     MatchAny = None  # type: ignore
     MatchValue = None  # type: ignore
 
-from ._utils import path_inside_base
+from ._utils import path_inside_base, safe_error_message
 
 COLLECTION_NAME = "onec_help"
 SNIPPET_MAX_CHARS = 850
@@ -275,14 +275,14 @@ def get_index_status(
     try:
         client = QdrantClient(host=host, port=port, check_compatibility=False)
     except Exception as e:
-        return {"error": str(e), "exists": False, "points_count": 0}
+        return {"error": safe_error_message(e), "exists": False, "points_count": 0}
     if not client.collection_exists(collection):
         return {"exists": False, "points_count": 0, "collection": collection}
     try:
         info = client.get_collection(collection)
         points_count = getattr(info, "points_count", None) or getattr(info, "pointsCount", 0)
     except Exception as e:
-        return {"exists": True, "points_count": None, "error": str(e), "collection": collection}
+        return {"exists": True, "points_count": None, "error": safe_error_message(e), "collection": collection}
     out: dict[str, Any] = {
         "exists": True,
         "points_count": points_count,

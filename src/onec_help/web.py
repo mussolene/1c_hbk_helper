@@ -6,6 +6,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
+from ._utils import mask_path_for_log, safe_error_message
 from .tree import build_tree, get_html_content
 
 
@@ -18,9 +19,11 @@ def _allowed_base_dirs():
 
 
 def _directory_allowed(directory: str) -> bool:
+    """Allow directory only if HELP_SERVE_ALLOWED_DIRS is set and directory is in the list.
+    When allowlist is empty, reject any user-provided path (security: prevents arbitrary fs access)."""
     allowed = _allowed_base_dirs()
     if not allowed:
-        return True
+        return False
     try:
         resolved = Path(directory).resolve()
         return any(resolved == d or resolved.is_relative_to(d) for d in allowed)
@@ -51,9 +54,13 @@ def index():
         if not directory or not Path(directory).is_dir():
             return render_template("index.html", error="Invalid directory path")
         if not _directory_allowed(directory):
-            return render_template(
-                "index.html", error="Directory not in allowed list (HELP_SERVE_ALLOWED_DIRS)"
+            allowed = _allowed_base_dirs()
+            err = (
+                "HELP_SERVE_ALLOWED_DIRS must be set (comma-separated paths) to restrict serve."
+                if not allowed
+                else "Directory not in allowed list (HELP_SERVE_ALLOWED_DIRS)"
             )
+            return render_template("index.html", error=err)
         app.config["BASE_DIR"] = directory
         tree_elements = build_tree(directory)
         import json
@@ -76,8 +83,8 @@ def get_content(html_path: str):
         content = get_html_content(html_path, base_dir)
         return jsonify({"content": content})
     except Exception as e:
-        logger.error("Error serving content for %s: %s", html_path, e)
-        return jsonify({"error": str(e)}), 500
+        logger.error("Error serving content for %s: %s", mask_path_for_log(html_path), type(e).__name__)
+        return jsonify({"error": safe_error_message(e)}), 500
 
 
 @app.route("/download/<path:file_path>")

@@ -363,18 +363,14 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
         from ._utils import progress_done, progress_line
         from .memory import get_memory_store
 
-        total = len(items)
-
         def _progress(loaded: int, tot: int, skipped: int) -> None:
             progress_line(
-                "load-snippets │ {}/{} │ {} loaded │ {} skip".format(
-                    loaded + skipped, tot, loaded, skipped
-                )
+                f"load-snippets │ {loaded + skipped}/{tot} │ {loaded} loaded │ {skipped} skip"
             )
 
         store = get_memory_store()
         n = store.upsert_curated_snippets(items, progress_callback=_progress)
-        progress_done("load-snippets │ ✓ {} loaded → onec_help_memory".format(n))
+        progress_done(f"load-snippets │ ✓ {n} loaded → onec_help_memory")
         return 0
     except json.JSONDecodeError as e:
         print(f"Error: invalid JSON: {e}", file=sys.stderr)
@@ -432,16 +428,14 @@ def cmd_load_standards(args: argparse.Namespace) -> int:
 
         def _progress(loaded: int, tot: int, skipped: int) -> None:
             progress_line(
-                "load-standards │ {}/{} │ {} loaded │ {} skip".format(
-                    loaded + skipped, tot, loaded, skipped
-                )
+                f"load-standards │ {loaded + skipped}/{tot} │ {loaded} loaded │ {skipped} skip"
             )
 
         store = get_memory_store()
         n = store.upsert_curated_snippets(
             items, progress_callback=_progress, domain="standards"
         )
-        progress_done("load-standards │ ✓ {} loaded → onec_help_memory (domain=standards)".format(n))
+        progress_done(f"load-standards │ ✓ {n} loaded → onec_help_memory (domain=standards)")
         return 0
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)

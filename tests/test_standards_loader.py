@@ -5,8 +5,6 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from onec_help.standards_loader import collect_from_folder, fetch_repo_archive
 
 

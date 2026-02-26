@@ -2,7 +2,9 @@
 # If running as root: fix volume ownership and run cron as app user, then drop to app for main process.
 if [ "$(id -u)" = "0" ]; then
   [ -d /data ] && chown -R app:app /data 2>/dev/null || true
-  env | grep -E '^(QDRANT_|HELP_|INGEST_|WATCHDOG_|MEMORY_|EMBEDDING_|SNIPPETS_|STANDARDS_)' | sed 's/^/export /' > /app/.ingest_env 2>/dev/null || true
+  # Exclude EMBEDDING_API_KEY from .ingest_env (security: no secrets on disk)
+  env | grep -E '^(QDRANT_|HELP_|INGEST_|WATCHDOG_|MEMORY_|SNIPPETS_|STANDARDS_)' | sed 's/^/export /' > /app/.ingest_env 2>/dev/null || true
+  env | grep -E '^EMBEDDING_(BACKEND|MODEL|API_URL|DIMENSION|BATCH_SIZE|WORKERS|FORCE_BATCH|TIMEOUT)=' | sed 's/^/export /' >> /app/.ingest_env 2>/dev/null || true
   chown app:app /app/.ingest_env 2>/dev/null || true
   if [ -d /opt/1cv8 ]; then
     crontab -u app /app/crontab 2>/dev/null || true

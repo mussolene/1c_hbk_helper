@@ -1,7 +1,24 @@
 """Shared utilities for onec_help package."""
 
+import os
 import sys
 from pathlib import Path
+
+
+def safe_error_message(e: BaseException, *, production: bool | None = None) -> str:
+    """Return error message safe for API/logs: no stack trace or sensitive detail in production."""
+    if production is None:
+        production = (os.environ.get("PRODUCTION") or "").strip().lower() in ("1", "true", "yes")
+    return type(e).__name__ if production else f"{type(e).__name__}: {e}"
+
+
+def mask_path_for_log(path: str | Path) -> str:
+    """Return path safe for logging: filename only to avoid leaking full paths."""
+    try:
+        p = Path(path)
+        return p.name if p.name else str(p)[-50:]  # fallback: last 50 chars
+    except Exception:
+        return "<path>"
 
 
 def _is_tty() -> bool:

@@ -1,6 +1,7 @@
+# Core dependencies (from pyproject.toml). For reproducible builds use:
+#   pip install -e . && pip freeze > requirements.lock
+# Or: pip-compile pyproject.toml -o requirements.txt
+
 flask>=3.0
 beautifulsoup4>=4.12
 qdrant-client>=1.7
-# Локальные эмбеддинги (EMBEDDING_BACKEND=local). Не нужны при openai_api или none.
-sentence-transformers>=2.2
-fastmcp>=2.0; python_version >= "3.10"

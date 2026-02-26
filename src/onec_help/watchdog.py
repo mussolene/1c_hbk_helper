@@ -10,6 +10,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from ._utils import safe_error_message
+
 
 def run_watchdog(
     help_source_base: Path | None = None,
@@ -63,7 +65,7 @@ def run_watchdog(
                 last_pending = now
                 _process_pending_memory()
         except Exception as e:
-            print(f"[watchdog] error: {e}", file=sys.stderr, flush=True)
+            print(f"[watchdog] error: {safe_error_message(e)}", file=sys.stderr, flush=True)
         time.sleep(poll)
 
 
@@ -77,7 +79,7 @@ def _run_ingest() -> None:
             env=os.environ.copy(),
         )
     except (subprocess.TimeoutExpired, OSError) as e:
-        print(f"[watchdog] ingest failed: {e}", file=sys.stderr, flush=True)
+        print(f"[watchdog] ingest failed: {safe_error_message(e)}", file=sys.stderr, flush=True)
 
 
 def _process_pending_memory() -> None:
@@ -89,4 +91,4 @@ def _process_pending_memory() -> None:
         if n > 0:
             print(f"[watchdog] processed {n} pending memory entries", file=sys.stderr, flush=True)
     except Exception as e:
-        print(f"[watchdog] process_pending failed: {e}", file=sys.stderr, flush=True)
+        print(f"[watchdog] process_pending failed: {safe_error_message(e)}", file=sys.stderr, flush=True)

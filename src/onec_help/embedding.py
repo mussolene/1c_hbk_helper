@@ -98,6 +98,20 @@ _embedding_api_available: bool | None = None
 _fallback_log_count = 0
 
 
+def _mask_url_for_log(url: str) -> str:
+    """Return scheme+host for logging (avoid leaking full path/query)."""
+    if not url:
+        return "<not set>"
+    try:
+        from urllib.parse import urlparse
+
+        p = urlparse(url)
+        host = p.netloc or p.path.split("/")[0] or "?"
+        return f"{p.scheme or 'http'}://{host}/..."
+    except Exception:
+        return "<url>"
+
+
 def _log_fallback(reason: str) -> None:
     """Log once per 100 fallbacks to avoid spam."""
     global _fallback_log_count
@@ -152,7 +166,7 @@ def _check_embedding_api_available() -> bool:
     except Exception as e:
         _embedding_api_available = False
         print(
-            f"[embedding] Внешний сервис эмбеддингов недоступен ({_EMBEDDING_API_URL}): {e!r}",
+            f"[embedding] Внешний сервис эмбеддингов недоступен ({_mask_url_for_log(_EMBEDDING_API_URL)}): {type(e).__name__}",
             file=sys.stderr,
             flush=True,
         )
@@ -356,7 +370,9 @@ def _get_embedding_api_single(text: str) -> list[float]:
                 time.sleep(delay)
     global _resolved_api_model_id
     _resolved_api_model_id = None
-    _log_fallback(f"embedding API error/timeout, using placeholder: {last_err!r}")
+    _log_fallback(
+        f"embedding API error/timeout, using placeholder: {type(last_err).__name__}"
+    )
     return _get_embedding_placeholder(text, _embedding_fallback_dim())
 
 
@@ -410,7 +426,9 @@ def _get_embedding_api_batch(texts: list[str]) -> list[list[float]]:
                 time.sleep(delay)
     global _resolved_api_model_id
     _resolved_api_model_id = None
-    _log_fallback(f"embedding API batch error, falling back to single requests: {last_err!r}")
+    _log_fallback(
+        f"embedding API batch error, falling back to single requests: {type(last_err).__name__}"
+    )
     return [_get_embedding_api_single(t) for t in texts]
 
 
