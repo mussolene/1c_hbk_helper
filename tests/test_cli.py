@@ -12,6 +12,7 @@ from onec_help.cli import (
     cmd_build_index,
     cmd_index_status,
     cmd_ingest,
+    cmd_load_snippets,
     cmd_mcp,
     cmd_unpack,
     cmd_unpack_dir,
@@ -543,6 +544,69 @@ def test_cmd_mcp_run_raises(mock_run_mcp) -> None:
     mock_run_mcp.side_effect = RuntimeError("fastmcp required: pip install fastmcp")
     args = make_args(directory="/tmp", transport=None, host=None, port=None, path=None)
     assert cmd_mcp(args) == 1
+
+
+def test_cmd_load_snippets_file_not_found() -> None:
+    """cmd_load_snippets returns 1 when snippets file does not exist."""
+    args = make_args(snippets_file="/nonexistent/snippets.json")
+    assert cmd_load_snippets(args) == 1
+
+
+def test_cmd_load_snippets_invalid_json(tmp_path: Path) -> None:
+    """cmd_load_snippets returns 1 when JSON is invalid."""
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json")
+    args = make_args(snippets_file=str(bad))
+    assert cmd_load_snippets(args) == 1
+
+
+def test_cmd_load_snippets_not_array(tmp_path: Path) -> None:
+    """cmd_load_snippets returns 1 when JSON is not an array."""
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"title": "x"}')
+    args = make_args(snippets_file=str(bad))
+    assert cmd_load_snippets(args) == 1
+
+
+@patch("onec_help.memory.get_memory_store")
+def test_cmd_load_snippets_success(mock_get_store, tmp_path: Path) -> None:
+    """cmd_load_snippets loads snippets and prints count."""
+    snippet_file = tmp_path / "snippets.json"
+    snippet_file.write_text(
+        '[{"title": "Test", "description": "desc", "code_snippet": "Сообщить(1);"}]',
+        encoding="utf-8",
+    )
+    mock_store = MagicMock()
+    mock_store.upsert_curated_snippets.return_value = 1
+    mock_get_store.return_value = mock_store
+    args = make_args(snippets_file=str(snippet_file))
+    assert cmd_load_snippets(args) == 0
+    mock_store.upsert_curated_snippets.assert_called_once()
+    call_args = mock_store.upsert_curated_snippets.call_args[0][0]
+    assert len(call_args) == 1
+    assert call_args[0]["title"] == "Test"
+
+
+def test_main_load_snippets(tmp_path: Path) -> None:
+    """main() parses load-snippets and invokes cmd_load_snippets."""
+    snippet_file = tmp_path / "snippets.json"
+    snippet_file.write_text('[{"title": "X", "code_snippet": "x"}]', encoding="utf-8")
+    with patch("onec_help.memory.get_memory_store") as mock_get:
+        mock_store = MagicMock()
+        mock_store.upsert_curated_snippets.return_value = 1
+        mock_get.return_value = mock_store
+        with patch("sys.argv", ["onec_help", "load-snippets", str(snippet_file)]):
+            assert main() == 0
+        mock_store.upsert_curated_snippets.assert_called_once()
+
+
+def test_cmd_load_snippets_exception(tmp_path: Path) -> None:
+    """cmd_load_snippets returns 1 when get_memory_store raises."""
+    snippet_file = tmp_path / "snippets.json"
+    snippet_file.write_text('[{"title": "X", "code_snippet": "x"}]', encoding="utf-8")
+    with patch("onec_help.memory.get_memory_store", side_effect=RuntimeError("no qdrant")):
+        args = make_args(snippets_file=str(snippet_file))
+        assert cmd_load_snippets(args) == 1
 
 
 @patch("onec_help.indexer.get_index_status")

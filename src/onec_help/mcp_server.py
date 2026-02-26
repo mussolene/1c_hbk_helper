@@ -1,6 +1,7 @@
 """MCP server for 1C Help: search_1c_help, get_1c_help_topic, get_1c_function_info."""
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -81,6 +82,38 @@ def _get_topic(
     )
 
 
+def _extract_keyword_tokens(query: str) -> list[str]:
+    """Extract CamelCase and Cyrillic identifiers from query for keyword search."""
+    tokens = re.findall(r"[А-Яа-яA-Za-z][А-Яа-яA-Za-z0-9]*", query)
+    return [t for t in tokens if len(t) >= 3][:5]
+
+
+def _hybrid_search(
+    query: str,
+    limit: int = 10,
+    version: str | None = None,
+    language: str | None = None,
+) -> list[dict[str, Any]]:
+    """Semantic + keyword search, merged and deduplicated. Keyword matches ranked higher."""
+    seen: dict[str, tuple[dict[str, Any], bool]] = {}
+
+    for r in _search(query, limit=limit * 2, version=version, language=language):
+        path = r.get("path", "")
+        if path and path not in seen:
+            seen[path] = (r, False)
+
+    for token in _extract_keyword_tokens(query):
+        for r in _search_keyword(token, limit=5, version=version, language=language):
+            path = r.get("path", "")
+            if path and path not in seen:
+                seen[path] = (r, True)
+            elif path and seen[path][1] is False:
+                seen[path] = (r, True)
+
+    keyword_first = sorted(seen.items(), key=lambda x: (0 if x[1][1] else 1, -x[1][0].get("score", 0) or 0))
+    return [item[1][0] for item in keyword_first[:limit]]
+
+
 def run_mcp(
     help_path: Path,
     transport: str = "stdio",
@@ -107,11 +140,10 @@ def run_mcp(
         include_user_memory: bool = False,
     ) -> str:
         """Search 1C help by natural language (semantic). Returns list of relevant topics with title, path, and snippet.
+        For code answers prefer get_1c_code_answer. For exact API names use search_1c_help_keyword.
         query: search text (e.g. 'Формат', 'Запрос.ПакетПолучения', 'синтаксис ОбъединитьПериоды').
-        limit: max number of results (default 10).
-        version: optional filter by platform version (e.g. '8.3.27.1859').
-        language: optional filter by language (e.g. 'ru').
-        include_user_memory: if True, also search user memory (saved snippets, topics) and mark source."""
+        limit: max results (default 10). version, language: optional filters.
+        include_user_memory: if True, also search saved snippets and mark source."""
         results = _search(query, limit=limit, version=version, language=language)
         memory_results: list[dict[str, Any]] = []
         if include_user_memory:
@@ -134,7 +166,8 @@ def run_mcp(
         for m in memory_results:
             payload = m.get("payload", {})
             title = payload.get("title", "") or payload.get("summary", "")[:80]
-            lines.append(f"{idx}. **{title}** [memory]")
+            src = " [пример]" if payload.get("domain") == "snippets" else " [memory]"
+            lines.append(f"{idx}. **{title}**{src}")
             lines.append(f"   {str(payload)[:SNIPPET_MAX_CHARS]}...")
             idx += 1
         return "\n".join(lines)
@@ -146,9 +179,9 @@ def run_mcp(
         version: str | None = None,
         language: str | None = None,
     ) -> str:
-        """Search 1C help by exact substring in title and text (e.g. 'МенеджерКриптографии', 'интерактивный режим').
-        Use when semantic search misses specific terms. limit: max results (default 15).
-        version: optional filter by platform version. language: optional filter by language."""
+        """Search 1C help by exact substring in title and text (e.g. 'МенеджерКриптографии', 'ПроцессорВыводаРезультатаКомпоновкиДанныхВКоллекциюЗначений').
+        Use when semantic search misses specific API names. For code answers prefer get_1c_code_answer.
+        limit: max results (default 15). version, language: optional filters."""
         results = _search_keyword(
             query.strip(),
             limit=limit,
@@ -167,14 +200,15 @@ def run_mcp(
     @mcp.tool()
     def search_1c_help_with_content(
         query: str,
-        limit: int = 3,
+        limit: int = 5,
         version: str | None = None,
         language: str | None = None,
     ) -> str:
         """Search 1C help and return full content of top results in one call.
-        Combines search + get_topic for each result. query: search text.
-        limit: max topics with full content (default 3). version, language: optional filters."""
-        results = _search(query, limit=limit, version=version, language=language)
+        Combines semantic + keyword search, then get_topic for each result.
+        query: search text. limit: max topics with full content (default 5).
+        version, language: optional filters."""
+        results = _hybrid_search(query, limit=limit, version=version, language=language)
         if not results:
             return "No results found. Ensure build-index was run and Qdrant is available."
         parts = []
@@ -186,6 +220,54 @@ def run_mcp(
             if content:
                 parts.append(f"---\n## {path}\n\n{content}")
         return "\n\n".join(parts) if parts else "No content could be retrieved."
+
+    @mcp.tool()
+    def get_1c_code_answer(
+        query: str,
+        limit: int = 5,
+        include_memory: bool = True,
+        version: str | None = None,
+        language: str | None = None,
+    ) -> str:
+        """Get code-ready answer from 1C help in one call. Best for: 'вывод СКД в таблицу', 'Формат', etc.
+        Combines semantic + keyword search, full topic content, and memory. Prefer over search+get_topic chain.
+        query: natural language or API name. limit: max topics (default 5). include_memory: also search saved snippets."""
+        results = _hybrid_search(query, limit=limit, version=version, language=language)
+        memory_parts: list[str] = []
+        if include_memory:
+            try:
+                from .memory import get_memory_store
+
+                for m in get_memory_store().search_long(query, limit=min(5, limit)):
+                    payload = m.get("payload", {}) or {}
+                    code = payload.get("code_snippet", "")
+                    desc = payload.get("description", "") or payload.get("summary", "")[:200]
+                    title = payload.get("title", "") or desc[:60]
+                    src = " [пример]" if payload.get("domain") == "snippets" else ""
+                    block = f"### {title}{src}\n\n{desc}\n\n```bsl\n{code}\n```" if code else f"### {title}\n\n{desc}"
+                    memory_parts.append(block)
+            except Exception:
+                pass
+        if not results and not memory_parts:
+            return (
+                "No results. Ensure index exists (get_1c_help_index_status). "
+                "Try search_1c_help_keyword with exact API name (e.g. ПроцессорВыводаРезультатаКомпоновкиДанныхВКоллекциюЗначений)."
+            )
+        parts: list[str] = [f"## Запрос: {query}"]
+        if memory_parts:
+            parts.append("\n### Из памяти\n\n" + "\n\n".join(memory_parts))
+        if results:
+            help_blocks = []
+            for r in results:
+                path = r.get("path", "")
+                if not path:
+                    continue
+                content = _get_topic(path, version=version, language=language, prefer_index=False)
+                if content:
+                    help_blocks.append(f"---\n## {path}\n\n{content}")
+            if help_blocks:
+                parts.append("\n### Из справки\n\n" + "\n\n".join(help_blocks))
+        return "\n".join(parts)
 
     @mcp.tool()
     def get_1c_help_topic(
@@ -374,6 +456,16 @@ def run_mcp(
         relevant.sort(key=lambda x: x[1])
         best_priority = relevant[0][1] if relevant else 3
         best = [r for r, p in relevant if p == best_priority]
+        if best_priority == 3:
+            lines = [
+                f"No exact match for «{name_clean}».",
+                "Try search_1c_help_keyword with a related term, e.g. ПроцессорВыводаРезультатаКомпоновкиДанныхВКоллекциюЗначений.",
+                "",
+                "Keyword suggestions (from index):",
+            ]
+            for r in relevant[:5]:
+                lines.append(f"- {r[0].get('path', '')}: {r[0].get('title', '')}")
+            return "\n".join(lines)
         if len(best) > 1:
             lines = ["Найдено несколько совпадений:"]
             for r in best[:10]:

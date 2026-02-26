@@ -3,6 +3,7 @@ Triple memory: short (in-memory), medium (JSONL file), long (Qdrant onec_help_me
 Triple-write on each event; long uses embedding or pending queue when unavailable.
 """
 
+import hashlib
 import json
 import os
 import threading
@@ -143,7 +144,13 @@ class MemoryStore:
         tags = str(topic_path) if topic_path else ""
         return f"1C Help: {title} | {query} | {tags}"
 
-    def _upsert_long(self, point_id: str, vector: list[float], payload: dict[str, Any]) -> None:
+    def _upsert_long(
+        self,
+        point_id: str,
+        vector: list[float],
+        payload: dict[str, Any],
+        numeric_id: int | None = None,
+    ) -> None:
         try:
             from qdrant_client import QdrantClient
             from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -156,7 +163,8 @@ class MemoryStore:
                     collection_name=_MEMORY_COLLECTION,
                     vectors_config=VectorParams(size=len(vector), distance=Distance.COSINE),
                 )
-            numeric_id = abs(hash(point_id)) % (2**63)
+            if numeric_id is None:
+                numeric_id = abs(hash(point_id)) % (2**63)
             client.upsert(
                 collection_name=_MEMORY_COLLECTION,
                 points=[PointStruct(id=numeric_id, vector=vector, payload=payload)],
@@ -244,6 +252,40 @@ class MemoryStore:
             return processed
         except (OSError, json.JSONDecodeError):
             return 0
+
+    def upsert_curated_snippets(self, items: list[dict[str, Any]]) -> int:
+        """Bulk upsert curated code snippets into long memory with domain='snippets'.
+        items: [{title, description, code_snippet}, ...]. Returns count of upserted items."""
+        from . import embedding
+
+        if not embedding.is_embedding_available():
+            return 0
+        count = 0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            title = item.get("title", "") or ""
+            desc = item.get("description", "") or ""
+            code = item.get("code_snippet", "") or ""
+            if not title and not code:
+                continue
+            summary = f"{title} | {desc} | {code[:300]}"
+            try:
+                vec = embedding.get_embedding(summary)
+                payload = {
+                    "title": title,
+                    "description": desc,
+                    "code_snippet": code,
+                    "domain": "snippets",
+                    "summary": summary,
+                }
+                point_id = f"snippet_{hashlib.sha256(title.encode()).hexdigest()[:12]}"
+                numeric_id = int(hashlib.sha256(point_id.encode()).hexdigest()[:14], 16) % (2**63)
+                self._upsert_long(point_id, vec, payload, numeric_id=numeric_id)
+                count += 1
+            except Exception:
+                continue
+        return count
 
     def search_long(
         self,

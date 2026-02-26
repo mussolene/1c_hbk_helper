@@ -318,3 +318,50 @@ def test_upsert_long_exception(tmp_path: Path) -> None:
         mock_qc.side_effect = RuntimeError("connection refused")
         store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
         store._upsert_long("id", [0.1] * 384, {"topic_path": "a.md"})
+
+
+def test_upsert_curated_snippets_embedding_unavailable(tmp_path: Path) -> None:
+    """upsert_curated_snippets returns 0 when embedding is not available."""
+    with patch("onec_help.embedding.is_embedding_available", return_value=False):
+        store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+        items = [{"title": "A", "description": "d", "code_snippet": "x"}]
+        assert store.upsert_curated_snippets(items) == 0
+
+
+def test_upsert_curated_snippets_success(tmp_path: Path) -> None:
+    """upsert_curated_snippets embeds and upserts to long memory."""
+    with patch("onec_help.embedding.is_embedding_available", return_value=True):
+        with patch("onec_help.embedding.get_embedding", return_value=[0.1] * 384):
+            with patch("qdrant_client.QdrantClient") as mock_qc:
+                mock_client = MagicMock()
+                mock_client.collection_exists.return_value = False
+                mock_qc.return_value = mock_client
+                store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+                items = [
+                    {"title": "Test", "description": "desc", "code_snippet": "Сообщить(1);"},
+                    {"title": "Two", "description": "d2", "code_snippet": "x"},
+                ]
+                n = store.upsert_curated_snippets(items)
+                assert n == 2
+                assert mock_client.upsert.call_count == 2
+                for call in mock_client.upsert.call_args_list:
+                    payload = call.kwargs["points"][0].payload
+                    assert payload.get("domain") == "snippets"
+
+
+def test_upsert_curated_snippets_skips_invalid(tmp_path: Path) -> None:
+    """upsert_curated_snippets skips items without title and code_snippet."""
+    with patch("onec_help.embedding.is_embedding_available", return_value=True):
+        with patch("onec_help.embedding.get_embedding", return_value=[0.1] * 384):
+            with patch("qdrant_client.QdrantClient") as mock_qc:
+                mock_client = MagicMock()
+                mock_client.collection_exists.return_value = False
+                mock_qc.return_value = mock_client
+                store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+                items = [
+                    {"title": "Valid", "code_snippet": "x"},
+                    {},
+                    {"description": "only"},
+                ]
+                n = store.upsert_curated_snippets(items)
+                assert n == 1

@@ -1,6 +1,7 @@
 """CLI: unpack, build-docs, serve, build-index, mcp."""
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -307,6 +308,38 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_load_snippets(args: argparse.Namespace) -> int:
+    """Load curated snippets from JSON into onec_help_memory (domain=snippets)."""
+    path = getattr(args, "snippets_file", None) or os.environ.get(
+        "SNIPPETS_JSON_PATH", ""
+    )
+    if not path or not path.strip():
+        default = Path(__file__).resolve().parent.parent / "docs" / "snippets" / "snippets.json"
+        path = str(default)
+    p = Path(path)
+    if not p.exists():
+        print(f"Error: snippets file not found: {p}", file=sys.stderr)
+        return 1
+    try:
+        raw = p.read_text(encoding="utf-8")
+        items = json.loads(raw)
+        if not isinstance(items, list):
+            print("Error: JSON must be an array of {title, description, code_snippet}", file=sys.stderr)
+            return 1
+        from .memory import get_memory_store
+
+        store = get_memory_store()
+        n = store.upsert_curated_snippets(items)
+        print(f"Loaded {n} snippets into onec_help_memory")
+        return 0
+    except json.JSONDecodeError as e:
+        print(f"Error: invalid JSON: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_watchdog(args: argparse.Namespace) -> int:
     """Run watchdog: monitor .hbk, ingest on change; process pending memory."""
     from .watchdog import run_watchdog
@@ -519,6 +552,20 @@ def main() -> int:
         help="Parallel API requests for openai_api (default: env EMBEDDING_WORKERS or 4)",
     )
     p_ingest.set_defaults(func=cmd_ingest)
+
+    # load-snippets
+    p_load_snippets = sub.add_parser(
+        "load-snippets",
+        help="Load curated code snippets from JSON into onec_help_memory (domain=snippets)",
+    )
+    p_load_snippets.add_argument(
+        "snippets_file",
+        type=str,
+        nargs="?",
+        default=None,
+        help="Path to snippets.json (default: docs/snippets/snippets.json or SNIPPETS_JSON_PATH)",
+    )
+    p_load_snippets.set_defaults(func=cmd_load_snippets)
 
     # index-status (ingest: embedding speed, per-folder, ETA, total time)
     p_status = sub.add_parser(
