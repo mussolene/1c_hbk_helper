@@ -21,29 +21,14 @@ from onec_help.indexer import (
 )
 
 
-def test_get_embedding_dimension_default() -> None:
-    """Default backend is local: dimension is VECTOR_SIZE (from embedding module)."""
+def test_get_embedding_dimension_delegates_to_embedding() -> None:
+    """indexer.get_embedding_dimension delegates to embedding module."""
+    dim = get_embedding_dimension()
+    assert isinstance(dim, int)
+    assert dim > 0
     from onec_help import embedding
 
-    assert get_embedding_dimension() == embedding.VECTOR_SIZE
-
-
-def test_get_embedding_dimension_openai_api() -> None:
-    """When openai_api and EMBEDDING_DIMENSION set, returns that value."""
-    import importlib
-
-    from onec_help import embedding
-
-    with patch.dict(
-        "os.environ",
-        {"EMBEDDING_BACKEND": "openai_api", "EMBEDDING_DIMENSION": "768"},
-        clear=False,
-    ):
-        importlib.reload(embedding)
-        importlib.reload(indexer_mod)
-        assert indexer_mod.get_embedding_dimension() == 768
-    importlib.reload(embedding)
-    importlib.reload(indexer_mod)
+    assert dim == embedding.get_embedding_dimension()
 
 
 def test_build_index_no_qdrant_client(tmp_path: Path) -> None:

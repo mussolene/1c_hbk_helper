@@ -178,7 +178,7 @@ def run_mcp(
         if not results:
             return "No results found. Ensure build-index was run and Qdrant is available."
         parts = []
-        for i, r in enumerate(results, 1):
+        for _i, r in enumerate(results, 1):
             path = r.get("path", "")
             if not path:
                 continue

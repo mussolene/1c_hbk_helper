@@ -12,7 +12,6 @@ import time
 import unicodedata
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Optional
 
 
 def sanitize_text_for_embedding(text: str) -> str:
@@ -92,10 +91,10 @@ def _embedding_workers() -> int:
         return DEFAULT_EMBEDDING_WORKERS
 
 
-_resolved_api_model_id: Optional[str] = None
-_cached_api_dimension: Optional[int] = None
+_resolved_api_model_id: str | None = None
+_cached_api_dimension: int | None = None
 _dimension_detecting: bool = False
-_embedding_api_available: Optional[bool] = None
+_embedding_api_available: bool | None = None
 _fallback_log_count = 0
 
 
@@ -195,7 +194,7 @@ def _resolve_openai_api_model() -> str:
     global _resolved_api_model_id
     if _resolved_api_model_id is not None:
         return _resolved_api_model_id
-    model_ids: List[str] = []
+    model_ids: list[str] = []
     try:
         req = urllib.request.Request(
             f"{_EMBEDDING_API_URL}/models",
@@ -295,7 +294,7 @@ def _get_embedding_local(text: str) -> list[float]:
         return _get_embedding_placeholder(text, VECTOR_SIZE)
 
 
-def _get_embedding_local_batch(texts: List[str]) -> List[list[float]]:
+def _get_embedding_local_batch(texts: list[str]) -> list[list[float]]:
     """Batch embedding via sentence-transformers."""
     global _embedding_model
     if not texts:
@@ -361,7 +360,7 @@ def _get_embedding_api_single(text: str) -> list[float]:
     return _get_embedding_placeholder(text, _embedding_fallback_dim())
 
 
-def _get_embedding_api_batch(texts: List[str]) -> List[list[float]]:
+def _get_embedding_api_batch(texts: list[str]) -> list[list[float]]:
     """Batch request to OpenAI-compatible API (input array). Fallback to single requests on error."""
     if not texts:
         return []
@@ -416,20 +415,20 @@ def _get_embedding_api_batch(texts: List[str]) -> List[list[float]]:
 
 
 def _get_embedding_api_batch_parallel(
-    texts: List[str],
+    texts: list[str],
     batch_size: int,
     workers: int,
-) -> List[list[float]]:
+) -> list[list[float]]:
     """Split texts into batches and call API in parallel (ThreadPool)."""
     if not texts:
         return []
     batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
     if workers <= 1 or len(batches) <= 1:
-        results: List[list[float]] = []
+        results: list[list[float]] = []
         for batch in batches:
             results.extend(_get_embedding_api_batch(batch))
         return results
-    batch_results: List[List[list[float]]] = [None] * len(batches)  # type: ignore[list-item]
+    batch_results: list[list[list[float]]] = [None] * len(batches)  # type: ignore[list-item]
     with ThreadPoolExecutor(max_workers=min(workers, len(batches))) as executor:
         future_to_idx = {
             executor.submit(_get_embedding_api_batch, b): i for i, b in enumerate(batches)
@@ -456,10 +455,10 @@ def get_embedding(text: str) -> list[float]:
 
 
 def get_embedding_batch(
-    texts: List[str],
-    batch_size: Optional[int] = None,
-    workers: Optional[int] = None,
-) -> List[list[float]]:
+    texts: list[str],
+    batch_size: int | None = None,
+    workers: int | None = None,
+) -> list[list[float]]:
     """
     Produce embeddings for a list of texts. Uses batch API where supported;
     for openai_api, workers > 1 runs batches in parallel.

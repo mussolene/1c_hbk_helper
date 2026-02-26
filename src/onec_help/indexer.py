@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     from qdrant_client import QdrantClient
@@ -23,6 +23,7 @@ except ImportError:
     Filter = None  # type: ignore
     MatchValue = None  # type: ignore
 
+from ._utils import path_inside_base
 
 COLLECTION_NAME = "onec_help"
 
@@ -44,10 +45,10 @@ def _path_to_point_id(rel_path: str, version: str = "", language: str = "") -> i
 
 
 def _build_path_to_section(
-    nodes: list, base_path: str = "", breadcrumb: Optional[List[str]] = None
-) -> Dict[str, tuple[str, List[str]]]:
+    nodes: list, base_path: str = "", breadcrumb: list[str] | None = None
+) -> dict[str, tuple[str, list[str]]]:
     """Traverse tree from build_tree; return {rel_path_or_stem: (section_path, breadcrumb)}."""
-    result: Dict[str, tuple[str, List[str]]] = {}
+    result: dict[str, tuple[str, list[str]]] = {}
     breadcrumb = breadcrumb or []
     for node in nodes or []:
         title = node.get("title", "")
@@ -69,11 +70,11 @@ def build_index(
     qdrant_port=6333,
     collection=COLLECTION_NAME,
     incremental=False,
-    extra_payload: Optional[Dict[str, Any]] = None,
+    extra_payload: dict[str, Any] | None = None,
     batch_size: int = 500,
-    embedding_batch_size: Optional[int] = None,
-    embedding_workers: Optional[int] = None,
-    source_dir: Optional[str] = None,
+    embedding_batch_size: int | None = None,
+    embedding_workers: int | None = None,
+    source_dir: str | None = None,
 ) -> int:
     """Index .md (and optionally .html) files from docs_dir into Qdrant in batches. Returns total points.
     extra_payload: merged into each point (e.g. {"version": "8.3", "language": "ru"}).
@@ -100,7 +101,7 @@ def build_index(
     language = extra.get("language", "")
     max_input_chars = embedding.MAX_EMBEDDING_INPUT_CHARS
 
-    path_to_section: Dict[str, tuple[str, List[str]]] = {}
+    path_to_section: dict[str, tuple[str, list[str]]] = {}
     if source_dir:
         root = find_categories_root(Path(source_dir))
         if root:
@@ -138,13 +139,13 @@ def build_index(
     total = 0
     for batch_start in range(0, len(paths_to_index), batch_size):
         batch_paths = paths_to_index[batch_start : batch_start + batch_size]
-        items: List[
-            tuple[str, str, str, int, List[Dict[str, Any]]]
+        items: list[
+            tuple[str, str, str, int, list[dict[str, Any]]]
         ] = []  # (rel_str, text, title, point_index, outgoing_links)
         base_for_links = Path(source_dir) if source_dir else docs_dir
-        for idx, path in enumerate(batch_paths):
+        for path in batch_paths:
             try:
-                outgoing_links: List[Dict[str, Any]] = []
+                outgoing_links: list[dict[str, Any]] = []
                 if path.suffix == ".md":
                     text = read_file_with_encoding_fallback(path, encodings=_ENCODINGS_UTF8_FIRST)
                     if source_dir:
@@ -228,11 +229,11 @@ def build_index(
 
 
 def get_index_status(
-    qdrant_host: Optional[str] = None,
-    qdrant_port: Optional[int] = None,
+    qdrant_host: str | None = None,
+    qdrant_port: int | None = None,
     collection: str = COLLECTION_NAME,
     sample_size: int = 500,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return index status: exists, points_count, and optional version/language breakdown from payload."""
     if QdrantClient is None:
         return {"error": "qdrant-client not available", "exists": False, "points_count": 0}
@@ -249,7 +250,7 @@ def get_index_status(
         points_count = getattr(info, "points_count", None) or getattr(info, "pointsCount", 0)
     except Exception as e:
         return {"exists": True, "points_count": None, "error": str(e), "collection": collection}
-    out: Dict[str, Any] = {
+    out: dict[str, Any] = {
         "exists": True,
         "points_count": points_count,
         "collection": collection,
@@ -284,8 +285,8 @@ def search_index(
     qdrant_port=None,
     collection=COLLECTION_NAME,
     limit=10,
-    version: Optional[str] = None,
-    language: Optional[str] = None,
+    version: str | None = None,
+    language: str | None = None,
 ):
     """Search Qdrant; return list of payloads with path, title, text snippet.
     version, language: optional payload filters."""
@@ -305,7 +306,7 @@ def search_index(
         must.append(FieldCondition(key="language", match=MatchValue(value=language)))
     qfilter = Filter(must=must) if must and Filter else None
 
-    kwargs: Dict[str, Any] = {"collection_name": collection, "limit": limit}
+    kwargs: dict[str, Any] = {"collection_name": collection, "limit": limit}
     if hasattr(client, "query_points"):
         kwargs["query"] = vector
         if qfilter is not None:
@@ -348,11 +349,11 @@ def search_index(
 
 def get_topic_from_index(
     topic_path: str,
-    qdrant_host: Optional[str] = None,
-    qdrant_port: Optional[int] = None,
+    qdrant_host: str | None = None,
+    qdrant_port: int | None = None,
     collection: str = COLLECTION_NAME,
-    version: Optional[str] = None,
-    language: Optional[str] = None,
+    version: str | None = None,
+    language: str | None = None,
 ) -> str:
     """Return full topic text from Qdrant payload by path (when file is not on disk)."""
     if QdrantClient is None or Filter is None or FieldCondition is None or MatchValue is None:
@@ -413,14 +414,14 @@ def get_topic_from_index(
 
 def search_index_keyword(
     query: str,
-    qdrant_host: Optional[str] = None,
-    qdrant_port: Optional[int] = None,
+    qdrant_host: str | None = None,
+    qdrant_port: int | None = None,
     collection: str = COLLECTION_NAME,
     limit: int = 15,
     batch_size: int = 500,
-    version: Optional[str] = None,
-    language: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    version: str | None = None,
+    language: str | None = None,
+) -> list[dict[str, Any]]:
     """Search by substring in title and text (no embedding). Finds exact terms like МенеджерКриптографии."""
     if QdrantClient is None:
         return []
@@ -438,10 +439,10 @@ def search_index_keyword(
         must.append(FieldCondition(key="language", match=MatchValue(value=language)))
     scroll_filter = Filter(must=must) if must and Filter else None
 
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     offset = None
     seen_paths: set[str] = set()
-    scroll_kwargs: Dict[str, Any] = {
+    scroll_kwargs: dict[str, Any] = {
         "collection_name": collection,
         "limit": batch_size,
         "with_payload": True,
@@ -494,12 +495,12 @@ def search_index_keyword(
 
 
 def list_index_titles(
-    qdrant_host: Optional[str] = None,
-    qdrant_port: Optional[int] = None,
+    qdrant_host: str | None = None,
+    qdrant_port: int | None = None,
     collection: str = COLLECTION_NAME,
     limit: int = 200,
     path_prefix: str = "",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """List (title, path) from index for browsing. path_prefix filters by path start (e.g. 'zif').
     Deduplicates by path (one entry per path when multiple versions exist)."""
     if QdrantClient is None:
@@ -507,7 +508,7 @@ def list_index_titles(
     host = qdrant_host or os.environ.get("QDRANT_HOST", "localhost")
     port = qdrant_port or int(os.environ.get("QDRANT_PORT", "6333"))
     client = QdrantClient(host=host, port=port, check_compatibility=False)
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     seen_paths: set[str] = set()
     offset = None
     prefix = (path_prefix or "").strip().lower()
@@ -541,17 +542,7 @@ def list_index_titles(
     return out[:limit]
 
 
-def _path_inside_base(path: Path, base: Path) -> bool:
-    """Return True if path resolves to a location under base (prevents path traversal)."""
-    try:
-        resolved = path.resolve()
-        base_resolved = base.resolve()
-        return resolved.is_relative_to(base_resolved) or resolved == base_resolved
-    except (ValueError, OSError):
-        return False
-
-
-def _apply_outgoing_links(text: str, payload: Dict[str, Any]) -> str:
+def _apply_outgoing_links(text: str, payload: dict[str, Any]) -> str:
     """Substitute hrefs with resolved_path and append Связанные темы section."""
     import re
 
@@ -598,7 +589,7 @@ def get_topic_by_path(help_path, topic_path) -> str:
         candidates.append(base / f"{topic_path}.md")
         candidates.append(base / f"{topic_path}.html")
     for p in candidates:
-        if not _path_inside_base(p, base):
+        if not path_inside_base(p, base):
             continue
         if p.exists() and p.is_file():
             if p.suffix == ".md":
@@ -611,11 +602,11 @@ def get_topic_by_path(help_path, topic_path) -> str:
 def get_topic_content(
     help_path,
     topic_path: str,
-    qdrant_host: Optional[str] = None,
-    qdrant_port: Optional[int] = None,
+    qdrant_host: str | None = None,
+    qdrant_port: int | None = None,
     collection: str = COLLECTION_NAME,
-    version: Optional[str] = None,
-    language: Optional[str] = None,
+    version: str | None = None,
+    language: str | None = None,
     prefer_index: bool = False,
 ) -> str:
     """Get topic text: first from disk (help_path), then from Qdrant payload if not found.
@@ -636,12 +627,12 @@ def get_topic_content(
 
 def get_1c_help_related(
     topic_path: str,
-    qdrant_host: Optional[str] = None,
-    qdrant_port: Optional[int] = None,
+    qdrant_host: str | None = None,
+    qdrant_port: int | None = None,
     collection: str = COLLECTION_NAME,
-    version: Optional[str] = None,
-    language: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    version: str | None = None,
+    language: str | None = None,
+) -> list[dict[str, Any]]:
     """Return list of related topics for a given path: [{path, title}] from outgoing_links."""
     if QdrantClient is None or Filter is None or FieldCondition is None or MatchValue is None:
         return []
@@ -687,10 +678,10 @@ def compare_1c_help(
     topic_path_or_query: str,
     version_left: str,
     version_right: str,
-    qdrant_host: Optional[str] = None,
-    qdrant_port: Optional[int] = None,
+    qdrant_host: str | None = None,
+    qdrant_port: int | None = None,
     collection: str = COLLECTION_NAME,
-    language: Optional[str] = None,
+    language: str | None = None,
     include_diff: bool = False,
 ) -> str:
     """Compare topic content between two versions. Returns formatted comparison or diff."""

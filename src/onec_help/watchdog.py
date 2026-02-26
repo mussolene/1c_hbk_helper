@@ -9,11 +9,10 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional
 
 
 def run_watchdog(
-    help_source_base: Optional[Path] = None,
+    help_source_base: Path | None = None,
     poll_interval_sec: int = 600,
     pending_interval_sec: int = 600,
 ) -> None:

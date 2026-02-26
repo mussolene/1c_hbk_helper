@@ -7,7 +7,7 @@ name = "onec-help"
 version = "0.1.0"
 description = "1C Help: unpack .hbk, convert to Markdown, index in Qdrant, MCP server"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.10"
 dependencies = [
     "flask>=3.0",
     "beautifulsoup4>=4.12",
@@ -44,6 +44,7 @@ omit = [
     "src/onec_help/__main__.py",
     "src/onec_help/mcp_server.py",
     "src/onec_help/html2md.py",  # many branches; tested separately
+    "src/onec_help/indexer.py",  # complex Qdrant logic; unit-tested with mocks
     "*/tests/*",
 ]
 source = ["src/onec_help"]
@@ -53,8 +54,21 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
-ignore = ["E501"]
+select = ["E", "F", "I", "W", "B", "S", "UP"]
+ignore = [
+    "E501",
+    "S104",  # host="0.0.0.0" intentional for Flask/Docker
+    "S108",  # /tmp/help_ingest is documented default, overridable via env
+    "S110",  # try/except pass - intentional fallbacks
+    "S112",  # try/except continue - intentional skip on error
+    "S310",  # Embedding API URL is user-configured
+    "S603",  # subprocess with fixed args (unzip, onec_help ingest)
+    "S607",  # 7z/unzip from PATH - system dependency
+    "S608",  # sqlite table name is constant _CACHE_TABLE
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]  # assert is standard in pytest
 
 [tool.ruff.lint.isort]
 known-first-party = ["onec_help"]

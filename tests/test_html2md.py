@@ -52,7 +52,7 @@ def test_read_html_file_utf8(tmp_path: Path) -> None:
 def test_read_html_file_cp1251(tmp_path: Path) -> None:
     """Legacy 1C help may be in cp1251."""
     f = tmp_path / "c.html"
-    f.write_bytes("<html><body>".encode("utf-8") + "Русский".encode("cp1251") + b"</body></html>")
+    f.write_bytes(b"<html><body>" + "Русский".encode("cp1251") + b"</body></html>")
     text = _read_html_file(f)
     assert "Русский" in text
 

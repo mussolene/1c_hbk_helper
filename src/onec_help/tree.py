@@ -4,6 +4,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ._utils import path_inside_base
+
 
 def build_tree(directory):
     """
@@ -45,21 +47,11 @@ def build_tree(directory):
     return flat
 
 
-def _path_inside_base(path: Path, base: Path) -> bool:
-    """Return True if path resolves to a location under base (prevents path traversal)."""
-    try:
-        resolved = path.resolve()
-        base_resolved = base.resolve()
-        return resolved.is_relative_to(base_resolved) or resolved == base_resolved
-    except (ValueError, OSError):
-        return False
-
-
 def get_html_content(html_path: str, base_dir) -> str:
     """Read HTML file and adjust links for web serving (href -> /content/, src -> /download/)."""
     base = Path(base_dir).resolve()
     file_path = (base / html_path).resolve()
-    if not _path_inside_base(file_path, base):
+    if not path_inside_base(file_path, base):
         return "<html><body>No content available</body></html>"
     if not file_path.exists() or file_path.suffix != ".html":
         return "<html><body>No content available</body></html>"

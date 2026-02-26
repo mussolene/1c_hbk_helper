@@ -6,12 +6,12 @@ import html
 import os
 import unicodedata
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from bs4 import BeautifulSoup
 
 
-def resolve_href(current_path: Path, href: str, base_dir: Path) -> Optional[str]:
+def resolve_href(current_path: Path, href: str, base_dir: Path) -> str | None:
     """Resolve relative href to a path within base_dir. Returns normalized path string or None.
     href="#" (anchor) returns None."""
     href = (href or "").strip()
@@ -40,9 +40,9 @@ def resolve_href(current_path: Path, href: str, base_dir: Path) -> Optional[str]
     return None
 
 
-def extract_outgoing_links(html_path: Path, base_dir: Path) -> List[Dict[str, Any]]:
+def extract_outgoing_links(html_path: Path, base_dir: Path) -> list[dict[str, Any]]:
     """Parse HTML, find all <a href>, resolve each, return [{href, resolved_path, target_title, link_text}]."""
-    result: List[Dict[str, Any]] = []
+    result: list[dict[str, Any]] = []
     try:
         text = _read_html_file(html_path)
     except Exception:
@@ -143,7 +143,7 @@ def _looks_like_utf8_mojibake(text: str) -> bool:
     return box > 5 and cyrillic > 5
 
 
-def _file_encodings() -> Tuple[str, ...]:
+def _file_encodings() -> tuple[str, ...]:
     order = (os.environ.get("HELP_FILE_ENCODING") or "").strip().lower()
     # HELP_FILE_ENCODING=cp1251 — сначала CP1251 (если точно знаете, что все файлы в 1251)
     if order == "cp1251":
@@ -151,7 +151,7 @@ def _file_encodings() -> Tuple[str, ...]:
     return _ENCODINGS_UTF8_FIRST
 
 
-def _try_fix_mojibake(text: str, raw: bytes) -> Optional[str]:
+def _try_fix_mojibake(text: str, raw: bytes) -> str | None:
     """Если текст похож на кракозябры — перекодировать или перечитать raw в другой кодировке."""
     if not _looks_like_utf8_mojibake(text):
         return None
@@ -179,9 +179,7 @@ def _try_fix_mojibake(text: str, raw: bytes) -> Optional[str]:
     return None
 
 
-def read_file_with_encoding_fallback(
-    path: Path, encodings: Optional[Tuple[str, ...]] = None
-) -> str:
+def read_file_with_encoding_fallback(path: Path, encodings: tuple[str, ...] | None = None) -> str:
     """Читает файл, пробуя кодировки по порядку. При признаках кракозябр пробует альтернативу."""
     if encodings is None:
         encodings = _file_encodings()

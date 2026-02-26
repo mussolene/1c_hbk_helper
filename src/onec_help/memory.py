@@ -10,14 +10,14 @@ import time
 import uuid
 from collections import deque
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal, Optional
 
 _MEMORY_COLLECTION = "onec_help_memory"
 _store: Optional["MemoryStore"] = None
 _store_lock = threading.Lock()
 
 
-def get_memory_store(base_path: Optional[Path] = None) -> "MemoryStore":
+def get_memory_store(base_path: Path | None = None) -> "MemoryStore":
     """Return singleton MemoryStore. base_path from env MEMORY_BASE_PATH or ~/.onec_help."""
     global _store
     with _store_lock:
@@ -60,7 +60,7 @@ class MemoryStore:
     def write_event(
         self,
         event_type: Literal["get_topic", "save_snippet", "exchange"],
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         domain: str = "user",
     ) -> None:
         """Atomically write to short, medium; for long call _write_long_or_pending."""
@@ -80,7 +80,7 @@ class MemoryStore:
 
         self._write_long_or_pending(event_type, payload_copy, ts)
 
-    def _format_medium_summary(self, event_type: str, payload: Dict[str, Any]) -> str:
+    def _format_medium_summary(self, event_type: str, payload: dict[str, Any]) -> str:
         query = payload.get("query", "")
         topic_path = payload.get("topic_path", "")
         paths = (
@@ -123,7 +123,7 @@ class MemoryStore:
         except OSError:
             pass
 
-    def _write_long_or_pending(self, event_type: str, payload: Dict[str, Any], ts: float) -> None:
+    def _write_long_or_pending(self, event_type: str, payload: dict[str, Any], ts: float) -> None:
         from . import embedding
 
         if not embedding.is_embedding_available():
@@ -136,14 +136,14 @@ class MemoryStore:
         except Exception:
             self._append_pending(payload, ts)
 
-    def _format_long_summary(self, payload: Dict[str, Any]) -> str:
+    def _format_long_summary(self, payload: dict[str, Any]) -> str:
         title = payload.get("title", "")
         query = payload.get("query", "")
         topic_path = payload.get("topic_path", "")
         tags = str(topic_path) if topic_path else ""
         return f"1C Help: {title} | {query} | {tags}"
 
-    def _upsert_long(self, point_id: str, vector: List[float], payload: Dict[str, Any]) -> None:
+    def _upsert_long(self, point_id: str, vector: list[float], payload: dict[str, Any]) -> None:
         try:
             from qdrant_client import QdrantClient
             from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -164,9 +164,9 @@ class MemoryStore:
         except Exception:
             pass
 
-    def _append_pending(self, payload: Dict[str, Any], ts: float) -> None:
+    def _append_pending(self, payload: dict[str, Any], ts: float) -> None:
         try:
-            data: List[Dict[str, Any]] = []
+            data: list[dict[str, Any]] = []
             if self.pending_path.exists():
                 raw = self.pending_path.read_text(encoding="utf-8")
                 if raw.strip():
@@ -178,15 +178,15 @@ class MemoryStore:
         except (OSError, json.JSONDecodeError):
             pass
 
-    def get_short(self) -> List[Dict[str, Any]]:
+    def get_short(self) -> list[dict[str, Any]]:
         """Last N records (FIFO)."""
         with self._short_lock:
             return list(self._short)
 
-    def get_medium(self) -> List[Dict[str, Any]]:
+    def get_medium(self) -> list[dict[str, Any]]:
         """Records with TTL; format [{ts, summary}]."""
         cutoff = time.time() - self.medium_ttl_days * 86400
-        out: List[Dict[str, Any]] = []
+        out: list[dict[str, Any]] = []
         try:
             if not self.medium_path.exists():
                 return []
@@ -249,8 +249,8 @@ class MemoryStore:
         self,
         query: str,
         limit: int = 5,
-        domain: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        domain: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Search onec_help_memory by semantic similarity."""
         try:
             from qdrant_client import QdrantClient
@@ -264,7 +264,7 @@ class MemoryStore:
             client = QdrantClient(host=host, port=port, check_compatibility=False)
             if not client.collection_exists(_MEMORY_COLLECTION):
                 return []
-            kwargs: Dict[str, Any] = {
+            kwargs: dict[str, Any] = {
                 "collection_name": _MEMORY_COLLECTION,
                 "query_vector": vec,
                 "limit": limit,

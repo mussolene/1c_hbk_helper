@@ -19,7 +19,7 @@ import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 # Path for ingest status (read by index-status). Default under /tmp so it works without /app.
 DEFAULT_INDEX_STATUS_FILE = "/tmp/onec_help_ingest_status.json"
@@ -35,7 +35,7 @@ def _default_workers() -> int:
     return max(1, (os.cpu_count() or 4) // 2)
 
 
-def _file_sha256(path: Path) -> Optional[str]:
+def _file_sha256(path: Path) -> str | None:
     """SHA256 of file contents (for .hbk). Returns None on read error."""
     h = hashlib.sha256()
     try:
@@ -51,10 +51,10 @@ def _ingest_cache_path() -> str:
     return os.environ.get("INGEST_CACHE_FILE", DEFAULT_INGEST_CACHE_FILE)
 
 
-def _load_ingest_cache() -> Dict[str, Dict[str, Any]]:
+def _load_ingest_cache() -> dict[str, dict[str, Any]]:
     """Load cache from SQLite. Returns dict key -> {hash, indexed, points}."""
     path = _ingest_cache_path()
-    entries: Dict[str, Dict[str, Any]] = {}
+    entries: dict[str, dict[str, Any]] = {}
     try:
         conn = sqlite3.connect(path)
         conn.execute(
@@ -95,7 +95,7 @@ def _update_ingest_cache_entry(key: str, file_hash: str, points: int) -> None:
 def _status_writer_loop(
     stop_event: threading.Event,
     state_lock: threading.Lock,
-    state: Dict[str, Any],
+    state: dict[str, Any],
     status_file: str,
     interval_sec: float,
 ) -> None:
@@ -133,14 +133,14 @@ def _write_ingest_status(
     total_tasks: int,
     done_tasks: int,
     total_points: int,
-    folders: List[Dict[str, Any]],
+    folders: list[dict[str, Any]],
     status: str = "in_progress",
-    finished_at: Optional[float] = None,
-    current: Optional[List[Dict[str, Any]]] = None,
+    finished_at: float | None = None,
+    current: list[dict[str, Any]] | None = None,
 ) -> None:
     """Write ingest status JSON for index-status command. current = list of {path, version, language, stage} per active thread."""
     elapsed = time.time() - started_at
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started_at)),
         "embedding_backend": embedding_backend or "none",
         "total_tasks": total_tasks,
@@ -172,7 +172,7 @@ def _write_ingest_status(
         pass
 
 
-def read_ingest_status(status_file: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def read_ingest_status(status_file: str | None = None) -> dict[str, Any] | None:
     """Read ingest status JSON (for index-status). Returns None if file missing or invalid."""
     path = status_file or os.environ.get("INDEX_STATUS_FILE", DEFAULT_INDEX_STATUS_FILE)
     try:
@@ -186,12 +186,12 @@ def read_ingest_status(status_file: Optional[str] = None) -> Optional[Dict[str, 
 LANG_PATTERN = re.compile(r"_([a-z]{2})\.hbk$", re.IGNORECASE)
 
 
-def _language_from_filename(name: str) -> Optional[str]:
+def _language_from_filename(name: str) -> str | None:
     m = LANG_PATTERN.search(name)
     return m.group(1).lower() if m else None
 
 
-def _count_html_md(dir_path: Path) -> Tuple[int, int]:
+def _count_html_md(dir_path: Path) -> tuple[int, int]:
     """Return (html_count, md_count) for files under dir_path (recursive)."""
     html_c, md_c = 0, 0
     try:
@@ -209,8 +209,8 @@ def _count_html_md(dir_path: Path) -> Tuple[int, int]:
 
 def collect_hbk_tasks(
     source_dirs_with_versions: list[tuple[Path, str]],
-    languages: Optional[List[str]],
-) -> List[Tuple[Path, str, str]]:
+    languages: list[str] | None,
+) -> list[tuple[Path, str, str]]:
     """
     Scan source dirs (read-only) for .hbk files. Each item: (source_dir, version_label).
     Поиск рекурсивный (rglob), в т.ч. в подпапке bin/ (типично для Windows:
@@ -218,7 +218,7 @@ def collect_hbk_tasks(
     languages: e.g. ["ru"] for only *_ru.hbk; None or [] = all languages.
     Returns list of (hbk_path, version, language).
     """
-    tasks: List[Tuple[Path, str, str]] = []
+    tasks: list[tuple[Path, str, str]] = []
     for source_dir, version in source_dirs_with_versions:
         source_dir = Path(source_dir).resolve()
         if not source_dir.is_dir():
@@ -242,9 +242,9 @@ def _unpack_and_build_docs(
     temp_base: Path,
     unpack_fn: Any,
     build_docs_fn: Any,
-    current_work: Optional[Dict[int, Dict[str, Any]]] = None,
-    state_lock: Optional[threading.Lock] = None,
-) -> Tuple[Optional[Path], Optional[Path], str, str, Optional[str]]:
+    current_work: dict[int, dict[str, Any]] | None = None,
+    state_lock: threading.Lock | None = None,
+) -> tuple[Path | None, Path | None, str, str, str | None]:
     """Unpack one .hbk to temp, build .md there. Returns (md_dir, unpacked_dir, version, language, error_message) or (None, None, v, l, reason) on failure.
     If current_work and state_lock are set, updates current file/stage for this thread for status display."""
     ident = threading.get_ident()
@@ -252,7 +252,7 @@ def _unpack_and_build_docs(
     out_sub = temp_base / version / language / safe_name
     unpacked = out_sub / "unpacked"
     md_dir = out_sub / "md"
-    err_msg: Optional[str] = None
+    err_msg: str | None = None
     try:
         if current_work is not None and state_lock is not None:
             with state_lock:
@@ -284,20 +284,20 @@ def _unpack_and_build_docs(
 
 
 def run_ingest(
-    source_dirs_with_versions: List[Tuple[Union[Path, str], str]],
-    languages: Optional[List[str]] = None,
-    temp_base: Optional[Union[Path, str]] = None,
+    source_dirs_with_versions: list[tuple[Path | str, str]],
+    languages: list[str] | None = None,
+    temp_base: Path | str | None = None,
     qdrant_host: str = "localhost",
     qdrant_port: int = 6333,
     collection: str = "onec_help",
     incremental: bool = True,
-    max_workers: Optional[int] = None,
-    max_tasks: Optional[int] = None,
+    max_workers: int | None = None,
+    max_tasks: int | None = None,
     verbose: bool = True,
     dry_run: bool = False,
     index_batch_size: int = 500,
-    embedding_batch_size: Optional[int] = None,
-    embedding_workers: Optional[int] = None,
+    embedding_batch_size: int | None = None,
+    embedding_workers: int | None = None,
 ) -> int:
     """
     Ingest .hbk from multiple source dirs (read-only): unpack to temp, build docs, index in batches, cleanup.
@@ -340,8 +340,8 @@ def run_ingest(
         "on",
     )
     cache_entries = _load_ingest_cache()
-    to_process: List[Tuple[Path, str, str]] = []
-    task_hashes: Dict[Tuple[str, str, str], str] = {}
+    to_process: list[tuple[Path, str, str]] = []
+    task_hashes: dict[tuple[str, str, str], str] = {}
     skipped = 0
     for path, version, lang in all_tasks:
         key = f"{version}/{lang}/{path.name}"
@@ -390,7 +390,7 @@ def run_ingest(
         embedding_backend = "none"
     started_at = time.time()
     # One entry per folder (version/language): hbk_count, html/md/err/points aggregated
-    folder_hbk_count: Dict[Tuple[str, str], int] = Counter()
+    folder_hbk_count: dict[tuple[str, str], int] = Counter()
     for _, v, lang in tasks:
         folder_hbk_count[(v, lang)] += 1
     folders = [
@@ -419,8 +419,8 @@ def run_ingest(
     )
 
     state_lock = threading.Lock()
-    current_work: Dict[int, Dict[str, Any]] = {}
-    state: Dict[str, Any] = {
+    current_work: dict[int, dict[str, Any]] = {}
+    state: dict[str, Any] = {
         "done_tasks": 0,
         "total_points": 0,
         "folders": folders,
@@ -457,7 +457,7 @@ def run_ingest(
 
     total_indexed = 0
     done = 0
-    failed: List[Tuple[Path, str, str, str]] = []  # (path, version, language, error_message)
+    failed: list[tuple[Path, str, str, str]] = []  # (path, version, language, error_message)
     main_ident = threading.get_ident()
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
@@ -627,7 +627,7 @@ def _unpack_one(
     output_base: Path,
     unpack_fn: Any,
     verbose: bool,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Unpack one .hbk. Returns (success, message)."""
     safe_name = re.sub(r"[^\w\-]", "_", path.stem)
     out_sub = output_base / version / lang / safe_name
@@ -645,9 +645,9 @@ def _unpack_one(
 
 
 def run_unpack_only(
-    source_dirs_with_versions: List[Tuple[Union[Path, str], str]],
-    output_dir: Union[Path, str],
-    languages: Optional[List[str]] = None,
+    source_dirs_with_versions: list[tuple[Path | str, str]],
+    output_dir: Path | str,
+    languages: list[str] | None = None,
     max_workers: int = 4,
     verbose: bool = True,
 ) -> int:
@@ -682,7 +682,7 @@ def run_unpack_only(
     return count
 
 
-def discover_version_dirs(base_path: Union[Path, str]) -> List[Tuple[Path, str]]:
+def discover_version_dirs(base_path: Path | str) -> list[tuple[Path, str]]:
     """
     Сканировать базовый каталог: каждая прямая подпапка = версия 1С.
     Возвращает [(путь_к_подпапке, имя_подпапки), ...]. Скрытые и не-каталоги пропускаются.
@@ -692,7 +692,7 @@ def discover_version_dirs(base_path: Union[Path, str]) -> List[Tuple[Path, str]]
     base = Path(base_path).resolve()
     if not base.is_dir():
         return []
-    out: List[Tuple[Path, str]] = []
+    out: list[tuple[Path, str]] = []
     for child in sorted(base.iterdir()):
         if child.name.startswith(".") or not child.is_dir():
             continue
@@ -700,7 +700,7 @@ def discover_version_dirs(base_path: Union[Path, str]) -> List[Tuple[Path, str]]
     return out
 
 
-def parse_source_dirs_env(env_value: Optional[str]) -> List[Tuple[str, str]]:
+def parse_source_dirs_env(env_value: str | None) -> list[tuple[str, str]]:
     """
     Parse HELP_SOURCE_DIRS (legacy): "path1:version1,path2:version2" or "path1,path2".
     Returns [(path, version), ...]. Prefer HELP_SOURCE_BASE instead.
@@ -722,7 +722,7 @@ def parse_source_dirs_env(env_value: Optional[str]) -> List[Tuple[str, str]]:
     return out
 
 
-def parse_languages_env(env_value: Optional[str]) -> Optional[List[str]]:
+def parse_languages_env(env_value: str | None) -> list[str] | None:
     """
     Parse HELP_LANGUAGES: "ru" => ["ru"], "ru,en" => ["ru","en"], empty or "all" => None (all languages).
     """

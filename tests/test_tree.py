@@ -3,7 +3,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from onec_help.tree import _path_inside_base, build_tree, get_html_content
+from onec_help._utils import path_inside_base
+from onec_help.tree import build_tree, get_html_content
 
 
 def test_build_tree(help_sample_dir: Path) -> None:
@@ -35,12 +36,12 @@ def test_get_html_content_non_html_suffix(tmp_path: Path) -> None:
 
 
 def test_path_inside_base_resolve_raises_returns_false(tmp_path: Path) -> None:
-    """When resolve() raises ValueError/OSError, _path_inside_base returns False."""
+    """When resolve() raises ValueError/OSError, path_inside_base returns False."""
     base = tmp_path / "base"
     base.mkdir()
     path = base / "file.html"
     with patch.object(Path, "resolve", side_effect=OSError("resolve failed")):
-        assert _path_inside_base(path, base) is False
+        assert path_inside_base(path, base) is False
 
 
 def test_get_html_content_path_traversal_rejected(tmp_path: Path) -> None:

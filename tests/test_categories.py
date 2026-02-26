@@ -67,6 +67,15 @@ def test_find_categories_root_not_found_after_common_subdirs(tmp_path: Path) -> 
     assert find_categories_root(tmp_path / "source") is None
 
 
+def test_find_categories_root_via_objects_subdir(tmp_path: Path) -> None:
+    """find_categories_root finds __categories__ in objects/ subdir."""
+    (tmp_path / "objects").mkdir()
+    (tmp_path / "objects" / "__categories__").write_text("{}")
+    root = find_categories_root(tmp_path)
+    assert root is not None
+    assert (root / "__categories__").exists()
+
+
 def test_build_tree_dir_without_categories(tmp_path: Path) -> None:
     """Directory without __categories__ uses iterdir() for sub structure."""
     sub = tmp_path / "subdir"
