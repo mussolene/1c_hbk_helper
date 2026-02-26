@@ -11,7 +11,7 @@ import time
 import uuid
 from collections import deque
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 _MEMORY_COLLECTION = "onec_help_memory"
 _store: Optional["MemoryStore"] = None
@@ -257,21 +257,31 @@ class MemoryStore:
         except (OSError, json.JSONDecodeError):
             return 0
 
-    def upsert_curated_snippets(self, items: list[dict[str, Any]]) -> int:
+    def upsert_curated_snippets(
+        self,
+        items: list[dict[str, Any]],
+        progress_callback: Callable[[int, int, int], None] | None = None,
+    ) -> int:
         """Bulk upsert curated code snippets into long memory with domain='snippets'.
-        items: [{title, description, code_snippet}, ...]. Returns count of upserted items."""
+        items: [{title, description, code_snippet}, ...]. Returns count of upserted items.
+        progress_callback: optional (done, total, skipped) called periodically."""
         from . import embedding
 
         if not embedding.is_embedding_available():
             return 0
+        total = len(items)
         count = 0
-        for item in items:
+        skipped = 0
+        report_every = max(1, total // 20) if total > 20 else 1
+        for i, item in enumerate(items):
             if not isinstance(item, dict):
+                skipped += 1
                 continue
             title = item.get("title", "") or ""
             desc = item.get("description", "") or ""
             code = item.get("code_snippet", "") or ""
             if not title and not code:
+                skipped += 1
                 continue
             summary = f"{title} | {desc} | {code[:300]}"
             try:
@@ -288,7 +298,11 @@ class MemoryStore:
                 self._upsert_long(point_id, vec, payload, numeric_id=numeric_id)
                 count += 1
             except Exception:
-                continue
+                skipped += 1
+            if progress_callback and (i + 1) % report_every == 0:
+                progress_callback(count, total, skipped)
+        if progress_callback:
+            progress_callback(count, total, skipped)
         return count
 
     def search_long(

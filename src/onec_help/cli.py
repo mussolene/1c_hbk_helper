@@ -336,8 +336,8 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
                 print(f"Error: path not found: {p}", file=sys.stderr)
                 return 1
             if p.is_dir():
-                if (p / "snippets.json").exists():
-                    _load_json(p / "snippets.json")
+                for j in sorted(p.glob("*.json")):
+                    _load_json(j)
                 _load_folder(p)
             else:
                 _load_json(p)
@@ -346,8 +346,8 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
             if not d.exists():
                 print(f"SNIPPETS_DIR not found: {d}", file=sys.stderr)
                 return 0
-            if (d / "snippets.json").exists():
-                _load_json(d / "snippets.json")
+            for j in sorted(d.glob("*.json")):
+                _load_json(j)
             _load_folder(d)
         else:
             print(
@@ -360,10 +360,21 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
             print("No snippets to load.", file=sys.stderr)
             return 0
 
+        from ._utils import progress_done, progress_line
         from .memory import get_memory_store
+
+        total = len(items)
+
+        def _progress(loaded: int, tot: int, skipped: int) -> None:
+            progress_line(
+                "load-snippets │ {}/{} │ {} loaded │ {} skip".format(
+                    loaded + skipped, tot, loaded, skipped
+                )
+            )
+
         store = get_memory_store()
-        n = store.upsert_curated_snippets(items)
-        print(f"Loaded {n} snippets into onec_help_memory")
+        n = store.upsert_curated_snippets(items, progress_callback=_progress)
+        progress_done("load-snippets │ ✓ {} loaded → onec_help_memory".format(n))
         return 0
     except json.JSONDecodeError as e:
         print(f"Error: invalid JSON: {e}", file=sys.stderr)
@@ -374,6 +385,28 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
+
+
+def cmd_parse_fastcode(args: argparse.Namespace) -> int:
+    """Parse FastCode templates into snippets JSON."""
+    from .parse_fastcode import run_parse
+
+    if "-" in args.pages:
+        lo, hi = args.pages.split("-", 1)
+        pages = list(range(int(lo), int(hi) + 1))
+    else:
+        pages = [int(p) for p in args.pages.split(",")]
+
+    out_path = args.out
+    if not out_path:
+        snippets_dir = os.environ.get("SNIPPETS_DIR", "")
+        if snippets_dir:
+            out_path = str(Path(snippets_dir) / "fastcode_snippets.json")
+        else:
+            out_path = "snippets/fastcode_snippets.json"
+    out = Path(out_path)
+    fetch_detail = not getattr(args, "no_fetch_detail", False)
+    return run_parse(out=out, pages=pages, delay=args.delay, fetch_detail=fetch_detail)
 
 
 def cmd_watchdog(args: argparse.Namespace) -> int:
@@ -602,6 +635,37 @@ def main() -> int:
         help="Path to snippets.json or folder (default: docs/snippets/ or SNIPPETS_JSON_PATH/SNIPPETS_DIR)",
     )
     p_load_snippets.set_defaults(func=cmd_load_snippets)
+
+    # parse-fastcode
+    p_parse_fastcode = sub.add_parser(
+        "parse-fastcode",
+        help="Parse FastCode.im templates into snippets JSON",
+    )
+    p_parse_fastcode.add_argument(
+        "--out",
+        type=str,
+        default=None,
+        help="Output path (default: SNIPPETS_DIR/fastcode_snippets.json or ./snippets/fastcode_snippets.json)",
+    )
+    p_parse_fastcode.add_argument(
+        "--pages",
+        type=str,
+        default="1-51",
+        help="Page range, e.g. 1-51 or 1,2,3",
+    )
+    p_parse_fastcode.add_argument(
+        "--delay",
+        type=float,
+        default=1.0,
+        help="Delay between requests in seconds",
+    )
+    p_parse_fastcode.add_argument(
+        "--no-fetch-detail",
+        action="store_true",
+        dest="no_fetch_detail",
+        help="Do not fetch detail pages (faster, but code may be truncated)",
+    )
+    p_parse_fastcode.set_defaults(func=cmd_parse_fastcode)
 
     # index-status (ingest: embedding speed, per-folder, ETA, total time)
     p_status = sub.add_parser(

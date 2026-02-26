@@ -620,19 +620,22 @@ def test_cmd_load_snippets_exception(tmp_path: Path) -> None:
 
 @patch("onec_help.memory.get_memory_store")
 def test_cmd_load_snippets_from_folder(mock_get_store, tmp_path: Path) -> None:
-    """cmd_load_snippets loads from folder (*.bsl, *.1c) when path is directory."""
+    """cmd_load_snippets loads from folder (*.bsl, *.1c, *.json) when path is directory."""
     (tmp_path / "example.bsl").write_text("Сообщить(1);", encoding="utf-8")
     (tmp_path / "other.1c").write_text("Возврат Истина;", encoding="utf-8")
+    (tmp_path / "extra.json").write_text(
+        '[{"title":"FromJSON","description":"","code_snippet":"Возврат;"}]', encoding="utf-8"
+    )
     mock_store = MagicMock()
-    mock_store.upsert_curated_snippets.return_value = 2
+    mock_store.upsert_curated_snippets.return_value = 3
     mock_get_store.return_value = mock_store
     args = make_args(snippets_file=str(tmp_path))
     assert cmd_load_snippets(args) == 0
     mock_store.upsert_curated_snippets.assert_called_once()
     items = mock_store.upsert_curated_snippets.call_args[0][0]
-    assert len(items) == 2
+    assert len(items) == 3
     titles = {it["title"] for it in items}
-    assert titles == {"example", "other"}
+    assert titles == {"example", "other", "FromJSON"}
 
 
 @patch("onec_help.indexer.get_index_status")
