@@ -36,3 +36,22 @@ def test_hybrid_search_handles_score_none(mock_search, mock_search_keyword) -> N
     paths = [r.get("path") for r in results]
     assert "a.md" in paths
     assert "b.md" in paths
+
+
+def test_extract_code_blocks() -> None:
+    """_extract_code_blocks extracts bsl and generic code blocks from markdown."""
+    md = """
+# Title
+Text before.
+```bsl
+Код = 1;
+```
+More text.
+```
+plain block
+```
+"""
+    blocks = mcp_server._extract_code_blocks(md)
+    assert len(blocks) == 2
+    assert "Код = 1;" in blocks[0]
+    assert "plain block" in blocks[1]

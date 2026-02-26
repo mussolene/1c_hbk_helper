@@ -29,6 +29,7 @@ except ImportError:
 from ._utils import path_inside_base
 
 COLLECTION_NAME = "onec_help"
+SNIPPET_MAX_CHARS = 850
 
 # Regex for CamelCase and Cyrillic identifiers (min 3 chars) for keyword extraction
 _KEYWORDS_PATTERN = re.compile(r"[А-Яа-яA-Za-z][А-Яа-яA-Za-z0-9]{2,}")
@@ -465,6 +466,9 @@ def search_index_keyword(
     if not q_lower:
         return []
 
+    # Type.Method pattern (e.g. HTTPСоединение.Получить): use substring search to preserve exact match
+    use_type_method_mode = "." in query
+
     must: list[Any] = []
     if version and Filter and FieldCondition and MatchValue:
         must.append(FieldCondition(key="version", match=MatchValue(value=version)))
@@ -473,7 +477,11 @@ def search_index_keyword(
 
     query_keywords = _extract_keywords(query, max_tokens=20)
     use_keyword_filter = (
-        bool(query_keywords) and Filter and FieldCondition and MatchAny
+        not use_type_method_mode
+        and bool(query_keywords)
+        and Filter
+        and FieldCondition
+        and MatchAny
     )
     if use_keyword_filter:
         must.append(
@@ -508,7 +516,7 @@ def search_index_keyword(
             if not use_keyword_filter and not _matches(payload):
                 continue
             seen_paths.add(path)
-            snippet = (payload.get("text") or "")[:550]
+            snippet = (payload.get("text") or "")[:SNIPPET_MAX_CHARS]
             links = payload.get("outgoing_links") or []
             if links:
                 titles = [
@@ -566,6 +574,11 @@ def search_index_keyword(
             if next_offset is None:
                 break
             offset = next_offset
+
+    # Type.Method mode: rank title matches above text-only matches
+    if use_type_method_mode and out:
+        title_lower = q_lower
+        out.sort(key=lambda r: (title_lower not in (r.get("title") or "").lower(),))
 
     return out
 

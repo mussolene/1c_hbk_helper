@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-SNIPPET_MAX_CHARS = 550
+SNIPPET_MAX_CHARS = 850
 
 # Prefer fastmcp; fallback to mcp package
 try:
@@ -80,6 +80,23 @@ def _get_topic(
         language=language,
         prefer_index=prefer_index,
     )
+
+
+_CODE_BLOCK_RE = re.compile(r"```(\w*)\s*\n(.*?)```", re.DOTALL)
+
+
+def _extract_code_blocks(md_text: str) -> list[str]:
+    """Extract code blocks (bsl, 1c, or generic) from markdown."""
+    blocks: list[str] = []
+    for m in _CODE_BLOCK_RE.finditer(md_text):
+        lang, code = m.group(1), m.group(2)
+        if lang in ("", "bsl", "1c", "1s") or "bsl" in lang.lower():
+            blocks.append(code.strip())
+        elif not lang or lang in ("text", "plain"):
+            blocks.append(code.strip())
+        else:
+            blocks.append(code.strip())
+    return blocks
 
 
 def _extract_keyword_tokens(query: str) -> list[str]:
@@ -184,6 +201,7 @@ def run_mcp(
     ) -> str:
         """Search 1C help by exact substring in title and text (e.g. 'МенеджерКриптографии', 'ПроцессорВыводаРезультатаКомпоновкиДанныхВКоллекциюЗначений').
         Use when semantic search misses specific API names. For code answers prefer get_1c_code_answer.
+        For method names like Type.Method (e.g. HTTPСоединение.Получить) pass the full string.
         limit: max results (default 15). version, language: optional filters."""
         results = _search_keyword(
             query.strip(),
@@ -229,12 +247,14 @@ def run_mcp(
         query: str,
         limit: int = 5,
         include_memory: bool = True,
+        code_only: bool = False,
         version: str | None = None,
         language: str | None = None,
     ) -> str:
         """Get code-ready answer from 1C help in one call. Best for: 'вывод СКД в таблицу', 'Формат', etc.
         Combines semantic + keyword search, full topic content, and memory. Prefer over search+get_topic chain.
-        query: natural language or API name. limit: max topics (default 5). include_memory: also search saved snippets."""
+        Traps: ПрочитатьJSON returns Structure by default — use ПрочитатьВСоответствие=Истина for Соответствие (Получить). HTTPСоединение.Получить — server only.
+        query: natural language or API name. limit: max topics (default 5). include_memory: also search saved snippets. code_only: if True, return primarily code blocks from help."""
         results = _hybrid_search(query, limit=limit, version=version, language=language)
         memory_parts: list[str] = []
         if include_memory:
@@ -267,7 +287,17 @@ def run_mcp(
                     continue
                 content = _get_topic(path, version=version, language=language, prefer_index=False)
                 if content:
-                    help_blocks.append(f"---\n## {path}\n\n{content}")
+                    if code_only:
+                        blocks = _extract_code_blocks(content)
+                        if blocks:
+                            block_text = "\n\n".join(
+                                f"```bsl\n{b}\n```" for b in blocks
+                            )
+                            help_blocks.append(f"---\n## {path}\n\n{block_text}")
+                        else:
+                            help_blocks.append(f"---\n## {path}\n\n{content[:2000]}...")
+                    else:
+                        help_blocks.append(f"---\n## {path}\n\n{content}")
             if help_blocks:
                 parts.append("\n### Из справки\n\n" + "\n\n".join(help_blocks))
         return "\n".join(parts)
@@ -448,10 +478,15 @@ def run_mcp(
         return 3
 
     @mcp.tool()
-    def get_1c_function_info(name: str, path: str | None = None) -> str:
+    def get_1c_function_info(
+        name: str,
+        path: str | None = None,
+        choose_index: int | None = None,
+    ) -> str:
         """Get description, syntax, parameters, return value, and examples for a 1C function/method by name.
+        When several matches (e.g. Формат, ФорматКартинки), use choose_index to pick the right one.
         name: function or method name (e.g. 'Формат', 'МенеджерКриптографии').
-        path: optional - when given, fetch only this topic path (e.g. 'Format971.md')."""
+        path: optional - when given, fetch only this topic path (e.g. 'Format971.md'). choose_index: 1-based index when multiple matches."""
         name_clean = name.strip()
         if not name_clean:
             return "Provide a function or method name."
@@ -480,6 +515,10 @@ def run_mcp(
                 lines.append(f"- {r[0].get('path', '')}: {r[0].get('title', '')}")
             return "\n".join(lines)
         if len(best) > 1:
+            idx = choose_index
+            if idx is not None and 1 <= idx <= len(best):
+                content = _get_topic(best[idx - 1]["path"])
+                return content or "Topic not found."
             lines = ["Найдено несколько совпадений:"]
             for r in best[:10]:
                 lines.append(f"- {r.get('path', '')}: {r.get('title', '')}")

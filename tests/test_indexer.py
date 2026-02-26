@@ -239,6 +239,38 @@ def test_search_index_keyword_hits(mock_client: MagicMock) -> None:
     assert result[0]["title"] == "Term here"
 
 
+@patch("onec_help.indexer.QdrantClient")
+def test_search_index_keyword_type_method_mode_sorts_title_first(mock_client: MagicMock) -> None:
+    """Query with '.' (Type.Method) uses substring mode and ranks title matches first."""
+    mock_instance = MagicMock()
+    mock_client.return_value = mock_instance
+    # First batch: text-only match, then title match (scroll order arbitrary)
+    mock_instance.scroll.return_value = (
+        [
+            MagicMock(
+                payload={
+                    "path": "text_match.md",
+                    "title": "Other",
+                    "text": "HTTPСоединение.Получить does something",
+                }
+            ),
+            MagicMock(
+                payload={
+                    "path": "title_match.md",
+                    "title": "HTTPСоединение.Получить (HTTPConnection.Get)",
+                    "text": "body",
+                }
+            ),
+        ],
+        None,
+    )
+    result = search_index_keyword("HTTPСоединение.Получить", limit=5)
+    assert len(result) == 2
+    # Title match must come first
+    assert result[0]["path"] == "title_match.md"
+    assert result[1]["path"] == "text_match.md"
+
+
 @patch("onec_help.indexer.QdrantClient", None)
 def test_list_index_titles_no_client() -> None:
     assert list_index_titles() == []
