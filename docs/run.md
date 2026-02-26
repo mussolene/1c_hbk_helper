@@ -2,6 +2,23 @@
 
 ## Локально
 
+### Вариант A: ingest (рекомендуется)
+
+Одна команда: распаковка .hbk, конвертация в Markdown, индексация в Qdrant. Подробнее см. [README.md](../README.md).
+
+```bash
+# Qdrant уже запущен (Docker)
+docker run -d -p 6333:6333 -v qdrant_data:/qdrant/storage qdrant/qdrant:v1.12.0
+
+# Ingest из каталога с версиями 1С
+HELP_SOURCE_BASE=/opt/1cv8 QDRANT_HOST=localhost python -m onec_help ingest
+
+# MCP (топики из Qdrant; каталог может быть пустым) и веб
+python -m onec_help mcp . --transport streamable-http --host 0.0.0.0 --port 5050
+```
+
+### Вариант B: пошагово (unpack → build-docs → build-index)
+
 1. Установить зависимости: `pip install -e ".[dev]"` (и при необходимости `.[mcp]` для MCP).
 2. Распаковать справку:
    - Один архив: `python -m onec_help unpack /path/to/file.hbk -o ./unpacked`
@@ -24,6 +41,7 @@
 - Порты: 5050 (MCP, streamable-http), 6333 (Qdrant).
 - **Только распаковка:** тот же образ `mcp`, команда `unpack-dir`. Запуск вручную:  
   `docker compose run --rm -v /opt/1cv8:/input:ro -v $(pwd)/unpacked:/output mcp python -m onec_help unpack-dir /input -o /output -l ru`
+- **Логи ingest:** `docker compose exec mcp tail -f /app/var/log/ingest.log`
 
 ## Подключение MCP к Cursor
 

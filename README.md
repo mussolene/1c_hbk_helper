@@ -67,14 +67,14 @@ pip install -e ".[dev]"
 | `INGEST_SKIP_CACHE` | `1`/`true` — полная переиндексация без кэша (или `ingest --no-cache`) | — |
 | `INGEST_FAILED_LOG` | Файл для списка неудачных .hbk | — |
 | `INDEX_STATUS_FILE` | Файл статуса ingest (для `index-status`: скорость эмбеддингов, по папкам, ETA) | `/tmp/onec_help_ingest_status.json` |
-| `MCP_TRANSPORT` | Транспорт MCP: `stdio` или `http` | `stdio` |
+| `MCP_TRANSPORT` | Транспорт MCP: `stdio`, `http` или `streamable-http` (для Docker/Cursor рекомендуется streamable-http) | `streamable-http` |
 | `MCP_HOST` | Хост для MCP HTTP | `127.0.0.1` |
 | `MCP_PORT` | Порт для MCP HTTP | `5050` |
 | `MCP_PATH` | URL-путь эндпоинта MCP | `/mcp` |
 | `PORT` | Порт веб-сервера (serve) | `5000` |
 | `HELP_SERVE_ALLOWED_DIRS` | Список путей через запятую (serve): разрешённые базовые каталоги для формы; если задан, ввод вне списка отклоняется | — |
-| `EMBEDDING_BACKEND` | Эмбеддинги: `local` (sentence-transformers), `openai_api` (внешний API) или `none` (отключены — плейсхолдер, только поиск по ключевым словам) | `local` |
-| `EMBEDDING_MODEL` | Имя модели. Для openai_api (LM Studio): если такой модели нет на сервере, берётся первая из списка или популярная (nomic-embed-text, all-MiniLM-L6-v2); при необходимости выполняется запрос на загрузку через API LM Studio | `all-MiniLM-L6-v2` |
+| `EMBEDDING_BACKEND` | Эмбеддинги: `local` (sentence-transformers), `openai_api` (внешний API) или `none` (отключены — плейсхолдер, только поиск по ключевым словам) | `openai_api` |
+| `EMBEDDING_MODEL` | Имя модели. Для openai_api (LM Studio): если такой модели нет на сервере, берётся первая из списка или популярная (text-text-embedding-mxbai-embed-large-v1, nomic-embed-text, all-MiniLM-L6-v2); для local — all-MiniLM-L6-v2 | `text-text-embedding-mxbai-embed-large-v1` (openai_api) |
 | `EMBEDDING_API_URL` | Для openai_api: базовый URL (по умолчанию LM Studio: `http://localhost:1234/v1` локально, в контейнере — `http://host.docker.internal:1234/v1`). При недоступности/ошибках используются плейсхолдер-векторы и семантический поиск ограничен | LM Studio: 1234 |
 | `EMBEDDING_API_KEY` | Ключ API (если нужен для openai_api) | — |
 | `EMBEDDING_DIMENSION` | Размерность при openai_api (если не задана — определяется по первому ответу API) | — |
@@ -159,7 +159,7 @@ docker compose exec mcp tail -f /app/var/log/ingest.log
 ### Эмбеддинги: отключение, локальная модель, внешний сервис
 
 - **Отключение эмбеддингов** (`EMBEDDING_BACKEND=none`): семантический поиск отключён, в индекс пишутся плейсхолдер-векторы; поиск по смыслу не работает, но **search_1c_help_keyword** (по ключевым словам) и остальные инструменты MCP работают. Подходит для экономии ресурсов или когда нужен только поиск по строкам.
-- **Локальная модель** (`local`, по умолчанию): sentence-transformers в контейнере. Нужна установка зависимостей для эмбеддингов (см. ниже).
+- **Локальная модель** (`local`): sentence-transformers в контейнере. Нужна установка зависимостей для эмбеддингов (см. ниже).
 - **Внешний API** (`openai_api`): LM Studio, Ollama, llama.cpp server и т.п. Задайте в `.env`:
 
 ```env
@@ -194,7 +194,7 @@ docker run --rm -d -p 5050:5050 \
   -e HELP_SOURCE_BASE=/opt/1cv8 \
   --name onec-help-mcp \
   $(docker build -q .) \
-  /app/entrypoint.sh python -m onec_help mcp /data --transport http --host 0.0.0.0 --port 5050
+  /app/entrypoint.sh python -m onec_help mcp /data --transport streamable-http --host 0.0.0.0 --port 5050
 ```
 
 MCP: http://localhost:5050/mcp.

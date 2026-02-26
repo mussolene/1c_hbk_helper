@@ -3,7 +3,7 @@
 #   docker build --build-arg EMBEDDING_BACKEND=none -t onec-help .
 FROM python:3.14-slim
 
-ARG EMBEDDING_BACKEND=local
+ARG EMBEDDING_BACKEND=openai_api
 
 # Базовый slim не содержит: 7z, cron, gosu
 RUN apt-get update && apt-get install -y --no-install-recommends \

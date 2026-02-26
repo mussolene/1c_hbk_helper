@@ -1,7 +1,7 @@
 # compose-spec: https://docs.docker.com/compose/compose-file/
 # 1C Help: Qdrant + MCP. Один контейнер mcp: MCP-сервер (порт 5050) + cron для индексации из /opt/1cv8.
 # На Mac: Docker Desktop → Settings → Resources → File sharing — добавьте /opt (или /opt/1cv8).
-# При старте контейнера (если есть /opt/1cv8) ingest запускается в фоне; логи: docker compose exec mcp tail -f /var/log/ingest.log
+# При старте контейнера (если есть /opt/1cv8) ingest запускается в фоне; логи: docker compose exec mcp tail -f /app/var/log/ingest.log
 # Индексация вручную: docker compose exec mcp python -m onec_help ingest
 #
 # База Qdrant: ./data/qdrant (в проекте, в .gitignore) — при перезапуске не теряется.
@@ -41,7 +41,7 @@ services:
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-onec_help}
       # Путь к хранилищу Qdrant внутри контейнера (смонтирован ниже) — для вывода размера БД в index-status
       QDRANT_STORAGE_PATH: /qdrant_storage
-      MCP_TRANSPORT: ${MCP_TRANSPORT:-http}
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
       MCP_HOST: ${MCP_HOST:-0.0.0.0}
       MCP_PORT: "5050"
       MCP_PATH: ${MCP_PATH:-/mcp}
@@ -50,7 +50,7 @@ services:
       HELP_INGEST_TEMP: ${HELP_INGEST_TEMP:-/tmp/help_ingest}
       INGEST_CACHE_FILE: ${INGEST_CACHE_FILE:-/qdrant_storage/ingest_cache.db}
       INGEST_FAILED_LOG: ${INGEST_FAILED_LOG:-/var/log/ingest_failed.log}
-      # Эмбеддинги: local (по умолчанию) или openai_api; при openai_api задать EMBEDDING_API_URL и EMBEDDING_DIMENSION
+      # Эмбеддинги: openai_api (по умолчанию) или local; при openai_api задать EMBEDDING_API_URL
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-openai_api}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-text-embedding-mxbai-embed-large-v1}
       EMBEDDING_API_URL: ${EMBEDDING_API_URL:-http://host.docker.internal:1234/v1}
@@ -67,7 +67,7 @@ services:
       - /opt/1cv8:/opt/1cv8:ro
       # Доступ к хранилищу Qdrant только для чтения — index-status показывает размер БД на диске
       - ./data/qdrant:/qdrant_storage:ro
-    command: ["python", "-m", "onec_help", "mcp", "/data", "--transport", "http", "--host", "0.0.0.0", "--port", "5050"]
+    command: ["python", "-m", "onec_help", "mcp", "/data", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "5050"]
     depends_on:
       qdrant:
         condition: service_healthy
