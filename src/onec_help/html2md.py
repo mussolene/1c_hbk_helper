@@ -4,6 +4,7 @@ See docs/help_formats.md for formal spec."""
 
 import html
 import os
+import re
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,37 @@ def extract_outgoing_links(html_path: Path, base_dir: Path) -> list[dict[str, An
             continue
         seen.add(key)
         resolved = resolve_href(current, href, base_dir)
+        result.append(
+            {
+                "href": href,
+                "resolved_path": resolved,
+                "target_title": link_text,
+                "link_text": link_text,
+            }
+        )
+    return result
+
+
+# Regex for Markdown links [text](url)
+_MD_LINK_PATTERN = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
+
+
+def extract_links_from_markdown(
+    md_text: str, current_path: Path, base_dir: Path
+) -> list[dict[str, Any]]:
+    """Parse Markdown [text](url) links, resolve each to base_dir, return [{href, resolved_path, target_title, link_text}]."""
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for m in _MD_LINK_PATTERN.finditer(md_text):
+        link_text = (m.group(1) or "").strip()
+        href = (m.group(2) or "").strip()
+        if not href:
+            continue
+        key = (href, link_text)
+        if key in seen:
+            continue
+        seen.add(key)
+        resolved = resolve_href(current_path, href, base_dir)
         result.append(
             {
                 "href": href,

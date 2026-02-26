@@ -1,6 +1,7 @@
 """Build and query Qdrant index from Markdown help."""
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ try:
         Distance,
         FieldCondition,
         Filter,
+        MatchAny,
         MatchValue,
         PointStruct,
         VectorParams,
@@ -21,11 +23,30 @@ except ImportError:
     Distance = None  # type: ignore
     FieldCondition = None  # type: ignore
     Filter = None  # type: ignore
+    MatchAny = None  # type: ignore
     MatchValue = None  # type: ignore
 
 from ._utils import path_inside_base
 
 COLLECTION_NAME = "onec_help"
+
+# Regex for CamelCase and Cyrillic identifiers (min 3 chars) for keyword extraction
+_KEYWORDS_PATTERN = re.compile(r"[А-Яа-яA-Za-z][А-Яа-яA-Za-z0-9]{2,}")
+
+
+def _extract_keywords(text: str, max_tokens: int = 50) -> list[str]:
+    """Extract CamelCase and Cyrillic identifiers from text for payload.keywords."""
+    if not text:
+        return []
+    tokens = _KEYWORDS_PATTERN.findall(text)
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in tokens:
+        tl = t.lower()
+        if tl not in seen and len(out) < max_tokens:
+            seen.add(tl)
+            out.append(t)
+    return out
 
 
 def get_embedding_dimension() -> int:
@@ -87,6 +108,7 @@ def build_index(
     from .html2md import (
         _ENCODINGS_UTF8_FIRST,
         _looks_like_html,
+        extract_links_from_markdown,
         extract_outgoing_links,
         html_to_md_content,
         read_file_with_encoding_fallback,
@@ -154,6 +176,10 @@ def build_index(
                         )
                         if html_path.exists():
                             outgoing_links = extract_outgoing_links(html_path, Path(source_dir))
+                    if not outgoing_links and text:
+                        md_links = extract_links_from_markdown(text, path, docs_dir)
+                        if md_links:
+                            outgoing_links = md_links
                 else:
                     text = (
                         html_to_md_content(path)
@@ -200,6 +226,12 @@ def build_index(
             payload.update(extra)
             if outgoing_links:
                 payload["outgoing_links"] = outgoing_links
+            first_para = text.split("\n\n")[0] if text else ""
+            kw = list(
+                dict.fromkeys(_extract_keywords(title) + _extract_keywords(first_para[:800]))
+            )[:50]
+            if kw:
+                payload["keywords"] = kw
             stem = Path(rel_str).stem
             if path_to_section:
                 for key in (rel_str, stem, rel_str.replace(".md", ".html")):
@@ -422,7 +454,8 @@ def search_index_keyword(
     version: str | None = None,
     language: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Search by substring in title and text (no embedding). Finds exact terms like МенеджерКриптографии."""
+    """Search by keyword (payload.keywords) or substring in title/text (no embedding).
+    Finds exact terms like МенеджерКриптографии."""
     if QdrantClient is None:
         return []
     host = qdrant_host or os.environ.get("QDRANT_HOST", "localhost")
@@ -432,11 +465,20 @@ def search_index_keyword(
     if not q_lower:
         return []
 
-    must = []
+    must: list[Any] = []
     if version and Filter and FieldCondition and MatchValue:
         must.append(FieldCondition(key="version", match=MatchValue(value=version)))
     if language and Filter and FieldCondition and MatchValue:
         must.append(FieldCondition(key="language", match=MatchValue(value=language)))
+
+    query_keywords = _extract_keywords(query, max_tokens=20)
+    use_keyword_filter = (
+        bool(query_keywords) and Filter and FieldCondition and MatchAny
+    )
+    if use_keyword_filter:
+        must.append(
+            FieldCondition(key="keywords", match=MatchAny(any=query_keywords))
+        )
     scroll_filter = Filter(must=must) if must and Filter else None
 
     out: list[dict[str, Any]] = []
@@ -450,6 +492,42 @@ def search_index_keyword(
     }
     if scroll_filter is not None:
         scroll_kwargs["scroll_filter"] = scroll_filter
+
+    def _matches(payload: dict[str, Any]) -> bool:
+        title = (payload.get("title") or "").lower()
+        text = (payload.get("text") or "").lower()
+        return q_lower in title or q_lower in text
+
+    def _collect(res: list) -> None:
+        nonlocal out, seen_paths
+        for point in res:
+            payload = getattr(point, "payload", None) or {}
+            path = payload.get("path", "")
+            if path in seen_paths:
+                continue
+            if not use_keyword_filter and not _matches(payload):
+                continue
+            seen_paths.add(path)
+            snippet = (payload.get("text") or "")[:550]
+            links = payload.get("outgoing_links") or []
+            if links:
+                titles = [
+                    lnk.get("target_title") or lnk.get("link_text", "") for lnk in links[:5]
+                ]
+                snippet = (
+                    snippet + "\nСвязанные: " + ", ".join(t for t in titles if t)
+                ).strip()
+            out.append(
+                {
+                    "path": path,
+                    "title": payload.get("title", ""),
+                    "text": snippet,
+                    "score": None,
+                }
+            )
+            if len(out) >= limit:
+                break
+
     while len(out) < limit:
         try:
             kwargs = dict(scroll_kwargs)
@@ -460,37 +538,35 @@ def search_index_keyword(
             break
         if not res:
             break
-        for point in res:
-            payload = getattr(point, "payload", None) or {}
-            path = payload.get("path", "")
-            if path in seen_paths:
-                continue
-            title = (payload.get("title") or "").lower()
-            text = (payload.get("text") or "").lower()
-            if q_lower in title or q_lower in text:
-                seen_paths.add(path)
-                snippet = (payload.get("text") or "")[:550]
-                links = payload.get("outgoing_links") or []
-                if links:
-                    titles = [
-                        lnk.get("target_title") or lnk.get("link_text", "") for lnk in links[:5]
-                    ]
-                    snippet = (
-                        snippet + "\nСвязанные: " + ", ".join(t for t in titles if t)
-                    ).strip()
-                out.append(
-                    {
-                        "path": path,
-                        "title": payload.get("title", ""),
-                        "text": snippet,
-                        "score": None,
-                    }
-                )
-                if len(out) >= limit:
-                    break
+        _collect(res)
         if next_offset is None:
             break
         offset = next_offset
+
+    # Fallback: if keyword filter returned nothing, retry with substring search
+    if not out and use_keyword_filter:
+        use_keyword_filter = False
+        must.pop()  # remove keywords condition
+        scroll_filter = Filter(must=must) if must and Filter else None
+        scroll_kwargs["scroll_filter"] = scroll_filter
+        if scroll_kwargs.get("scroll_filter") is None:
+            scroll_kwargs.pop("scroll_filter", None)
+        offset = None
+        while len(out) < limit:
+            try:
+                kwargs = dict(scroll_kwargs)
+                if offset is not None:
+                    kwargs["offset"] = offset
+                res, next_offset = client.scroll(**kwargs)
+            except Exception:
+                break
+            if not res:
+                break
+            _collect(res)
+            if next_offset is None:
+                break
+            offset = next_offset
+
     return out
 
 

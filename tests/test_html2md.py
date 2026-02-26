@@ -12,6 +12,7 @@ from onec_help.html2md import (
     _read_html_file,
     _table_to_md,
     build_docs,
+    extract_links_from_markdown,
     extract_outgoing_links,
     html_to_md_content,
     read_file_with_encoding_fallback,
@@ -294,3 +295,20 @@ def test_extract_outgoing_links(tmp_path: Path) -> None:
     # Anchor link has no resolved_path
     anchor = [lnk for lnk in links if lnk.get("href") == "#"][0]
     assert anchor.get("resolved_path") is None
+
+
+def test_extract_links_from_markdown(tmp_path: Path) -> None:
+    """extract_links_from_markdown parses [text](url) and resolves to base_dir."""
+    (tmp_path / "sub").mkdir()
+    current = tmp_path / "sub" / "page.md"
+    current.write_text("# Page", encoding="utf-8")
+    (tmp_path / "other.md").write_text("# Other", encoding="utf-8")
+    (tmp_path / "sub" / "sibling.md").write_text("# Sibling", encoding="utf-8")
+    md_text = "See [Other](../other.md) and [Sibling](sibling.md) and [anchor](#x)."
+    links = extract_links_from_markdown(md_text, current, tmp_path)
+    assert len(links) == 3
+    resolved = [lnk for lnk in links if lnk.get("resolved_path")]
+    assert len(resolved) == 2
+    paths = {lnk["resolved_path"] for lnk in resolved}
+    assert "other.md" in paths
+    assert "sub/sibling.md" in paths

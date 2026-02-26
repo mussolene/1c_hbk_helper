@@ -7,6 +7,7 @@ import pytest
 
 from onec_help import indexer as indexer_mod
 from onec_help.indexer import (
+    _extract_keywords,
     _path_to_point_id,
     build_index,
     get_1c_help_related,
@@ -63,6 +64,15 @@ def test_search_index(mock_client: MagicMock) -> None:
     assert isinstance(result, list)
 
 
+def test_extract_keywords() -> None:
+    """_extract_keywords extracts CamelCase and Cyrillic identifiers."""
+    assert "МенеджерКриптографии" in _extract_keywords("МенеджерКриптографии.Шифровать")
+    assert "Шифровать" in _extract_keywords("МенеджерКриптографии.Шифровать")
+    assert "GetValue" in _extract_keywords("Object.GetValue(x)")
+    assert _extract_keywords("ab") == []  # min 3 chars
+    assert _extract_keywords("") == []
+
+
 @patch("onec_help.indexer.QdrantClient")
 def test_build_index(mock_client: MagicMock, help_sample_dir: Path, tmp_path: Path) -> None:
     (tmp_path / "one.md").write_text("# Test\n\nBody.", encoding="utf-8")
@@ -72,6 +82,24 @@ def test_build_index(mock_client: MagicMock, help_sample_dir: Path, tmp_path: Pa
     assert n >= 1
     mock_instance.recreate_collection.assert_called_once()
     mock_instance.upsert.assert_called_once()
+
+
+@patch("onec_help.indexer.QdrantClient")
+def test_build_index_keywords_in_payload(mock_client: MagicMock, tmp_path: Path) -> None:
+    """build_index adds keywords from title and first paragraph to payload."""
+    (tmp_path / "func.md").write_text(
+        "# МенеджерКриптографии.Шифровать\n\nШифрует данные.", encoding="utf-8"
+    )
+    mock_instance = MagicMock()
+    mock_client.return_value = mock_instance
+    build_index(tmp_path, qdrant_host="localhost", qdrant_port=6333)
+    call = mock_instance.upsert.call_args
+    points = call.kwargs.get("points", call.args[0] if call.args else [])
+    assert points
+    payload = points[0].payload if hasattr(points[0], "payload") else {}
+    kw = payload.get("keywords", []) if isinstance(payload, dict) else []
+    assert kw, "keywords should be present"
+    assert "МенеджерКриптографии" in kw or "Шифровать" in kw
 
 
 @patch("onec_help.indexer.QdrantClient")
