@@ -51,6 +51,16 @@ def _ingest_cache_path() -> str:
     return os.environ.get("INGEST_CACHE_FILE", DEFAULT_INGEST_CACHE_FILE)
 
 
+def _log_cache_error(op: str, path: str, err: Exception) -> None:
+    """Log cache I/O error once per run to avoid spam."""
+    if not hasattr(_log_cache_error, "_warned"):
+        _log_cache_error._warned = set()  # type: ignore[attr-defined]
+    key = (op, path)
+    if key not in _log_cache_error._warned:  # type: ignore[attr-defined]
+        _log_cache_error._warned.add(key)  # type: ignore[attr-defined]
+        _log(f"[ingest] WARN: ingest cache {op} failed for {path}: {err}. Re-indexing will not be skipped.")
+
+
 def _load_ingest_cache() -> dict[str, dict[str, Any]]:
     """Load cache from SQLite. Returns dict key -> {hash, indexed, points}."""
     path = _ingest_cache_path()
@@ -68,8 +78,8 @@ def _load_ingest_cache() -> dict[str, dict[str, Any]]:
                 "points": row[3],
             }
         conn.close()
-    except (OSError, sqlite3.Error):
-        pass
+    except (OSError, sqlite3.Error) as e:
+        _log_cache_error("read", path, e)
     return entries
 
 
@@ -88,8 +98,8 @@ def _update_ingest_cache_entry(key: str, file_hash: str, points: int) -> None:
         )
         conn.commit()
         conn.close()
-    except (OSError, sqlite3.Error):
-        pass
+    except (OSError, sqlite3.Error) as e:
+        _log_cache_error("write", path, e)
 
 
 def _status_writer_loop(

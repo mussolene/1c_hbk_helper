@@ -51,7 +51,7 @@ services:
       HELP_SOURCE_BASE: ${HELP_SOURCE_BASE:-/opt/1cv8}
       HELP_LANGUAGES: ${HELP_LANGUAGES:-ru}
       HELP_INGEST_TEMP: ${HELP_INGEST_TEMP:-/tmp/help_ingest}
-      INGEST_CACHE_FILE: ${INGEST_CACHE_FILE:-/qdrant_storage/ingest_cache.db}
+      INGEST_CACHE_FILE: ${INGEST_CACHE_FILE:-/app/var/ingest_cache/ingest_cache.db}
       INGEST_FAILED_LOG: ${INGEST_FAILED_LOG:-/var/log/ingest_failed.log}
       # Эмбеддинги: openai_api (по умолчанию) или local; при openai_api задать EMBEDDING_API_URL
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-openai_api}
@@ -72,6 +72,8 @@ services:
       - /opt/1cv8:/opt/1cv8:ro
       # Доступ к хранилищу Qdrant только для чтения — index-status показывает размер БД на диске
       - ./data/qdrant:/qdrant_storage:ro
+      # Кэш ingest (SQLite) — должен быть на read-write volume, иначе при каждом запуске полная переиндексация
+      - ./data/ingest_cache:/app/var/ingest_cache
       # Сниппеты — только чтение. Хост: ./snippets или SNIPPETS_HOST_PATH
       - ${SNIPPETS_HOST_PATH:-./snippets}:/data/snippets:ro
     command: ["python", "-m", "onec_help", "mcp", "/data", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "5050"]
