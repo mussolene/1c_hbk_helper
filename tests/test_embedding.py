@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from onec_help import embedding as embedding_mod
 
 
@@ -48,6 +46,27 @@ def test_get_embedding_backend_none() -> None:
         assert all(isinstance(x, float) for x in vec)
         vec2 = embedding_mod.get_embedding("hello")
         assert vec == vec2
+    importlib.reload(embedding_mod)
+
+
+def test_get_embedding_deterministic() -> None:
+    """EMBEDDING_BACKEND=deterministic returns 384-dim deterministic vectors."""
+    import importlib
+
+    with patch.dict(
+        "os.environ",
+        {"EMBEDDING_BACKEND": "deterministic"},
+        clear=False,
+    ):
+        importlib.reload(embedding_mod)
+        assert embedding_mod.get_embedding_dimension() == 384
+        vec = embedding_mod.get_embedding("test")
+        assert len(vec) == 384
+        assert all(isinstance(x, float) for x in vec)
+        vec2 = embedding_mod.get_embedding("test")
+        assert vec == vec2
+        vec3 = embedding_mod.get_embedding("other")
+        assert vec != vec3
     importlib.reload(embedding_mod)
 
 
@@ -249,7 +268,11 @@ def test_get_embedding_dimension_openai_api_invalid_dimension() -> None:
 
     with patch.dict(
         "os.environ",
-        {"EMBEDDING_BACKEND": "openai_api", "EMBEDDING_DIMENSION": "not_a_number", "EMBEDDING_API_URL": "http://x/v1"},
+        {
+            "EMBEDDING_BACKEND": "openai_api",
+            "EMBEDDING_DIMENSION": "not_a_number",
+            "EMBEDDING_API_URL": "http://x/v1",
+        },
         clear=False,
     ):
         importlib.reload(embedding_mod)
@@ -584,7 +607,11 @@ def test_get_embedding_api_batch_parallel_workers_gt_one() -> None:
 
     with patch.dict(
         "os.environ",
-        {"EMBEDDING_BACKEND": "openai_api", "EMBEDDING_API_URL": "http://test/v1", "EMBEDDING_DIMENSION": "4"},
+        {
+            "EMBEDDING_BACKEND": "openai_api",
+            "EMBEDDING_API_URL": "http://test/v1",
+            "EMBEDDING_DIMENSION": "4",
+        },
         clear=False,
     ):
         importlib.reload(embedding_mod)
@@ -607,7 +634,11 @@ def test_get_embedding_batch_openai_api_uses_parallel() -> None:
 
     with patch.dict(
         "os.environ",
-        {"EMBEDDING_BACKEND": "openai_api", "EMBEDDING_API_URL": "http://test/v1", "EMBEDDING_DIMENSION": "4"},
+        {
+            "EMBEDDING_BACKEND": "openai_api",
+            "EMBEDDING_API_URL": "http://test/v1",
+            "EMBEDDING_DIMENSION": "4",
+        },
         clear=False,
     ):
         importlib.reload(embedding_mod)
@@ -673,3 +704,52 @@ def test_check_embedding_api_available_backend_not_openai() -> None:
         importlib.reload(embedding_mod)
         assert embedding_mod._check_embedding_api_available() is True
     importlib.reload(embedding_mod)
+
+
+def test_sanitize_text_for_embedding() -> None:
+    """sanitize_text_for_embedding replaces control chars except \\n, \\r, \\t."""
+    assert embedding_mod.sanitize_text_for_embedding("hello") == "hello"
+    assert embedding_mod.sanitize_text_for_embedding("hel\x00lo") == "hel lo"
+    assert embedding_mod.sanitize_text_for_embedding("a\nb\tc\rd") == "a\nb\tc\rd"
+    assert embedding_mod.sanitize_text_for_embedding("") == ""
+    assert embedding_mod.sanitize_text_for_embedding("\x01\x1f") == "  "
+
+
+def test_sanitize_text_for_embedding_non_str() -> None:
+    """sanitize_text_for_embedding returns '' for non-str."""
+    assert embedding_mod.sanitize_text_for_embedding(None) == ""  # type: ignore
+    assert embedding_mod.sanitize_text_for_embedding(123) == ""  # type: ignore
+
+
+def test_is_embedding_available_none() -> None:
+    """is_embedding_available returns False for backend none."""
+    import importlib
+
+    with patch.dict("os.environ", {"EMBEDDING_BACKEND": "none"}, clear=False):
+        importlib.reload(embedding_mod)
+        assert embedding_mod.is_embedding_available() is False
+    importlib.reload(embedding_mod)
+
+
+def test_is_embedding_available_openai_api() -> None:
+    """is_embedding_available returns _check_embedding_api_available for openai_api."""
+    import importlib
+
+    with patch.dict(
+        "os.environ",
+        {"EMBEDDING_BACKEND": "openai_api", "EMBEDDING_API_URL": "http://test/v1"},
+        clear=False,
+    ):
+        importlib.reload(embedding_mod)
+        with patch.object(embedding_mod, "_check_embedding_api_available", return_value=True):
+            assert embedding_mod.is_embedding_available() is True
+        with patch.object(embedding_mod, "_check_embedding_api_available", return_value=False):
+            assert embedding_mod.is_embedding_available() is False
+    importlib.reload(embedding_mod)
+
+
+def test_placeholder_handles_invalid_unicode() -> None:
+    """_get_embedding_placeholder with surrogate pairs uses errors=replace."""
+    vec = embedding_mod._get_embedding_placeholder("\udc80invalid", dimension=8)
+    assert len(vec) == 8
+    assert all(isinstance(x, float) for x in vec)

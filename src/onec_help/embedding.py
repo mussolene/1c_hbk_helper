@@ -6,11 +6,21 @@ Retry, timeout and batch support for indexing. Lazy import of sentence-transform
 import hashlib
 import json
 import os
+import re
 import sys
 import time
+import unicodedata
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional
+
+
+def sanitize_text_for_embedding(text: str) -> str:
+    """Replace control chars (0x00-0x1F except \\n, \\r, \\t) with space before embedding."""
+    if not isinstance(text, str):
+        return ""
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", text)
+
 
 VECTOR_SIZE = 384  # default for all-MiniLM-L6-v2; overridden when EMBEDDING_BACKEND=openai_api
 MAX_EMBEDDING_INPUT_CHARS = 2000
@@ -33,8 +43,8 @@ _LMSTUDIO_PREFERRED_EMBEDDING_MODELS = (
     "text-embedding-3-small",
 )
 _EMBEDDING_API_URL = (
-    os.environ.get("EMBEDDING_API_URL") or "http://localhost:1234/v1"
-).strip().rstrip("/")
+    (os.environ.get("EMBEDDING_API_URL") or "http://localhost:1234/v1").strip().rstrip("/")
+)
 _EMBEDDING_API_KEY = (os.environ.get("EMBEDDING_API_KEY") or "").strip()
 _EMBEDDING_DIMENSION = (os.environ.get("EMBEDDING_DIMENSION") or "").strip()
 
@@ -58,7 +68,10 @@ def _embedding_batch_size() -> int:
     try:
         return max(
             1,
-            min(MAX_EMBEDDING_BATCH_SIZE, int(os.environ.get("EMBEDDING_BATCH_SIZE", DEFAULT_EMBEDDING_BATCH_SIZE))),
+            min(
+                MAX_EMBEDDING_BATCH_SIZE,
+                int(os.environ.get("EMBEDDING_BATCH_SIZE", DEFAULT_EMBEDDING_BATCH_SIZE)),
+            ),
         )
     except ValueError:
         return DEFAULT_EMBEDDING_BATCH_SIZE
@@ -70,7 +83,10 @@ def _embedding_workers() -> int:
     try:
         return max(
             1,
-            min(MAX_EMBEDDING_WORKERS, int(os.environ.get("EMBEDDING_WORKERS", DEFAULT_EMBEDDING_WORKERS))),
+            min(
+                MAX_EMBEDDING_WORKERS,
+                int(os.environ.get("EMBEDDING_WORKERS", DEFAULT_EMBEDDING_WORKERS)),
+            ),
         )
     except ValueError:
         return DEFAULT_EMBEDDING_WORKERS
@@ -92,6 +108,27 @@ def _log_fallback(reason: str) -> None:
         if _fallback_log_count > 1:
             msg += f" (fallback count={_fallback_log_count})"
         print(msg, file=sys.stderr, flush=True)
+
+
+def is_embedding_available() -> bool:
+    """True if we can get meaningful embedding (not placeholder). Used for memory long-term storage."""
+    if _EMBEDDING_BACKEND in ("none", "null", "off"):
+        return False
+    if _EMBEDDING_BACKEND == "openai_api":
+        return _check_embedding_api_available()
+    if _EMBEDDING_BACKEND == "local":
+        try:
+            global _embedding_model
+            if _embedding_model is None:
+                from sentence_transformers import SentenceTransformer
+
+                _embedding_model = SentenceTransformer(_EMBEDDING_MODEL)
+            return True
+        except Exception:
+            return False
+    if _EMBEDDING_BACKEND == "deterministic":
+        return True
+    return False
 
 
 def _check_embedding_api_available() -> bool:
@@ -131,6 +168,8 @@ def _check_embedding_api_available() -> bool:
 def get_embedding_dimension() -> int:
     """Return vector size for the current embedding backend (for collection creation)."""
     global _cached_api_dimension, _dimension_detecting
+    if _EMBEDDING_BACKEND == "deterministic":
+        return 384
     if _EMBEDDING_BACKEND == "openai_api" and _EMBEDDING_DIMENSION:
         try:
             return int(_EMBEDDING_DIMENSION)
@@ -205,7 +244,11 @@ def _resolve_openai_api_model() -> str:
                     f"{base_url}/api/v1/models/load",
                     data=load_body,
                     headers={"Content-Type": "application/json"}
-                    | ({"Authorization": f"Bearer {_EMBEDDING_API_KEY}"} if _EMBEDDING_API_KEY else {}),
+                    | (
+                        {"Authorization": f"Bearer {_EMBEDDING_API_KEY}"}
+                        if _EMBEDDING_API_KEY
+                        else {}
+                    ),
                     method="POST",
                 )
                 urllib.request.urlopen(post, timeout=120)
@@ -223,8 +266,20 @@ def _embedding_fallback_dim() -> int:
 
 def _get_embedding_placeholder(text: str, dimension: int = VECTOR_SIZE) -> list[float]:
     """Deterministic placeholder vector (no model, no API)."""
-    h = hashlib.sha256(text.encode()).digest()
+    h = hashlib.sha256(text.encode("utf-8", errors="replace")).digest()
     return [(h[i % len(h)] - 128) / 128.0 for i in range(dimension)]
+
+
+def _get_embedding_deterministic(text: str) -> list[float]:
+    """Deterministic embedding (NFC, tokens, hash → 384 dim) for 'only DB' scenario."""
+    text = unicodedata.normalize("NFC", sanitize_text_for_embedding(text))
+    tokens = re.findall(r"\w+|[^\w\s]", text.lower())
+    vec = [0.0] * 384
+    for i, t in enumerate(tokens):
+        h = int(hashlib.sha256(t.encode("utf-8", errors="replace")).hexdigest()[:8], 16)
+        vec[i % 384] += (h % 256 - 128) / 128.0
+    n = max(len(tokens), 1)
+    return [v / n for v in vec]
 
 
 def _get_embedding_local(text: str) -> list[float]:
@@ -265,10 +320,12 @@ def _get_embedding_api_single(text: str) -> list[float]:
         return _get_embedding_placeholder(text, _embedding_fallback_dim())
     model_id = _resolve_openai_api_model()
     url = f"{_EMBEDDING_API_URL}/embeddings"
-    body = json.dumps({
-        "model": model_id,
-        "input": text[:MAX_EMBEDDING_INPUT_CHARS],
-    }).encode("utf-8")
+    body = json.dumps(
+        {
+            "model": model_id,
+            "input": text[:MAX_EMBEDDING_INPUT_CHARS],
+        }
+    ).encode("utf-8")
     timeout = _embedding_timeout()
     last_err = None
     for attempt in range(RETRY_ATTEMPTS):
@@ -278,7 +335,11 @@ def _get_embedding_api_single(text: str) -> list[float]:
                 data=body,
                 headers={
                     "Content-Type": "application/json",
-                    **({"Authorization": f"Bearer {_EMBEDDING_API_KEY}"} if _EMBEDDING_API_KEY else {}),
+                    **(
+                        {"Authorization": f"Bearer {_EMBEDDING_API_KEY}"}
+                        if _EMBEDDING_API_KEY
+                        else {}
+                    ),
                 },
                 method="POST",
             )
@@ -321,7 +382,11 @@ def _get_embedding_api_batch(texts: List[str]) -> List[list[float]]:
                 data=body,
                 headers={
                     "Content-Type": "application/json",
-                    **({"Authorization": f"Bearer {_EMBEDDING_API_KEY}"} if _EMBEDDING_API_KEY else {}),
+                    **(
+                        {"Authorization": f"Bearer {_EMBEDDING_API_KEY}"}
+                        if _EMBEDDING_API_KEY
+                        else {}
+                    ),
                 },
                 method="POST",
             )
@@ -334,7 +399,9 @@ def _get_embedding_api_batch(texts: List[str]) -> List[list[float]]:
                     if isinstance(item, dict) and "embedding" in item:
                         result.append(list(item["embedding"]))
                     else:
-                        result.append(_get_embedding_placeholder(truncated[i], _embedding_fallback_dim()))
+                        result.append(
+                            _get_embedding_placeholder(truncated[i], _embedding_fallback_dim())
+                        )
                 return result
             break
         except Exception as e:
@@ -364,7 +431,9 @@ def _get_embedding_api_batch_parallel(
         return results
     batch_results: List[List[list[float]]] = [None] * len(batches)  # type: ignore[list-item]
     with ThreadPoolExecutor(max_workers=min(workers, len(batches))) as executor:
-        future_to_idx = {executor.submit(_get_embedding_api_batch, b): i for i, b in enumerate(batches)}
+        future_to_idx = {
+            executor.submit(_get_embedding_api_batch, b): i for i, b in enumerate(batches)
+        }
         for future in as_completed(future_to_idx):
             idx = future_to_idx[future]
             batch_results[idx] = future.result()
@@ -375,9 +444,12 @@ def _get_embedding_api_batch_parallel(
 
 
 def get_embedding(text: str) -> list[float]:
-    """Produce embedding for one text; backend from env: local, openai_api, or none (placeholder)."""
+    """Produce embedding for one text; backend from env: local, openai_api, deterministic, or none (placeholder)."""
+    text = sanitize_text_for_embedding(text)
     if _EMBEDDING_BACKEND in ("none", "null", "off"):
         return _get_embedding_placeholder(text, get_embedding_dimension())
+    if _EMBEDDING_BACKEND == "deterministic":
+        return _get_embedding_deterministic(text)
     if _EMBEDDING_BACKEND == "openai_api":
         return _get_embedding_api_single(text)
     return _get_embedding_local(text)
@@ -394,12 +466,16 @@ def get_embedding_batch(
     """
     if not texts:
         return []
+    texts = [sanitize_text_for_embedding(t) for t in texts]
     size = batch_size if batch_size is not None else _embedding_batch_size()
     w = workers if workers is not None else _embedding_workers()
 
     if _EMBEDDING_BACKEND in ("none", "null", "off"):
         dim = get_embedding_dimension()
         return [_get_embedding_placeholder(t, dim) for t in texts]
+
+    if _EMBEDDING_BACKEND == "deterministic":
+        return [_get_embedding_deterministic(t) for t in texts]
 
     if _EMBEDDING_BACKEND == "openai_api":
         return _get_embedding_api_batch_parallel(texts, size, w)

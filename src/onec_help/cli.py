@@ -307,6 +307,23 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_watchdog(args: argparse.Namespace) -> int:
+    """Run watchdog: monitor .hbk, ingest on change; process pending memory."""
+    from .watchdog import run_watchdog
+
+    try:
+        run_watchdog(
+            poll_interval_sec=args.poll_interval,
+            pending_interval_sec=args.pending_interval,
+        )
+        return 0
+    except KeyboardInterrupt:
+        return 0
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_mcp(args: argparse.Namespace) -> int:
     """Run MCP server (stdio, sse, http, streamable-http). Requires fastmcp (pip install fastmcp)."""
     try:
@@ -531,6 +548,25 @@ def main() -> int:
     )
     p_mcp.add_argument("--path", type=str, default=None, help="URL path (default: /mcp)")
     p_mcp.set_defaults(func=cmd_mcp)
+
+    # watchdog
+    p_watchdog = sub.add_parser(
+        "watchdog",
+        help="Monitor new .hbk files, run ingest on change; process pending memory embeddings",
+    )
+    p_watchdog.add_argument(
+        "--poll-interval",
+        type=int,
+        default=int(os.environ.get("WATCHDOG_POLL_INTERVAL", "600")),
+        help="Seconds between .hbk checks (default: 600)",
+    )
+    p_watchdog.add_argument(
+        "--pending-interval",
+        type=int,
+        default=int(os.environ.get("WATCHDOG_PENDING_INTERVAL", "600")),
+        help="Seconds between pending memory processing (default: 600)",
+    )
+    p_watchdog.set_defaults(func=cmd_watchdog)
 
     args = parser.parse_args()
     return args.func(args)

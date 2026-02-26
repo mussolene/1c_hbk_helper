@@ -9,6 +9,7 @@ from onec_help import indexer as indexer_mod
 from onec_help.indexer import (
     _path_to_point_id,
     build_index,
+    get_1c_help_related,
     get_embedding_dimension,
     get_index_status,
     get_topic_by_path,
@@ -335,3 +336,46 @@ def test_build_index_multiple_batches(mock_client: MagicMock, tmp_path: Path) ->
     n = build_index(tmp_path, qdrant_host="localhost", qdrant_port=6333, batch_size=2)
     assert n == 5
     assert mock_instance.upsert.call_count >= 2
+
+
+@patch("onec_help.indexer.QdrantClient")
+@patch("onec_help.indexer.Filter")
+@patch("onec_help.indexer.FieldCondition")
+@patch("onec_help.indexer.MatchValue")
+def test_get_1c_help_related(
+    _mock_mv: MagicMock,
+    _mock_fc: MagicMock,
+    _mock_f: MagicMock,
+    mock_client: MagicMock,
+) -> None:
+    """get_1c_help_related returns outgoing_links from payload."""
+    mock_instance = MagicMock()
+    mock_client.return_value = mock_instance
+    mock_instance.scroll.return_value = (
+        [
+            MagicMock(
+                payload={
+                    "path": "topic.md",
+                    "outgoing_links": [
+                        {
+                            "href": "a.html",
+                            "resolved_path": "a.md",
+                            "target_title": "A",
+                            "link_text": "A",
+                        },
+                        {
+                            "href": "#",
+                            "resolved_path": None,
+                            "target_title": "Anchor",
+                            "link_text": "Anchor",
+                        },
+                    ],
+                }
+            )
+        ],
+        None,
+    )
+    result = get_1c_help_related("topic.md", qdrant_host="localhost", qdrant_port=6333)
+    assert len(result) == 1
+    assert result[0]["path"] == "a.md"
+    assert result[0]["title"] == "A"

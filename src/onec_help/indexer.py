@@ -43,6 +43,26 @@ def _path_to_point_id(rel_path: str, version: str = "", language: str = "") -> i
     return int(h, 16) % (2**63)
 
 
+def _build_path_to_section(
+    nodes: list, base_path: str = "", breadcrumb: Optional[List[str]] = None
+) -> Dict[str, tuple[str, List[str]]]:
+    """Traverse tree from build_tree; return {rel_path_or_stem: (section_path, breadcrumb)}."""
+    result: Dict[str, tuple[str, List[str]]] = {}
+    breadcrumb = breadcrumb or []
+    for node in nodes or []:
+        title = node.get("title", "")
+        path = node.get("path", "")
+        children = node.get("children", [])
+        if path:
+            stem = Path(path).stem
+            result[path.replace("\\", "/")] = (base_path, list(breadcrumb))
+            result[stem] = (base_path, list(breadcrumb))
+        section_path = (base_path + "/" + title) if base_path and title else (title or base_path)
+        child_breadcrumb = breadcrumb + ([title] if title else [])
+        result.update(_build_path_to_section(children, section_path, child_breadcrumb))
+    return result
+
+
 def build_index(
     docs_dir,
     qdrant_host="localhost",
@@ -53,17 +73,20 @@ def build_index(
     batch_size: int = 500,
     embedding_batch_size: Optional[int] = None,
     embedding_workers: Optional[int] = None,
+    source_dir: Optional[str] = None,
 ) -> int:
     """Index .md (and optionally .html) files from docs_dir into Qdrant in batches. Returns total points.
     extra_payload: merged into each point (e.g. {"version": "8.3", "language": "ru"}).
     incremental: if True, do not recreate collection; upsert by path (add new, update changed).
-    batch_size: upsert every N files to avoid one huge blocking call.
+    source_dir: optional path to unpacked HTML with __categories__ for section_path/breadcrumb in payload.
     embedding_batch_size: texts per embedding batch (env EMBEDDING_BATCH_SIZE).
     embedding_workers: parallel API requests for openai_api (env EMBEDDING_WORKERS)."""
     from . import embedding
+    from .categories import build_tree, find_categories_root, parse_content_file
     from .html2md import (
         _ENCODINGS_UTF8_FIRST,
         _looks_like_html,
+        extract_outgoing_links,
         html_to_md_content,
         read_file_with_encoding_fallback,
     )
@@ -76,6 +99,17 @@ def build_index(
     version = extra.get("version", "")
     language = extra.get("language", "")
     max_input_chars = embedding.MAX_EMBEDDING_INPUT_CHARS
+
+    path_to_section: Dict[str, tuple[str, List[str]]] = {}
+    if source_dir:
+        root = find_categories_root(Path(source_dir))
+        if root:
+            try:
+                struct = parse_content_file(root / "__categories__")
+                tree = build_tree(root, struct)
+                path_to_section = _build_path_to_section(tree)
+            except Exception:
+                pass
 
     paths_to_index: list[Path] = []
     for path in docs_dir.rglob("*.md"):
@@ -104,11 +138,21 @@ def build_index(
     total = 0
     for batch_start in range(0, len(paths_to_index), batch_size):
         batch_paths = paths_to_index[batch_start : batch_start + batch_size]
-        items: List[tuple[str, str, str, int]] = []  # (rel_str, text, title, point_index)
+        items: List[
+            tuple[str, str, str, int, List[Dict[str, Any]]]
+        ] = []  # (rel_str, text, title, point_index, outgoing_links)
+        base_for_links = Path(source_dir) if source_dir else docs_dir
         for idx, path in enumerate(batch_paths):
             try:
+                outgoing_links: List[Dict[str, Any]] = []
                 if path.suffix == ".md":
                     text = read_file_with_encoding_fallback(path, encodings=_ENCODINGS_UTF8_FIRST)
+                    if source_dir:
+                        html_path = Path(source_dir) / path.relative_to(docs_dir).with_suffix(
+                            ".html"
+                        )
+                        if html_path.exists():
+                            outgoing_links = extract_outgoing_links(html_path, Path(source_dir))
                 else:
                     text = (
                         html_to_md_content(path)
@@ -120,6 +164,8 @@ def build_index(
                             text = read_file_with_encoding_fallback(path)[:50000]
                         except Exception:
                             continue
+                    if path.suffix in (".html", "") or not path.suffix:
+                        outgoing_links = extract_outgoing_links(path, base_for_links)
                 if not text.strip():
                     continue
                 rel = path.relative_to(docs_dir)
@@ -128,7 +174,7 @@ def build_index(
                     path.stem if path.suffix else path.name
                 )
                 point_index = total + len(items)
-                items.append((rel_str, text, title, point_index))
+                items.append((rel_str, text, title, point_index, outgoing_links))
             except Exception:
                 continue
         if not items:
@@ -142,7 +188,7 @@ def build_index(
         if len(vectors) != len(items):
             continue
         points = []
-        for idx_in_items, (rel_str, text, title, point_index) in enumerate(items):
+        for idx_in_items, (rel_str, text, title, point_index, outgoing_links) in enumerate(items):
             vector = vectors[idx_in_items]
             point_id = (
                 _path_to_point_id(rel_str, version=version, language=language)
@@ -151,6 +197,16 @@ def build_index(
             )
             payload = {"path": rel_str, "text": text[:50000], "title": title}
             payload.update(extra)
+            if outgoing_links:
+                payload["outgoing_links"] = outgoing_links
+            stem = Path(rel_str).stem
+            if path_to_section:
+                for key in (rel_str, stem, rel_str.replace(".md", ".html")):
+                    if key in path_to_section:
+                        section_path, breadcrumb = path_to_section[key]
+                        payload["section_path"] = section_path
+                        payload["breadcrumb"] = breadcrumb
+                        break
             points.append(PointStruct(id=point_id, vector=vector, payload=payload))
         if not collection_created:
             dim = embedding.get_embedding_dimension()
@@ -228,8 +284,11 @@ def search_index(
     qdrant_port=None,
     collection=COLLECTION_NAME,
     limit=10,
+    version: Optional[str] = None,
+    language: Optional[str] = None,
 ):
-    """Search Qdrant; return list of payloads with path, title, text snippet."""
+    """Search Qdrant; return list of payloads with path, title, text snippet.
+    version, language: optional payload filters."""
     from . import embedding
 
     host = qdrant_host or os.environ.get("QDRANT_HOST", "localhost")
@@ -238,29 +297,53 @@ def search_index(
         return []
     client = QdrantClient(host=host, port=port, check_compatibility=False)
     vector = embedding.get_embedding(query)
-    # qdrant-client 2.x: query_points(query=...); 1.x: search(query_vector=...)
+
+    must = []
+    if version and Filter and FieldCondition and MatchValue:
+        must.append(FieldCondition(key="version", match=MatchValue(value=version)))
+    if language and Filter and FieldCondition and MatchValue:
+        must.append(FieldCondition(key="language", match=MatchValue(value=language)))
+    qfilter = Filter(must=must) if must and Filter else None
+
+    kwargs: Dict[str, Any] = {"collection_name": collection, "limit": limit}
     if hasattr(client, "query_points"):
-        response = client.query_points(
-            collection_name=collection,
-            query=vector,
-            limit=limit,
-        )
+        kwargs["query"] = vector
+        if qfilter is not None:
+            kwargs["query_filter"] = qfilter
+        response = client.query_points(**kwargs)
         hits = getattr(response, "points", [])
     else:
-        hits = client.search(
-            collection_name=collection,
-            query_vector=vector,
-            limit=limit,
+        kwargs["query_vector"] = vector
+        if qfilter is not None:
+            kwargs["query_filter"] = qfilter
+        hits = client.search(**kwargs)
+    _SNIPPET_LEN = 550
+    raw = []
+    for h in hits:
+        payload = getattr(h, "payload", None) or {}
+        text = (payload.get("text") or "")[:_SNIPPET_LEN]
+        links = payload.get("outgoing_links") or []
+        if links:
+            titles = [lnk.get("target_title") or lnk.get("link_text", "") for lnk in links[:5]]
+            text = (text + "\nСвязанные: " + ", ".join(t for t in titles if t)).strip()
+        raw.append(
+            {
+                "path": payload.get("path", ""),
+                "title": payload.get("title", ""),
+                "text": text,
+                "score": getattr(h, "score", None),
+            }
         )
-    return [
-        {
-            "path": (getattr(h, "payload", None) or {}).get("path", ""),
-            "title": (getattr(h, "payload", None) or {}).get("title", ""),
-            "text": ((getattr(h, "payload", None) or {}).get("text") or "")[:500],
-            "score": getattr(h, "score", None),
-        }
-        for h in hits
-    ]
+    if not version and not language:
+        seen: set[str] = set()
+        deduped = []
+        for r in raw:
+            p = r.get("path", "")
+            if p and p not in seen:
+                seen.add(p)
+                deduped.append(r)
+        return deduped
+    return raw
 
 
 def get_topic_from_index(
@@ -268,6 +351,8 @@ def get_topic_from_index(
     qdrant_host: Optional[str] = None,
     qdrant_port: Optional[int] = None,
     collection: str = COLLECTION_NAME,
+    version: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> str:
     """Return full topic text from Qdrant payload by path (when file is not on disk)."""
     if QdrantClient is None or Filter is None or FieldCondition is None or MatchValue is None:
@@ -282,9 +367,14 @@ def get_topic_from_index(
     client = QdrantClient(host=host, port=port, check_compatibility=False)
     for pv in path_variants:
         try:
+            must_cond = [FieldCondition(key="path", match=MatchValue(value=pv))]
+            if version:
+                must_cond.append(FieldCondition(key="version", match=MatchValue(value=version)))
+            if language:
+                must_cond.append(FieldCondition(key="language", match=MatchValue(value=language)))
             res, _ = client.scroll(
                 collection_name=collection,
-                scroll_filter=Filter(must=[FieldCondition(key="path", match=MatchValue(value=pv))]),
+                scroll_filter=Filter(must=must_cond),
                 limit=1,
                 with_payload=True,
                 with_vectors=False,
@@ -293,7 +383,7 @@ def get_topic_from_index(
                 payload = getattr(res[0], "payload", None) or {}
                 text = payload.get("text") or ""
                 if text:
-                    return text
+                    return _apply_outgoing_links(text, payload)
         except Exception:
             continue
     # Fallback: scroll and match path by suffix (handles version/language prefixes)
@@ -315,7 +405,7 @@ def get_topic_from_index(
             ):
                 text = payload.get("text") or ""
                 if text:
-                    return text
+                    return _apply_outgoing_links(text, payload)
     except Exception:
         pass
     return ""
@@ -328,6 +418,8 @@ def search_index_keyword(
     collection: str = COLLECTION_NAME,
     limit: int = 15,
     batch_size: int = 500,
+    version: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Search by substring in title and text (no embedding). Finds exact terms like МенеджерКриптографии."""
     if QdrantClient is None:
@@ -338,18 +430,31 @@ def search_index_keyword(
     q_lower = query.strip().lower()
     if not q_lower:
         return []
+
+    must = []
+    if version and Filter and FieldCondition and MatchValue:
+        must.append(FieldCondition(key="version", match=MatchValue(value=version)))
+    if language and Filter and FieldCondition and MatchValue:
+        must.append(FieldCondition(key="language", match=MatchValue(value=language)))
+    scroll_filter = Filter(must=must) if must and Filter else None
+
     out: List[Dict[str, Any]] = []
     offset = None
     seen_paths: set[str] = set()
+    scroll_kwargs: Dict[str, Any] = {
+        "collection_name": collection,
+        "limit": batch_size,
+        "with_payload": True,
+        "with_vectors": False,
+    }
+    if scroll_filter is not None:
+        scroll_kwargs["scroll_filter"] = scroll_filter
     while len(out) < limit:
         try:
-            res, next_offset = client.scroll(
-                collection_name=collection,
-                limit=batch_size,
-                offset=offset,
-                with_payload=True,
-                with_vectors=False,
-            )
+            kwargs = dict(scroll_kwargs)
+            if offset is not None:
+                kwargs["offset"] = offset
+            res, next_offset = client.scroll(**kwargs)
         except Exception:
             break
         if not res:
@@ -363,11 +468,20 @@ def search_index_keyword(
             text = (payload.get("text") or "").lower()
             if q_lower in title or q_lower in text:
                 seen_paths.add(path)
+                snippet = (payload.get("text") or "")[:550]
+                links = payload.get("outgoing_links") or []
+                if links:
+                    titles = [
+                        lnk.get("target_title") or lnk.get("link_text", "") for lnk in links[:5]
+                    ]
+                    snippet = (
+                        snippet + "\nСвязанные: " + ", ".join(t for t in titles if t)
+                    ).strip()
                 out.append(
                     {
                         "path": path,
                         "title": payload.get("title", ""),
-                        "text": (payload.get("text") or "")[:500],
+                        "text": snippet,
                         "score": None,
                     }
                 )
@@ -386,13 +500,15 @@ def list_index_titles(
     limit: int = 200,
     path_prefix: str = "",
 ) -> List[Dict[str, Any]]:
-    """List (title, path) from index for browsing. path_prefix filters by path start (e.g. 'zif')."""
+    """List (title, path) from index for browsing. path_prefix filters by path start (e.g. 'zif').
+    Deduplicates by path (one entry per path when multiple versions exist)."""
     if QdrantClient is None:
         return []
     host = qdrant_host or os.environ.get("QDRANT_HOST", "localhost")
     port = qdrant_port or int(os.environ.get("QDRANT_PORT", "6333"))
     client = QdrantClient(host=host, port=port, check_compatibility=False)
     out: List[Dict[str, Any]] = []
+    seen_paths: set[str] = set()
     offset = None
     prefix = (path_prefix or "").strip().lower()
     while len(out) < limit:
@@ -413,8 +529,11 @@ def list_index_titles(
                 break
             payload = getattr(point, "payload", None) or {}
             path = payload.get("path", "")
+            if path in seen_paths:
+                continue
             if prefix and not path.lower().startswith(prefix):
                 continue
+            seen_paths.add(path)
             out.append({"title": payload.get("title", ""), "path": path})
         if next_offset is None:
             break
@@ -430,6 +549,32 @@ def _path_inside_base(path: Path, base: Path) -> bool:
         return resolved.is_relative_to(base_resolved) or resolved == base_resolved
     except (ValueError, OSError):
         return False
+
+
+def _apply_outgoing_links(text: str, payload: Dict[str, Any]) -> str:
+    """Substitute hrefs with resolved_path and append Связанные темы section."""
+    import re
+
+    links = payload.get("outgoing_links") or []
+    for lnk in links:
+        href = lnk.get("href", "")
+        resolved = lnk.get("resolved_path")
+        if not href or not resolved:
+            continue
+        # Substitute [anything](href) -> [anything](resolved_path)
+        escaped_href = re.escape(href)
+        text = re.sub(r"\[([^\]]*)\]\(\s*" + escaped_href + r"\s*\)", rf"[\1]({resolved})", text)
+    # Append related section for links with resolved_path
+    with_resolved = [lnk for lnk in links if lnk.get("resolved_path")]
+    if with_resolved:
+        lines = ["\n\n## Связанные темы\n"]
+        for lnk in with_resolved[:20]:
+            rp = lnk.get("resolved_path", "")
+            title = lnk.get("target_title") or lnk.get("link_text", "")
+            if rp:
+                lines.append(f"- [{title}]({rp})")
+        text = text + "\n".join(lines)
+    return text
 
 
 def get_topic_by_path(help_path, topic_path) -> str:
@@ -469,14 +614,143 @@ def get_topic_content(
     qdrant_host: Optional[str] = None,
     qdrant_port: Optional[int] = None,
     collection: str = COLLECTION_NAME,
+    version: Optional[str] = None,
+    language: Optional[str] = None,
+    prefer_index: bool = False,
 ) -> str:
-    """Get topic text: first from disk (help_path), then from Qdrant payload if not found."""
-    content = get_topic_by_path(help_path, topic_path)
-    if content:
-        return content
+    """Get topic text: first from disk (help_path), then from Qdrant payload if not found.
+    prefer_index: if True, skip disk and read only from Qdrant."""
+    if not prefer_index:
+        content = get_topic_by_path(help_path, topic_path)
+        if content:
+            return content
     return get_topic_from_index(
         topic_path,
         qdrant_host=qdrant_host,
         qdrant_port=qdrant_port,
         collection=collection,
+        version=version,
+        language=language,
     )
+
+
+def get_1c_help_related(
+    topic_path: str,
+    qdrant_host: Optional[str] = None,
+    qdrant_port: Optional[int] = None,
+    collection: str = COLLECTION_NAME,
+    version: Optional[str] = None,
+    language: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Return list of related topics for a given path: [{path, title}] from outgoing_links."""
+    if QdrantClient is None or Filter is None or FieldCondition is None or MatchValue is None:
+        return []
+    host = qdrant_host or os.environ.get("QDRANT_HOST", "localhost")
+    port = qdrant_port or int(os.environ.get("QDRANT_PORT", "6333"))
+    topic_path = topic_path.lstrip("/")
+    path_variants = [topic_path]
+    if not topic_path.endswith(".md") and not topic_path.endswith(".html"):
+        path_variants.append(topic_path + ".md")
+        path_variants.append(topic_path + ".html")
+    client = QdrantClient(host=host, port=port, check_compatibility=False)
+    for pv in path_variants:
+        try:
+            must_cond = [FieldCondition(key="path", match=MatchValue(value=pv))]
+            if version:
+                must_cond.append(FieldCondition(key="version", match=MatchValue(value=version)))
+            if language:
+                must_cond.append(FieldCondition(key="language", match=MatchValue(value=language)))
+            res, _ = client.scroll(
+                collection_name=collection,
+                scroll_filter=Filter(must=must_cond),
+                limit=1,
+                with_payload=True,
+                with_vectors=False,
+            )
+            if res and len(res) > 0:
+                payload = getattr(res[0], "payload", None) or {}
+                links = payload.get("outgoing_links") or []
+                return [
+                    {
+                        "path": lnk.get("resolved_path", ""),
+                        "title": lnk.get("target_title") or lnk.get("link_text", ""),
+                    }
+                    for lnk in links
+                    if lnk.get("resolved_path")
+                ]
+        except Exception:
+            continue
+    return []
+
+
+def compare_1c_help(
+    topic_path_or_query: str,
+    version_left: str,
+    version_right: str,
+    qdrant_host: Optional[str] = None,
+    qdrant_port: Optional[int] = None,
+    collection: str = COLLECTION_NAME,
+    language: Optional[str] = None,
+    include_diff: bool = False,
+) -> str:
+    """Compare topic content between two versions. Returns formatted comparison or diff."""
+    path = topic_path_or_query.strip()
+    if ".md" not in path and ".html" not in path:
+        results = search_index(
+            path,
+            qdrant_host=qdrant_host,
+            qdrant_port=qdrant_port,
+            collection=collection,
+            limit=1,
+            version=version_left,
+            language=language,
+        )
+        if not results:
+            results = search_index(
+                path,
+                qdrant_host=qdrant_host,
+                qdrant_port=qdrant_port,
+                collection=collection,
+                limit=1,
+                language=language,
+            )
+        if not results:
+            return f"Topic not found for query: {path}"
+        path = results[0].get("path", "")
+    content_left = get_topic_content(
+        "",
+        path,
+        qdrant_host=qdrant_host,
+        qdrant_port=qdrant_port,
+        collection=collection,
+        version=version_left,
+        language=language,
+        prefer_index=True,
+    )
+    content_right = get_topic_content(
+        "",
+        path,
+        qdrant_host=qdrant_host,
+        qdrant_port=qdrant_port,
+        collection=collection,
+        version=version_right,
+        language=language,
+        prefer_index=True,
+    )
+    if not content_left and not content_right:
+        return f"Topic not found in either version for path: {path}"
+    out = f"## Версия {version_left}\n\n{content_left or '(нет контента)'}\n\n---\n\n## Версия {version_right}\n\n{content_right or '(нет контента)'}"
+    if include_diff and content_left and content_right:
+        import difflib
+
+        lines_left = content_left.splitlines(keepends=True)
+        lines_right = content_right.splitlines(keepends=True)
+        diff = difflib.unified_diff(
+            lines_left,
+            lines_right,
+            fromfile=f"v{version_left}",
+            tofile=f"v{version_right}",
+            lineterm="",
+        )
+        out += "\n\n---\n\n## Diff\n\n```\n" + "".join(diff) + "\n```"
+    return out

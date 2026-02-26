@@ -6,9 +6,69 @@ import html
 import os
 import unicodedata
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from bs4 import BeautifulSoup
+
+
+def resolve_href(current_path: Path, href: str, base_dir: Path) -> Optional[str]:
+    """Resolve relative href to a path within base_dir. Returns normalized path string or None.
+    href="#" (anchor) returns None."""
+    href = (href or "").strip()
+    if not href or href.startswith("#"):
+        return None
+    try:
+        resolved = (current_path.parent / href).resolve()
+        rel = resolved.relative_to(base_dir.resolve())
+    except (ValueError, OSError):
+        return None
+    rel_str = str(rel).replace("\\", "/")
+    candidates = [
+        base_dir / rel_str,
+        base_dir / Path(rel_str).with_suffix(".md"),
+        base_dir / Path(rel_str).with_suffix(".html"),
+    ]
+    if not rel_str.endswith((".md", ".html", ".htm")):
+        candidates.extend([base_dir / (rel_str + ".md"), base_dir / (rel_str + ".html")])
+    for c in candidates:
+        if c.exists() and c.is_file():
+            try:
+                r = c.relative_to(base_dir)
+                return str(r).replace("\\", "/")
+            except ValueError:
+                pass
+    return None
+
+
+def extract_outgoing_links(html_path: Path, base_dir: Path) -> List[Dict[str, Any]]:
+    """Parse HTML, find all <a href>, resolve each, return [{href, resolved_path, target_title, link_text}]."""
+    result: List[Dict[str, Any]] = []
+    try:
+        text = _read_html_file(html_path)
+    except Exception:
+        return result
+    soup = BeautifulSoup(text, "html.parser")
+    current = Path(html_path)
+    seen: set[tuple[str, str]] = set()
+    for a in soup.find_all("a", href=True):
+        href = a.get("href", "").strip()
+        link_text = a.get_text(strip=True) or ""
+        if not href:
+            continue
+        key = (href, link_text)
+        if key in seen:
+            continue
+        seen.add(key)
+        resolved = resolve_href(current, href, base_dir)
+        result.append(
+            {
+                "href": href,
+                "resolved_path": resolved,
+                "target_title": link_text,
+                "link_text": link_text,
+            }
+        )
+    return result
 
 
 def _normalize_md_text(s: str) -> str:
@@ -71,7 +131,7 @@ def _looks_like_utf8_mojibake(text: str) -> bool:
     Признак 2: псевдографика (╨ ╤ и т.п. U+2500–U+257F) вперемешку с кириллицей."""
     if len(text) < 20:
         return False
-    cyrillic = sum(1 for c in text if "\u0400" <= c <= "\u04FF")
+    cyrillic = sum(1 for c in text if "\u0400" <= c <= "\u04ff")
     if cyrillic < 10:
         return False
     # Р и С как первый байт UTF-8 русских букв
@@ -79,7 +139,7 @@ def _looks_like_utf8_mojibake(text: str) -> bool:
     if (bad / cyrillic) > 0.25:
         return True
     # Псевдографика (типично при неверной кодировке) вместе с кириллицей
-    box = sum(1 for c in text if "\u2500" <= c <= "\u257F")
+    box = sum(1 for c in text if "\u2500" <= c <= "\u257f")
     return box > 5 and cyrillic > 5
 
 
@@ -279,7 +339,15 @@ def html_to_md_content(html_path) -> str:
         code_block = ex_heading.find_next("pre") or ex_heading.find_next("table")
         if code_block:
             lines.append("## Пример\n\n```\n")
-            lines.append(code_block.get_text(separator="\n", strip=True) + "\n")
+            if code_block.name == "table":
+                rows = code_block.find_all("tr")
+                text = "\n".join(
+                    " ".join(cell.get_text(strip=True) for cell in row.find_all(["td", "th"]))
+                    for row in rows
+                )
+                lines.append(text + "\n")
+            else:
+                lines.append(code_block.get_text(separator="\n", strip=True) + "\n")
             lines.append("```\n\n")
 
     # See also
@@ -301,9 +369,55 @@ def html_to_md_content(html_path) -> str:
                 lines.append(f"- {a.get_text(strip=True)}\n")
             lines.append("\n")
 
+    # Примечание
+    note_heading = soup.find(
+        "p",
+        class_="V8SH_chapter",
+        string=lambda t: t and "Примечание:" in (t if isinstance(t, str) else t),
+    )
+    if not note_heading:
+        for p in soup.find_all("p", class_="V8SH_chapter"):
+            if p.get_text(strip=True) == "Примечание:":
+                note_heading = p
+                break
+    if note_heading:
+        next_p = note_heading.find_next_sibling("p") or note_heading.find_next(string=True)
+        if next_p:
+            note_text = (
+                next_p.get_text(separator=" ", strip=True)
+                if hasattr(next_p, "get_text")
+                else str(next_p).strip()
+            )
+            if note_text and "Примечание" not in note_text:
+                lines.append("## Примечание\n\n")
+                lines.append(note_text + "\n\n")
+
+    # Доступность
+    avail_heading = soup.find(
+        "p",
+        class_="V8SH_chapter",
+        string=lambda t: t and "Доступность:" in (t if isinstance(t, str) else t),
+    )
+    if not avail_heading:
+        for p in soup.find_all("p", class_="V8SH_chapter"):
+            if "Доступность:" in (p.get_text(strip=True) or ""):
+                avail_heading = p
+                break
+    if avail_heading:
+        next_p = avail_heading.find_next_sibling("p") or avail_heading.find_next(string=True)
+        if next_p:
+            avail_text = (
+                next_p.get_text(separator=" ", strip=True)
+                if hasattr(next_p, "get_text")
+                else str(next_p).strip()
+            )
+            if avail_text and "Доступность" not in avail_text:
+                lines.append("## Доступность\n\n")
+                lines.append(avail_text + "\n\n")
+
     out = "".join(lines).strip()
-    if not out or out == f"# {title}\n":
-        # Fallback: title + body text
+    if not out or out.strip() == (f"# {title}").strip():
+        # Fallback: title + body text (catalog pages with only title)
         body = soup.find("body")
         if body:
             out = f"# {title}\n\n" + body.get_text(separator="\n", strip=True)[:8000]

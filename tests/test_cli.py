@@ -176,7 +176,9 @@ def test_cmd_index_status_error(mock_status) -> None:
 
 @patch("onec_help.ingest.read_ingest_status")
 @patch("onec_help.indexer.get_index_status")
-def test_cmd_index_status_with_ingest(mock_status, mock_ingest, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_index_status_with_ingest(
+    mock_status, mock_ingest, capsys: pytest.CaptureFixture[str]
+) -> None:
     """index-status shows embedding speed, per-folder, total time when ingest status exists.
     When status is completed, current is empty so no stale workers are shown."""
     mock_status.return_value = {

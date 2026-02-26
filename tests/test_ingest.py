@@ -258,7 +258,7 @@ def test_run_ingest_max_tasks(mock_qdrant: MagicMock, mock_task: MagicMock, tmp_
     # Names must match LANG_PATTERN (*_ru.hbk) so collect_hbk_tasks returns them
     for name in ("a_ru.hbk", "b_ru.hbk", "c_ru.hbk", "d_ru.hbk", "e_ru.hbk"):
         (tmp_path / "v" / name).write_bytes(b"x")
-    mock_task.return_value = (None, "v", "ru", "skip")
+    mock_task.return_value = (None, None, "v", "ru", "skip")
     mock_qdrant.return_value.collection_exists.return_value = True
     n = run_ingest(
         source_dirs_with_versions=[(tmp_path, "v")],

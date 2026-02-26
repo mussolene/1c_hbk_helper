@@ -60,6 +60,9 @@ services:
       EMBEDDING_WORKERS: ${EMBEDDING_WORKERS:-4}
       EMBEDDING_FORCE_BATCH: ${EMBEDDING_FORCE_BATCH:-0}
       EMBEDDING_TIMEOUT: ${EMBEDDING_TIMEOUT:-60}
+      WATCHDOG_ENABLED: ${WATCHDOG_ENABLED:-0}
+      WATCHDOG_POLL_INTERVAL: ${WATCHDOG_POLL_INTERVAL:-600}
+      WATCHDOG_PENDING_INTERVAL: ${WATCHDOG_PENDING_INTERVAL:-600}
     volumes:
       - /opt/1cv8:/opt/1cv8:ro
       # Доступ к хранилищу Qdrant только для чтения — index-status показывает размер БД на диске

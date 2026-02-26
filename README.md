@@ -45,6 +45,7 @@ pip install -e ".[dev]"
 | **`build-index <directory> [--incremental] [--embedding-batch-size N] [--embedding-workers N]`** | Построить векторный индекс в Qdrant по .md/.html (батч-эмбеддинги; при openai_api — параллельные запросы) |
 | **`ingest`** | Распаковать .hbk из мультикаталогов во временную папку, построить Markdown, проиндексировать в Qdrant, удалить временные данные. По хэшу .hbk кэшируется факт индексации — при перезапуске неизменённые файлы пропускаются (не парсятся, не пересчитываются эмбеддинги). Опции `--no-cache` для полной переиндексации; `--embedding-batch-size`, `--embedding-workers` — для ускорения эмбеддингов |
 | **`index-status`** | Статус индекса: число тем, число эмбеддингов, размер БД на диске (если задан `QDRANT_STORAGE_PATH`), версии и языки; при запущенном ingest — скорость эмбеддингов, прогресс по папкам, ETA |
+| **`watchdog`** | Мониторинг новых .hbk в HELP_SOURCE_BASE, инкрементальный ingest при появлении; обработка pending embeddings памяти каждые N минут |
 | **`serve <directory>`** | Веб-просмотр справки (Flask) |
 | **`mcp <directory>`** | MCP-сервер (stdio/HTTP; нужен fastmcp) |
 
@@ -81,6 +82,9 @@ pip install -e ".[dev]"
 | `EMBEDDING_WORKERS` | Число параллельных запросов к внешнему API (только openai_api). По умолчанию 4 | `4` |
 | `EMBEDDING_FORCE_BATCH` | Максимальная мощность: `1`/`true`/`yes` — батч 256 и 16 воркеров для любого типа embedding | — |
 | `EMBEDDING_TIMEOUT` | Таймаут HTTP-запроса к API (секунды). При ошибке — retry с backoff, затем плейсхолдер | `60` |
+| `WATCHDOG_ENABLED` | `1` — запустить watchdog в фоне: мониторинг .hbk и обработка pending memory | `0` |
+| `WATCHDOG_POLL_INTERVAL` | Интервал проверки новых .hbk (секунды) | `600` |
+| `WATCHDOG_PENDING_INTERVAL` | Интервал обработки pending embeddings (секунды) | `600` |
 
 ## Запуск из коробки (Docker Compose)
 
@@ -100,6 +104,7 @@ docker compose up -d
 # Индексация вручную: docker compose exec mcp python -m onec_help ingest
 # Проверка индекса: docker compose exec mcp python -m onec_help index-status
 # По расписанию: в контейнере mcp запущен cron — раз в сутки в 3:00 переиндексация из /opt/1cv8
+# Watchdog (при WATCHDOG_ENABLED=1): мониторинг новых .hbk, инкрементальный ingest; обработка pending памяти
 ```
 
 ### Только распаковка .hbk
@@ -130,6 +135,7 @@ python -m onec_help unpack-dir /opt/1cv8 -o ./unpacked -l ru
 - **При старте контейнера:** если смонтирован `/opt/1cv8`, ingest один раз запускается **в фоне** (логи: `docker compose exec mcp tail -f /app/var/log/ingest.log`).
 - **Вручную:** `docker compose exec mcp python -m onec_help ingest`
 - **По расписанию:** cron в контейнере mcp — раз в сутки в 3:00.
+- **Watchdog** (при `WATCHDOG_ENABLED=1`): мониторинг новых .hbk в HELP_SOURCE_BASE; при появлении или изменении — полный ingest; каждые N минут — обработка pending memory (эмбеддинги, сохранённые при недоступном API). Логи: `tail -f /app/var/log/watchdog.log`.
 
 Дополнительно:
 

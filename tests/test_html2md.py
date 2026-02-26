@@ -12,8 +12,10 @@ from onec_help.html2md import (
     _read_html_file,
     _table_to_md,
     build_docs,
+    extract_outgoing_links,
     html_to_md_content,
     read_file_with_encoding_fallback,
+    resolve_href,
 )
 
 
@@ -209,6 +211,27 @@ def test_build_docs_extensionless_html(tmp_path: Path) -> None:
     assert any("noext" in str(p) for p in created)
 
 
+def test_html_to_md_example_table_code(tmp_path: Path) -> None:
+    """Example section with table (fragmented code) yields readable code block."""
+    f = tmp_path / "example_table.html"
+    f.write_text(
+        """
+<html><body>
+<h1 class="V8SH_pagetitle">Format</h1>
+<p class="V8SH_chapter">Пример:</p>
+<table><tr><td>A</td><td>=</td><td>Формат</td></tr>
+<tr><td>(</td><td>123</td><td>.</td></tr></table>
+</body></html>
+""",
+        encoding="utf-8",
+    )
+    md = html_to_md_content(f)
+    assert "## Пример" in md
+    # Table cells should be joined per row (not each td on new line)
+    assert "Формат" in md
+    assert "A =" in md or "A = Формат" in md
+
+
 def test_html_to_md_v8sh_fallback_loop(tmp_path: Path) -> None:
     """V8SH sections found via fallback loop (get_text == 'Описание:') when string= doesn't match."""
     f = tmp_path / "v8sh.html"
@@ -234,3 +257,40 @@ def test_html_to_md_v8sh_fallback_loop(tmp_path: Path) -> None:
     assert "Синтаксис" in md or "TestFunc(x)" in md
     assert "Возвращаемое значение" in md or "Number" in md
     assert "См. также" in md or "Other" in md
+
+
+def test_resolve_href_relative(tmp_path: Path) -> None:
+    """resolve_href resolves relative href to existing file within base_dir."""
+    (tmp_path / "a.html").write_text("a", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.html").write_text("b", encoding="utf-8")
+    current = tmp_path / "sub" / "b.html"
+    assert resolve_href(current, "a.html", tmp_path) is None  # ../ from sub
+    assert resolve_href(current, "../a.html", tmp_path) == "a.html"
+    assert resolve_href(tmp_path / "a.html", "sub/b.html", tmp_path) == "sub/b.html"
+
+
+def test_resolve_href_anchor_returns_none(tmp_path: Path) -> None:
+    """href="#" returns None."""
+    (tmp_path / "a.html").write_text("a", encoding="utf-8")
+    assert resolve_href(tmp_path / "a.html", "#section", tmp_path) is None
+    assert resolve_href(tmp_path / "a.html", "", tmp_path) is None
+
+
+def test_extract_outgoing_links(tmp_path: Path) -> None:
+    """extract_outgoing_links finds <a href> and resolves when possible."""
+    (tmp_path / "page.html").write_text(
+        '<html><body><a href="other.html">Other</a><a href="#">Anchor</a></body></html>',
+        encoding="utf-8",
+    )
+    (tmp_path / "other.html").write_text("other", encoding="utf-8")
+    links = extract_outgoing_links(tmp_path / "page.html", tmp_path)
+    assert len(links) == 2
+    # First link should resolve
+    resolved = [lnk for lnk in links if lnk.get("resolved_path")]
+    assert len(resolved) == 1
+    assert resolved[0]["resolved_path"] == "other.html"
+    assert resolved[0]["link_text"] == "Other"
+    # Anchor link has no resolved_path
+    anchor = [lnk for lnk in links if lnk.get("href") == "#"][0]
+    assert anchor.get("resolved_path") is None

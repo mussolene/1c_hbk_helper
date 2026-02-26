@@ -1,0 +1,287 @@
+"""
+Triple memory: short (in-memory), medium (JSONL file), long (Qdrant onec_help_memory).
+Triple-write on each event; long uses embedding or pending queue when unavailable.
+"""
+
+import json
+import os
+import threading
+import time
+import uuid
+from collections import deque
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional
+
+_MEMORY_COLLECTION = "onec_help_memory"
+_store: Optional["MemoryStore"] = None
+_store_lock = threading.Lock()
+
+
+def get_memory_store(base_path: Optional[Path] = None) -> "MemoryStore":
+    """Return singleton MemoryStore. base_path from env MEMORY_BASE_PATH or ~/.onec_help."""
+    global _store
+    with _store_lock:
+        if _store is None:
+            path = base_path
+            if path is None:
+                p = os.environ.get("MEMORY_BASE_PATH", "").strip()
+                path = Path(p).expanduser() if p else Path.home() / ".onec_help"
+            short = int(os.environ.get("MEMORY_SHORT_LIMIT", "50"))
+            medium = int(os.environ.get("MEMORY_MEDIUM_LIMIT", "500"))
+            ttl = int(os.environ.get("MEMORY_MEDIUM_TTL_DAYS", "7"))
+            _store = MemoryStore(path, short_limit=short, medium_limit=medium, medium_ttl_days=ttl)
+        return _store
+
+
+def _is_memory_enabled() -> bool:
+    v = (os.environ.get("MEMORY_ENABLED") or "0").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+class MemoryStore:
+    """Triple-write memory: short (deque), medium (JSONL), long (Qdrant or pending)."""
+
+    def __init__(
+        self,
+        base_path: Path,
+        short_limit: int = 50,
+        medium_limit: int = 500,
+        medium_ttl_days: int = 7,
+    ) -> None:
+        self.base_path = Path(base_path)
+        self.base_path.mkdir(parents=True, exist_ok=True)
+        self._short: deque = deque(maxlen=short_limit)
+        self._short_lock = threading.Lock()
+        self.medium_limit = medium_limit
+        self.medium_ttl_days = medium_ttl_days
+        self.medium_path = self.base_path / "session_memory.jsonl"
+        self.pending_path = self.base_path / "pending_memory.json"
+
+    def write_event(
+        self,
+        event_type: Literal["get_topic", "save_snippet", "exchange"],
+        payload: Dict[str, Any],
+        domain: str = "user",
+    ) -> None:
+        """Atomically write to short, medium; for long call _write_long_or_pending."""
+        if not _is_memory_enabled():
+            return
+        ts = time.time()
+        payload_copy = dict(payload)
+        payload_copy["type"] = event_type
+        payload_copy["ts"] = ts
+        payload_copy["domain"] = domain
+
+        with self._short_lock:
+            self._short.append(payload_copy)
+
+        summary_medium = self._format_medium_summary(event_type, payload_copy)
+        self._append_medium(ts, summary_medium)
+
+        self._write_long_or_pending(event_type, payload_copy, ts)
+
+    def _format_medium_summary(self, event_type: str, payload: Dict[str, Any]) -> str:
+        query = payload.get("query", "")
+        topic_path = payload.get("topic_path", "")
+        paths = (
+            topic_path
+            if isinstance(topic_path, str)
+            else ", ".join(topic_path)
+            if topic_path
+            else ""
+        )
+        desc = payload.get("description", "") or payload.get("response_snippet", "")[:200]
+        return f"[{payload.get('ts', 0)}] Запрос: {query}. Топики: {paths}. Сниппет: {desc}."
+
+    def _append_medium(self, ts: float, summary: str) -> None:
+        try:
+            with open(self.medium_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"ts": ts, "summary": summary}, ensure_ascii=False) + "\n")
+            self._trim_medium()
+        except OSError:
+            pass
+
+    def _trim_medium(self) -> None:
+        try:
+            if not self.medium_path.exists():
+                return
+            lines = self.medium_path.read_text(encoding="utf-8").strip().split("\n")
+            if not lines:
+                return
+            cutoff = time.time() - self.medium_ttl_days * 86400
+            kept = []
+            for ln in lines:
+                try:
+                    obj = json.loads(ln)
+                    if obj.get("ts", 0) > cutoff:
+                        kept.append(ln)
+                except json.JSONDecodeError:
+                    continue
+            if len(kept) > self.medium_limit:
+                kept = kept[-self.medium_limit :]
+            self.medium_path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+        except OSError:
+            pass
+
+    def _write_long_or_pending(self, event_type: str, payload: Dict[str, Any], ts: float) -> None:
+        from . import embedding
+
+        if not embedding.is_embedding_available():
+            self._append_pending(payload, ts)
+            return
+        summary = self._format_long_summary(payload)
+        try:
+            vec = embedding.get_embedding(summary)
+            self._upsert_long(str(uuid.uuid4()), vec, {**payload, "summary": summary})
+        except Exception:
+            self._append_pending(payload, ts)
+
+    def _format_long_summary(self, payload: Dict[str, Any]) -> str:
+        title = payload.get("title", "")
+        query = payload.get("query", "")
+        topic_path = payload.get("topic_path", "")
+        tags = str(topic_path) if topic_path else ""
+        return f"1C Help: {title} | {query} | {tags}"
+
+    def _upsert_long(self, point_id: str, vector: List[float], payload: Dict[str, Any]) -> None:
+        try:
+            from qdrant_client import QdrantClient
+            from qdrant_client.models import Distance, PointStruct, VectorParams
+
+            host = os.environ.get("QDRANT_HOST", "localhost")
+            port = int(os.environ.get("QDRANT_PORT", "6333"))
+            client = QdrantClient(host=host, port=port, check_compatibility=False)
+            if not client.collection_exists(_MEMORY_COLLECTION):
+                client.create_collection(
+                    collection_name=_MEMORY_COLLECTION,
+                    vectors_config=VectorParams(size=len(vector), distance=Distance.COSINE),
+                )
+            numeric_id = abs(hash(point_id)) % (2**63)
+            client.upsert(
+                collection_name=_MEMORY_COLLECTION,
+                points=[PointStruct(id=numeric_id, vector=vector, payload=payload)],
+            )
+        except Exception:
+            pass
+
+    def _append_pending(self, payload: Dict[str, Any], ts: float) -> None:
+        try:
+            data: List[Dict[str, Any]] = []
+            if self.pending_path.exists():
+                raw = self.pending_path.read_text(encoding="utf-8")
+                if raw.strip():
+                    data = json.loads(raw)
+            data.append({"id": str(uuid.uuid4()), "payload": payload, "created_at": ts})
+            self.pending_path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=0), encoding="utf-8"
+            )
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    def get_short(self) -> List[Dict[str, Any]]:
+        """Last N records (FIFO)."""
+        with self._short_lock:
+            return list(self._short)
+
+    def get_medium(self) -> List[Dict[str, Any]]:
+        """Records with TTL; format [{ts, summary}]."""
+        cutoff = time.time() - self.medium_ttl_days * 86400
+        out: List[Dict[str, Any]] = []
+        try:
+            if not self.medium_path.exists():
+                return []
+            for ln in self.medium_path.read_text(encoding="utf-8").strip().split("\n"):
+                if not ln:
+                    continue
+                try:
+                    obj = json.loads(ln)
+                    if obj.get("ts", 0) > cutoff:
+                        out.append({"ts": obj.get("ts"), "summary": obj.get("summary", "")})
+                except json.JSONDecodeError:
+                    continue
+        except OSError:
+            pass
+        return out[-self.medium_limit :]
+
+    def process_pending(self) -> int:
+        """Process pending_memory.json: embed and upsert to onec_help_memory when embedding available.
+        Returns number of processed items."""
+        from . import embedding
+
+        if not embedding.is_embedding_available():
+            return 0
+        try:
+            if not self.pending_path.exists():
+                return 0
+            raw = self.pending_path.read_text(encoding="utf-8")
+            if not raw.strip():
+                return 0
+            data = json.loads(raw)
+            if not isinstance(data, list):
+                return 0
+            processed = 0
+            remaining = []
+            for item in data:
+                if not isinstance(item, dict):
+                    remaining.append(item)
+                    continue
+                payload = item.get("payload", {})
+                if not payload:
+                    continue
+                try:
+                    summary = self._format_long_summary(payload)
+                    vec = embedding.get_embedding(summary)
+                    self._upsert_long(
+                        item.get("id", str(uuid.uuid4())), vec, {**payload, "summary": summary}
+                    )
+                    processed += 1
+                except Exception:
+                    remaining.append(item)
+            if processed > 0:
+                self.pending_path.write_text(
+                    json.dumps(remaining, ensure_ascii=False, indent=0), encoding="utf-8"
+                )
+            return processed
+        except (OSError, json.JSONDecodeError):
+            return 0
+
+    def search_long(
+        self,
+        query: str,
+        limit: int = 5,
+        domain: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Search onec_help_memory by semantic similarity."""
+        try:
+            from qdrant_client import QdrantClient
+            from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+            from . import embedding
+
+            vec = embedding.get_embedding(query)
+            host = os.environ.get("QDRANT_HOST", "localhost")
+            port = int(os.environ.get("QDRANT_PORT", "6333"))
+            client = QdrantClient(host=host, port=port, check_compatibility=False)
+            if not client.collection_exists(_MEMORY_COLLECTION):
+                return []
+            kwargs: Dict[str, Any] = {
+                "collection_name": _MEMORY_COLLECTION,
+                "query_vector": vec,
+                "limit": limit,
+                "with_payload": True,
+            }
+            if domain and Filter and FieldCondition and MatchValue:
+                kwargs["query_filter"] = Filter(
+                    must=[FieldCondition(key="domain", match=MatchValue(value=domain))]
+                )
+            if hasattr(client, "query_points"):
+                res = client.query_points(**kwargs)
+                points = getattr(res, "points", [])
+            else:
+                points = client.search(**kwargs)
+            return [
+                {"payload": getattr(p, "payload", {}), "score": getattr(p, "score", None)}
+                for p in points
+            ]
+        except Exception:
+            return []

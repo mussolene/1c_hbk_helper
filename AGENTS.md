@@ -8,14 +8,14 @@
 
 ## Команды и сценарии
 
-- **Локально:** `python -m onec_help unpack/build-docs/build-index/serve/mcp <args>`
-- **Docker:** `docker-compose up` (сервисы `qdrant` + `mcp`). В mcp смонтирован `/opt/1cv8`, cron раз в сутки в 3:00 запускает ingest.
+- **Локально:** `python -m onec_help unpack/build-docs/build-index/ingest/watchdog/serve/mcp <args>`
+- **Docker:** `docker-compose up` (сервисы `qdrant` + `mcp`). В mcp смонтирован `/opt/1cv8`, cron раз в сутки в 3:00 запускает ingest; при `WATCHDOG_ENABLED=1` — watchdog в фоне (мониторинг .hbk, pending memory).
 - **Индекс вручную:** `docker compose exec mcp python -m onec_help ingest` (каталог версий — `HELP_SOURCE_BASE`, подпапки = версии 1С, поиск .hbk рекурсивно, в т.ч. в `bin/` на Windows).
 
 ## Структура кода
 
-- `src/onec_help/`: пакет (unpack, categories, html2md, tree, web, indexer, mcp_server, cli).
-- `unpack` — 7z; `categories` — парсинг `__categories__` и дерево TOC; `html2md` — HTML → Markdown; `tree` — дерево для веба; `web` — Flask; `indexer` — Qdrant; `mcp_server` — FastMCP, инструменты search_1c_help, get_1c_help_topic, get_1c_function_info.
+- `src/onec_help/`: пакет (unpack, categories, html2md, tree, web, indexer, memory, watchdog, mcp_server, cli).
+- `unpack` — 7z; `categories` — парсинг `__categories__` и дерево TOC; `html2md` — HTML → Markdown; `tree` — дерево для веба; `web` — Flask; `indexer` — Qdrant; `memory` — тройная память (short/medium/long); `watchdog` — мониторинг .hbk и pending embeddings; `mcp_server` — FastMCP, инструменты search_1c_help, get_1c_help_topic, get_1c_function_info, save_1c_snippet, get_1c_help_related, compare_1c_help, trigger_reindex.
 - Тесты в `tests/`, покрытие ≥90% (pytest-cov, `--cov-fail-under=90`).
 - Фикстуры — минимальный срез справки в `tests/fixtures/help_sample/`.
 

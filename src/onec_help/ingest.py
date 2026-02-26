@@ -61,9 +61,7 @@ def _load_ingest_cache() -> Dict[str, Dict[str, Any]]:
             f"CREATE TABLE IF NOT EXISTS {_CACHE_TABLE} "
             "(key TEXT PRIMARY KEY, hash TEXT NOT NULL, indexed INTEGER NOT NULL, points INTEGER)"
         )
-        for row in conn.execute(
-            f"SELECT key, hash, indexed, points FROM {_CACHE_TABLE}"
-        ):
+        for row in conn.execute(f"SELECT key, hash, indexed, points FROM {_CACHE_TABLE}"):
             entries[row[0]] = {
                 "hash": row[1],
                 "indexed": bool(row[2]),
@@ -246,8 +244,8 @@ def _unpack_and_build_docs(
     build_docs_fn: Any,
     current_work: Optional[Dict[int, Dict[str, Any]]] = None,
     state_lock: Optional[threading.Lock] = None,
-) -> Tuple[Optional[Path], str, str, Optional[str]]:
-    """Unpack one .hbk to temp, build .md there. Returns (md_dir, version, language, error_message) or (None, v, l, reason) on failure.
+) -> Tuple[Optional[Path], Optional[Path], str, str, Optional[str]]:
+    """Unpack one .hbk to temp, build .md there. Returns (md_dir, unpacked_dir, version, language, error_message) or (None, None, v, l, reason) on failure.
     If current_work and state_lock are set, updates current file/stage for this thread for status display."""
     ident = threading.get_ident()
     safe_name = re.sub(r"[^\w\-]", "_", hbk_path.stem)
@@ -274,20 +272,15 @@ def _unpack_and_build_docs(
         build_docs_fn(unpacked, md_dir)
         if any(md_dir.rglob("*.md")) or any(md_dir.rglob("*")) and not list(md_dir.rglob("*.md")):
             # build_docs may create .md or we have extension-less HTML; indexer will use HTML fallback
-            return (md_dir, version, language, None)
-        return (md_dir, version, language, None)
+            return (md_dir, unpacked, version, language, None)
+        return (md_dir, unpacked, version, language, None)
     except Exception as e:
         err_msg = f"{type(e).__name__}: {e}"
-        return (None, version, language, err_msg)
+        return (None, None, version, language, err_msg)
     finally:
         if current_work is not None and state_lock is not None:
             with state_lock:
                 current_work.pop(ident, None)
-        if unpacked.exists():
-            try:
-                shutil.rmtree(unpacked)
-            except OSError:
-                pass
 
 
 def run_ingest(
@@ -398,13 +391,13 @@ def run_ingest(
     started_at = time.time()
     # One entry per folder (version/language): hbk_count, html/md/err/points aggregated
     folder_hbk_count: Dict[Tuple[str, str], int] = Counter()
-    for _, v, l in tasks:
-        folder_hbk_count[(v, l)] += 1
+    for _, v, lang in tasks:
+        folder_hbk_count[(v, lang)] += 1
     folders = [
         {
             "version": v,
-            "language": l,
-            "hbk_count": folder_hbk_count[(v, l)],
+            "language": lang,
+            "hbk_count": folder_hbk_count[(v, lang)],
             "html_count": 0,
             "md_count": 0,
             "err_count": 0,
@@ -412,7 +405,7 @@ def run_ingest(
             "tasks_done": 0,
             "status": "pending",
         }
-        for (v, l) in sorted(folder_hbk_count.keys())
+        for (v, lang) in sorted(folder_hbk_count.keys())
     ]
     _write_ingest_status(
         status_file,
@@ -438,7 +431,9 @@ def run_ingest(
         "status": "in_progress",
         "status_file": status_file,
     }
-    interval_sec = float(os.environ.get("INDEX_STATUS_INTERVAL_SEC", str(STATUS_UPDATE_INTERVAL_SEC)))
+    interval_sec = float(
+        os.environ.get("INDEX_STATUS_INTERVAL_SEC", str(STATUS_UPDATE_INTERVAL_SEC))
+    )
     stop_event = threading.Event()
     writer = threading.Thread(
         target=_status_writer_loop,
@@ -453,7 +448,9 @@ def run_ingest(
         if not client.collection_exists(collection):
             client.create_collection(
                 collection_name=collection,
-                vectors_config=VectorParams(size=get_embedding_dimension(), distance=Distance.COSINE),
+                vectors_config=VectorParams(
+                    size=get_embedding_dimension(), distance=Distance.COSINE
+                ),
             )
             if verbose:
                 _log("[ingest] Created Qdrant collection")
@@ -480,7 +477,7 @@ def run_ingest(
         for future in as_completed(futures):
             path_hbk, version, language = futures[future]
             done += 1
-            md_dir, _, _, err_msg = future.result()
+            md_dir, unpacked, _, _, err_msg = future.result()
             if md_dir is None or not md_dir.exists():
                 reason = (err_msg or "unknown").split("\n")[0].strip()[:200]
                 failed.append((path_hbk, version, language, err_msg or "unknown"))
@@ -533,6 +530,7 @@ def run_ingest(
                         batch_size=index_batch_size,
                         embedding_batch_size=embedding_batch_size,
                         embedding_workers=embedding_workers,
+                        source_dir=str(unpacked) if unpacked and unpacked.exists() else None,
                     )
                     total_indexed += n
                     key = f"{version}/{language}/{path_hbk.name}"
