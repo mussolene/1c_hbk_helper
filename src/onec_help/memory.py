@@ -142,7 +142,11 @@ class MemoryStore:
         query = payload.get("query", "")
         topic_path = payload.get("topic_path", "")
         tags = str(topic_path) if topic_path else ""
-        return f"1C Help: {title} | {query} | {tags}"
+        if title or query or tags:
+            return f"1C Help: {title} | {query} | {tags}"
+        desc = payload.get("description", "") or ""
+        code = (payload.get("code_snippet", "") or "")[:300]
+        return f"1C snippet: {desc} | {code}"
 
     def _upsert_long(
         self,

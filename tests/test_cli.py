@@ -547,9 +547,18 @@ def test_cmd_mcp_run_raises(mock_run_mcp) -> None:
 
 
 def test_cmd_load_snippets_file_not_found() -> None:
-    """cmd_load_snippets returns 1 when snippets file does not exist."""
+    """cmd_load_snippets returns 1 when path does not exist."""
     args = make_args(snippets_file="/nonexistent/snippets.json")
     assert cmd_load_snippets(args) == 1
+
+
+def test_cmd_load_snippets_no_source(capsys) -> None:
+    """cmd_load_snippets returns 0 with message when no path and no SNIPPETS_DIR."""
+    with patch.dict("os.environ", {"SNIPPETS_JSON_PATH": "", "SNIPPETS_DIR": ""}, clear=False):
+        args = make_args(snippets_file=None)
+        assert cmd_load_snippets(args) == 0
+    out = capsys.readouterr().err
+    assert "No source" in out or "examples only" in out
 
 
 def test_cmd_load_snippets_invalid_json(tmp_path: Path) -> None:
@@ -607,6 +616,23 @@ def test_cmd_load_snippets_exception(tmp_path: Path) -> None:
     with patch("onec_help.memory.get_memory_store", side_effect=RuntimeError("no qdrant")):
         args = make_args(snippets_file=str(snippet_file))
         assert cmd_load_snippets(args) == 1
+
+
+@patch("onec_help.memory.get_memory_store")
+def test_cmd_load_snippets_from_folder(mock_get_store, tmp_path: Path) -> None:
+    """cmd_load_snippets loads from folder (*.bsl, *.1c) when path is directory."""
+    (tmp_path / "example.bsl").write_text("Сообщить(1);", encoding="utf-8")
+    (tmp_path / "other.1c").write_text("Возврат Истина;", encoding="utf-8")
+    mock_store = MagicMock()
+    mock_store.upsert_curated_snippets.return_value = 2
+    mock_get_store.return_value = mock_store
+    args = make_args(snippets_file=str(tmp_path))
+    assert cmd_load_snippets(args) == 0
+    mock_store.upsert_curated_snippets.assert_called_once()
+    items = mock_store.upsert_curated_snippets.call_args[0][0]
+    assert len(items) == 2
+    titles = {it["title"] for it in items}
+    assert titles == {"example", "other"}
 
 
 @patch("onec_help.indexer.get_index_status")

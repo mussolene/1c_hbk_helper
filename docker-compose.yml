@@ -6,6 +6,9 @@
 #
 # База Qdrant: ./data/qdrant (в проекте, в .gitignore) — при перезапуске не теряется.
 #
+# Сниппеты: смонтируйте папку со сниппетами (*.bsl, *.1c, *.md, snippets.json), read-only.
+#   volumes: ./snippets:/data/snippets:ro  и SNIPPETS_DIR=/data/snippets. При старте — load-snippets.
+#
 # Только распаковка .hbk (тот же образ mcp, другая команда):
 #   docker compose run --rm -v /path/to/1cv8:/input:ro -v $(pwd)/unpacked:/output mcp python -m onec_help unpack-dir /input -o /output -l ru
 #
@@ -63,10 +66,14 @@ services:
       WATCHDOG_ENABLED: ${WATCHDOG_ENABLED:-0}
       WATCHDOG_POLL_INTERVAL: ${WATCHDOG_POLL_INTERVAL:-600}
       WATCHDOG_PENDING_INTERVAL: ${WATCHDOG_PENDING_INTERVAL:-600}
+      # Каталог сниппетов (*.bsl, *.1c, *.md, snippets.json). При старте — load-snippets
+      SNIPPETS_DIR: ${SNIPPETS_DIR:-/data/snippets}
     volumes:
       - /opt/1cv8:/opt/1cv8:ro
       # Доступ к хранилищу Qdrant только для чтения — index-status показывает размер БД на диске
       - ./data/qdrant:/qdrant_storage:ro
+      # Сниппеты — только чтение. Хост: ./snippets или SNIPPETS_HOST_PATH
+      - ${SNIPPETS_HOST_PATH:-./snippets}:/data/snippets:ro
     command: ["python", "-m", "onec_help", "mcp", "/data", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "5050"]
     depends_on:
       qdrant:

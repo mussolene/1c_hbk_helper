@@ -309,31 +309,67 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
 
 def cmd_load_snippets(args: argparse.Namespace) -> int:
-    """Load curated snippets from JSON into onec_help_memory (domain=snippets)."""
-    path = getattr(args, "snippets_file", None) or os.environ.get(
+    """Load curated snippets from JSON and/or folder into onec_help_memory (domain=snippets).
+    Sources: explicit path arg, or SNIPPETS_DIR env. docs/snippets/ — только примеры, не загружаются."""
+    path_arg = getattr(args, "snippets_file", None) or os.environ.get(
         "SNIPPETS_JSON_PATH", ""
     )
-    if not path or not path.strip():
-        default = Path(__file__).resolve().parent.parent / "docs" / "snippets" / "snippets.json"
-        path = str(default)
-    p = Path(path)
-    if not p.exists():
-        print(f"Error: snippets file not found: {p}", file=sys.stderr)
-        return 1
-    try:
-        raw = p.read_text(encoding="utf-8")
-        items = json.loads(raw)
-        if not isinstance(items, list):
-            print("Error: JSON must be an array of {title, description, code_snippet}", file=sys.stderr)
-            return 1
-        from .memory import get_memory_store
+    snippets_dir = os.environ.get("SNIPPETS_DIR", "")
 
+    items: list[dict] = []
+
+    def _load_json(p: Path) -> None:
+        raw = p.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if not isinstance(data, list):
+            raise ValueError("JSON must be an array of {title, description, code_snippet}")
+        items.extend(data)
+
+    def _load_folder(d: Path) -> None:
+        from .snippets_loader import collect_from_folder
+        items.extend(collect_from_folder(d))
+
+    try:
+        if path_arg and path_arg.strip():
+            p = Path(path_arg.strip())
+            if not p.exists():
+                print(f"Error: path not found: {p}", file=sys.stderr)
+                return 1
+            if p.is_dir():
+                if (p / "snippets.json").exists():
+                    _load_json(p / "snippets.json")
+                _load_folder(p)
+            else:
+                _load_json(p)
+        elif snippets_dir:
+            d = Path(snippets_dir)
+            if not d.exists():
+                print(f"SNIPPETS_DIR not found: {d}", file=sys.stderr)
+                return 0
+            if (d / "snippets.json").exists():
+                _load_json(d / "snippets.json")
+            _load_folder(d)
+        else:
+            print(
+                "No source: set SNIPPETS_DIR or pass path. docs/snippets/ — examples only.",
+                file=sys.stderr,
+            )
+            return 0
+
+        if not items:
+            print("No snippets to load.", file=sys.stderr)
+            return 0
+
+        from .memory import get_memory_store
         store = get_memory_store()
         n = store.upsert_curated_snippets(items)
         print(f"Loaded {n} snippets into onec_help_memory")
         return 0
     except json.JSONDecodeError as e:
         print(f"Error: invalid JSON: {e}", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
         return 1
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -556,14 +592,14 @@ def main() -> int:
     # load-snippets
     p_load_snippets = sub.add_parser(
         "load-snippets",
-        help="Load curated code snippets from JSON into onec_help_memory (domain=snippets)",
+        help="Load curated snippets from JSON and/or folder into onec_help_memory (domain=snippets)",
     )
     p_load_snippets.add_argument(
         "snippets_file",
         type=str,
         nargs="?",
         default=None,
-        help="Path to snippets.json (default: docs/snippets/snippets.json or SNIPPETS_JSON_PATH)",
+        help="Path to snippets.json or folder (default: docs/snippets/ or SNIPPETS_JSON_PATH/SNIPPETS_DIR)",
     )
     p_load_snippets.set_defaults(func=cmd_load_snippets)
 

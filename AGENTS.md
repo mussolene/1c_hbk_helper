@@ -11,6 +11,7 @@
 - **Локально:** `python -m onec_help unpack/build-docs/build-index/ingest/load-snippets/watchdog/serve/mcp <args>`
 - **Docker:** `docker-compose up` (сервисы `qdrant` + `mcp`). В mcp смонтирован `/opt/1cv8`, cron раз в сутки в 3:00 запускает ingest; при `WATCHDOG_ENABLED=1` — watchdog в фоне (мониторинг .hbk, pending memory).
 - **Индекс вручную:** `docker compose exec mcp python -m onec_help ingest` (каталог версий — `HELP_SOURCE_BASE`, подпапки = версии 1С, поиск .hbk рекурсивно, в т.ч. в `bin/` на Windows).
+- **Сниппеты:** `docs/snippets/` — примеры (не загружаются). Реальные — из тома `./snippets:/data/snippets:ro`, при старте `load-snippets`.
 
 ## Структура кода
 
@@ -32,5 +33,6 @@
 ## Правила
 
 - Язык кода и комментариев — по контексту (рус/англ). Пути и конфигурация — только через аргументы и env, без хардкода.
+- **Сохранять рабочий код 1С:** при выдаче исполняемого примера 1С, которого нет в базовых сниппетах, вызывать `save_1c_snippet` с кодом и описанием — это улучшит `get_1c_code_answer` в следующих сессиях.
 - Не трогать план в `.cursor/plans/`. При доработках сохранять совместимость с docker-compose и Qdrant.
 - Использовать subagent’ы при необходимости для объёмных задач.

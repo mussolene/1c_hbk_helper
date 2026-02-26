@@ -304,15 +304,25 @@ def run_mcp(
         return "Topic not found."
 
     @mcp.tool()
-    def save_1c_snippet(code_snippet: str, description: str = "") -> str:
+    def save_1c_snippet(
+        code_snippet: str,
+        description: str = "",
+        title: str = "",
+    ) -> str:
         """Save a 1C code snippet to user memory for future context.
-        code_snippet: the code to remember. description: short explanation of what it does."""
+        code_snippet: the code to remember. description: short explanation. title: optional short label for search."""
         try:
             from .memory import get_memory_store
 
+            payload: dict[str, Any] = {
+                "code_snippet": code_snippet,
+                "description": description,
+            }
+            if title:
+                payload["title"] = title
             get_memory_store().write_event(
                 "save_snippet",
-                {"code_snippet": code_snippet, "description": description},
+                payload,
             )
             return "Snippet saved to memory."
         except Exception as e:
