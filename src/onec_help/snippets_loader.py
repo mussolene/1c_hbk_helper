@@ -4,9 +4,12 @@ import re
 from pathlib import Path
 from typing import Any
 
+from . import bsl_utils
+
 _BSL_EXTENSIONS = {".bsl", ".1c"}
 _CODE_BLOCK_RE = re.compile(r"```(?:bsl|1c)?\s*\n(.*?)```", re.DOTALL)
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+_PER_FUNCTION_MIN_LINES = 50  # only split .bsl by functions if >= this many lines
 
 
 def _parse_md_frontmatter(content: str) -> tuple[dict[str, str], str]:
@@ -35,9 +38,16 @@ def _extract_code_from_md(body: str) -> str:
     return ""
 
 
-def collect_from_folder(dir_path: Path) -> list[dict[str, Any]]:
+def collect_from_folder(
+    dir_path: Path,
+    per_function: bool = False,
+    per_function_min_lines: int = _PER_FUNCTION_MIN_LINES,
+) -> list[dict[str, Any]]:
     """Collect snippets from folder: *.bsl, *.1c, *.md (recursive).
-    Returns list of {title, description, code_snippet}."""
+    Returns list of {title, description, code_snippet}.
+
+    per_function: if True, split large .bsl by procedures/functions (each as snippet).
+    per_function_min_lines: only split when file has >= this many lines."""
     items: list[dict[str, Any]] = []
 
     def add_item(title: str, description: str, code: str) -> None:
@@ -54,8 +64,13 @@ def collect_from_folder(dir_path: Path) -> list[dict[str, Any]]:
                 continue
             if not raw.strip():
                 continue
-            title = f.stem
-            add_item(title, "", raw.strip())
+            if per_function and raw.count("\n") >= per_function_min_lines:
+                for proc in bsl_utils.extract_procedures_and_functions(raw):
+                    name = proc.get("name", "")
+                    if name:
+                        add_item(f"{f.stem}.{name}", "", proc["code"])
+            else:
+                add_item(f.stem, "", raw.strip())
 
     for f in dir_path.rglob("*.md"):
         if f.name.lower() == "readme.md":

@@ -4,7 +4,7 @@
 
 ARGS ?=
 
-.PHONY: build parse-fastcode load-snippets snippets up down ingest build-index index-status help
+.PHONY: build parse-fastcode load-snippets load-standards snippets up down ingest build-index index-status help
 
 # Rebuild mcp image (required after adding new commands like parse-fastcode)
 build:
@@ -17,6 +17,12 @@ parse-fastcode:
 # Load snippets from SNIPPETS_DIR into onec_help_memory (embeddings)
 load-snippets:
 	docker compose run --rm mcp python -m onec_help load-snippets $(ARGS)
+
+# Load v8-code-style docs into onec_help_memory (domain=standards).
+# По умолчанию STANDARDS_REPO — авто-скачивание, temp удаляется после загрузки.
+# Либо STANDARDS_DIR=/data/standards + volume, либо ARGS=path.
+load-standards:
+	docker compose run --rm mcp python -m onec_help load-standards $(ARGS)
 
 # Parse FastCode + load snippets (full pipeline)
 snippets: parse-fastcode load-snippets
@@ -47,6 +53,7 @@ help:
 	@echo "  make build            Rebuild mcp image (after git pull / new commands)"
 	@echo "  make parse-fastcode   Parse FastCode.im → fastcode_snippets.json"
 	@echo "  make load-snippets    Load snippets into memory (embeddings)"
+	@echo "  make load-standards   Load v8-code-style docs (STANDARDS_REPO auto or STANDARDS_DIR/ARGS)"
 	@echo "  make snippets         parse-fastcode + load-snippets"
 	@echo "  make ingest           Индексация .hbk из HELP_SOURCE_BASE (/opt/1cv8)"
 	@echo "  make build-index      Индексация из папки с .md (ARGS=путь)"
@@ -58,5 +65,7 @@ help:
 	@echo "  make parse-fastcode ARGS='--pages 1-51'"
 	@echo "  make parse-fastcode ARGS='--pages 1-5 --no-fetch-detail'"
 	@echo "  make load-snippets"
+	@echo "  make load-standards              # STANDARDS_REPO (default) or STANDARDS_DIR"
+	@echo "  make load-standards ARGS='/path' # explicit path"
 	@echo "  make ingest ARGS='--dry-run'"
 	@echo "  make build-index ARGS='/data/docs_md'"

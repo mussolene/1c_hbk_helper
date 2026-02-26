@@ -68,6 +68,10 @@ services:
       WATCHDOG_PENDING_INTERVAL: ${WATCHDOG_PENDING_INTERVAL:-600}
       # Каталог сниппетов (*.bsl, *.1c, *.md, snippets.json). При старте — load-snippets
       SNIPPETS_DIR: ${SNIPPETS_DIR:-/data/snippets}
+      # Стандарты: STANDARDS_REPO — авто-скачивание (temp, удаление после загрузки); STANDARDS_DIR — смонтированная папка
+      STANDARDS_REPO: ${STANDARDS_REPO:-https://github.com/1C-Company/v8-code-style}
+      STANDARDS_SUBPATH: ${STANDARDS_SUBPATH:-docs}
+      STANDARDS_DIR: ${STANDARDS_DIR:-}
     volumes:
       - /opt/1cv8:/opt/1cv8:ro
       # Доступ к хранилищу Qdrant только для чтения — index-status показывает размер БД на диске
@@ -76,6 +80,8 @@ services:
       - ./data/ingest_cache:/app/var/ingest_cache
       # Сниппеты. Для parse-fastcode нужен rw (запись fastcode_snippets.json)
       - ${SNIPPETS_HOST_PATH:-./snippets}:/data/snippets
+      # Стандарты: опционально, если STANDARDS_DIR=/data/standards — mount каталога с .md
+      - ${STANDARDS_HOST_PATH:-./standards}:/data/standards
     command: ["python", "-m", "onec_help", "mcp", "/data", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "5050"]
     depends_on:
       qdrant:

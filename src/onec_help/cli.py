@@ -325,9 +325,9 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
             raise ValueError("JSON must be an array of {title, description, code_snippet}")
         items.extend(data)
 
-    def _load_folder(d: Path) -> None:
+    def _load_folder(d: Path, per_func: bool = False) -> None:
         from .snippets_loader import collect_from_folder
-        items.extend(collect_from_folder(d))
+        items.extend(collect_from_folder(d, per_function=per_func))
 
     try:
         if path_arg and path_arg.strip():
@@ -338,7 +338,7 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
             if p.is_dir():
                 for j in sorted(p.glob("*.json")):
                     _load_json(j)
-                _load_folder(p)
+                _load_folder(p, per_func=getattr(args, "per_function", False))
             else:
                 _load_json(p)
         elif snippets_dir:
@@ -348,7 +348,7 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
                 return 0
             for j in sorted(d.glob("*.json")):
                 _load_json(j)
-            _load_folder(d)
+            _load_folder(d, per_func=getattr(args, "per_function", False))
         else:
             print(
                 "No source: set SNIPPETS_DIR or pass path. docs/snippets/ — examples only.",
@@ -385,6 +385,72 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
+
+
+def cmd_load_standards(args: argparse.Namespace) -> int:
+    """Load v8-code-style standards (markdown) into onec_help_memory (domain=standards).
+    Source: path arg, STANDARDS_DIR (mounted volume), or STANDARDS_REPO (auto-download, temp, delete)."""
+    path_arg = getattr(args, "standards_path", None) or os.environ.get("STANDARDS_DIR", "")
+    path_arg = (path_arg or "").strip()
+    standards_repo = os.environ.get("STANDARDS_REPO", "").strip()
+    standards_subpath = os.environ.get("STANDARDS_SUBPATH", "docs").strip() or "docs"
+    standards_branch = os.environ.get("STANDARDS_BRANCH", "master").strip() or "master"
+    temp_dir = None
+
+    if path_arg:
+        d = Path(path_arg)
+        if not d.exists() or not d.is_dir():
+            print(f"Error: path not found or not a directory: {d}", file=sys.stderr)
+            return 1
+    elif standards_repo:
+        try:
+            from .standards_loader import fetch_repo_archive
+
+            d, temp_dir = fetch_repo_archive(
+                standards_repo, subpath=standards_subpath, branch=standards_branch
+            )
+        except Exception as e:
+            print(f"Error fetching {standards_repo}: {e}", file=sys.stderr)
+            return 1
+    else:
+        print(
+            "No source: set STANDARDS_REPO (e.g. https://github.com/1C-Company/v8-code-style) "
+            "or STANDARDS_DIR / pass path.",
+            file=sys.stderr,
+        )
+        return 0
+
+    try:
+        from ._utils import progress_done, progress_line
+        from .memory import get_memory_store
+        from .standards_loader import collect_from_folder
+
+        items = collect_from_folder(d)
+        if not items:
+            print(f"No .md files in {d}", file=sys.stderr)
+            return 0
+
+        def _progress(loaded: int, tot: int, skipped: int) -> None:
+            progress_line(
+                "load-standards │ {}/{} │ {} loaded │ {} skip".format(
+                    loaded + skipped, tot, loaded, skipped
+                )
+            )
+
+        store = get_memory_store()
+        n = store.upsert_curated_snippets(
+            items, progress_callback=_progress, domain="standards"
+        )
+        progress_done("load-standards │ ✓ {} loaded → onec_help_memory (domain=standards)".format(n))
+        return 0
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    finally:
+        if temp_dir is not None:
+            import shutil
+
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def cmd_parse_fastcode(args: argparse.Namespace) -> int:
@@ -634,7 +700,27 @@ def main() -> int:
         default=None,
         help="Path to snippets.json or folder (default: docs/snippets/ or SNIPPETS_JSON_PATH/SNIPPETS_DIR)",
     )
+    p_load_snippets.add_argument(
+        "--per-function",
+        action="store_true",
+        dest="per_function",
+        help="Split large .bsl by procedures/functions (each as snippet, min 50 lines)",
+    )
     p_load_snippets.set_defaults(func=cmd_load_snippets)
+
+    # load-standards
+    p_load_standards = sub.add_parser(
+        "load-standards",
+        help="Load v8-code-style docs (markdown) into onec_help_memory (domain=standards)",
+    )
+    p_load_standards.add_argument(
+        "standards_path",
+        type=str,
+        nargs="?",
+        default=None,
+        help="Path to folder with .md (default: STANDARDS_DIR env)",
+    )
+    p_load_standards.set_defaults(func=cmd_load_standards)
 
     # parse-fastcode
     p_parse_fastcode = sub.add_parser(

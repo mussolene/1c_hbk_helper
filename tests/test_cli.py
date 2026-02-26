@@ -13,6 +13,7 @@ from onec_help.cli import (
     cmd_index_status,
     cmd_ingest,
     cmd_load_snippets,
+    cmd_load_standards,
     cmd_mcp,
     cmd_unpack,
     cmd_unpack_dir,
@@ -636,6 +637,48 @@ def test_cmd_load_snippets_from_folder(mock_get_store, tmp_path: Path) -> None:
     assert len(items) == 3
     titles = {it["title"] for it in items}
     assert titles == {"example", "other", "FromJSON"}
+
+
+def test_cmd_load_standards_no_source(capsys) -> None:
+    """cmd_load_standards returns 0 when no path, no STANDARDS_DIR, no STANDARDS_REPO."""
+    args = make_args(standards_path=None)
+    with patch.dict("os.environ", {"STANDARDS_DIR": "", "STANDARDS_REPO": ""}):
+        assert cmd_load_standards(args) == 0
+    err = capsys.readouterr().err
+    assert "No source" in err and ("STANDARDS_REPO" in err or "STANDARDS_DIR" in err)
+
+
+@patch("onec_help.memory.get_memory_store")
+def test_cmd_load_standards_success(mock_get_store, tmp_path: Path) -> None:
+    """cmd_load_standards loads markdown and upserts with domain=standards."""
+    (tmp_path / "rule.md").write_text("# Проверка\n\nОписание правила.", encoding="utf-8")
+    mock_store = MagicMock()
+    mock_store.upsert_curated_snippets.return_value = 1
+    mock_get_store.return_value = mock_store
+    args = make_args(standards_path=str(tmp_path))
+    assert cmd_load_standards(args) == 0
+    mock_store.upsert_curated_snippets.assert_called_once()
+    call_kw = mock_store.upsert_curated_snippets.call_args[1]
+    assert call_kw.get("domain") == "standards"
+
+
+@patch("onec_help.memory.get_memory_store")
+@patch("onec_help.standards_loader.fetch_repo_archive")
+def test_cmd_load_standards_from_repo(mock_fetch, mock_get_store, tmp_path: Path) -> None:
+    """cmd_load_standards fetches from STANDARDS_REPO when no path given."""
+    (tmp_path / "fetched.md").write_text("# Fetched rule\n\nContent.", encoding="utf-8")
+    mock_fetch.return_value = (tmp_path, Path("/tmp/nonexistent_standards_xxx"))
+    mock_store = MagicMock()
+    mock_store.upsert_curated_snippets.return_value = 1
+    mock_get_store.return_value = mock_store
+    args = make_args(standards_path=None)
+    with patch.dict(
+        "os.environ",
+        {"STANDARDS_DIR": "", "STANDARDS_REPO": "https://github.com/1C-Company/v8-code-style"},
+    ):
+        assert cmd_load_standards(args) == 0
+    mock_fetch.assert_called_once()
+    mock_store.upsert_curated_snippets.assert_called_once()
 
 
 @patch("onec_help.indexer.get_index_status")

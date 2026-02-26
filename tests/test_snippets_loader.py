@@ -47,3 +47,21 @@ def test_collect_from_folder_skips_readme(tmp_path: Path) -> None:
 def test_collect_from_folder_empty(tmp_path: Path) -> None:
     """Empty folder returns empty list."""
     assert collect_from_folder(tmp_path) == []
+
+
+def test_collect_from_folder_per_function(tmp_path: Path) -> None:
+    """When per_function=True and file is large, split by procedures."""
+    code = """
+Процедура П1()
+    Сообщить(1);
+КонецПроцедуры
+
+Функция Ф1()
+    Возврат Истина;
+КонецФункции
+""" + "\n" * 50  # pad to >= 50 lines
+    (tmp_path / "module.bsl").write_text(code, encoding="utf-8")
+    items = collect_from_folder(tmp_path, per_function=True, per_function_min_lines=50)
+    assert len(items) >= 1
+    titles = [i["title"] for i in items]
+    assert any("П1" in t or "Ф1" in t for t in titles)

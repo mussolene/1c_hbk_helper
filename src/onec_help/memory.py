@@ -261,10 +261,12 @@ class MemoryStore:
         self,
         items: list[dict[str, Any]],
         progress_callback: Callable[[int, int, int], None] | None = None,
+        domain: str = "snippets",
     ) -> int:
-        """Bulk upsert curated code snippets into long memory with domain='snippets'.
+        """Bulk upsert curated items into long memory.
         items: [{title, description, code_snippet}, ...]. Returns count of upserted items.
-        progress_callback: optional (done, total, skipped) called periodically."""
+        progress_callback: optional (done, total, skipped) called periodically.
+        domain: 'snippets' | 'standards' — filter for search_long."""
         from . import embedding
 
         if not embedding.is_embedding_available():
@@ -273,6 +275,7 @@ class MemoryStore:
         count = 0
         skipped = 0
         report_every = max(1, total // 20) if total > 20 else 1
+        prefix = domain[:8]
         for i, item in enumerate(items):
             if not isinstance(item, dict):
                 skipped += 1
@@ -290,10 +293,10 @@ class MemoryStore:
                     "title": title,
                     "description": desc,
                     "code_snippet": code,
-                    "domain": "snippets",
+                    "domain": domain,
                     "summary": summary,
                 }
-                point_id = f"snippet_{hashlib.sha256(title.encode()).hexdigest()[:12]}"
+                point_id = f"{prefix}_{hashlib.sha256(title.encode()).hexdigest()[:12]}"
                 numeric_id = int(hashlib.sha256(point_id.encode()).hexdigest()[:14], 16) % (2**63)
                 self._upsert_long(point_id, vec, payload, numeric_id=numeric_id)
                 count += 1
