@@ -39,6 +39,7 @@ tmp/
 shcntx_ru/
 shcntx_ru2/
 *.zip
+./nosync
 
 # Windows / 1C
 V8Unpack.exe
