@@ -1,10 +1,12 @@
-"""
-Ingest .hbk from multiple read-only source directories.
+"""Ingest .hbk from multiple read-only source directories.
+
 Unpacks to a temp dir in the container, builds docs, indexes with version/language, then cleans up.
 Supports language filter (e.g. only *_ru.hbk) and concurrent processing.
 Progress is printed to stderr so long runs are not killed by "no output" timeouts.
 Writes ingest status to INDEX_STATUS_FILE for index-status command (embedding speed, per-folder, ETA).
 """
+
+from __future__ import annotations
 
 import copy
 import hashlib
@@ -630,7 +632,9 @@ def run_ingest(
                         f.write(f"{version}\t{language}\t{path_hbk}\t{err or ''}\n")
                 _log(f"[ingest] Wrote failure list to {fail_log}")
             except OSError as e:
-                _log(f"[ingest] Could not write failure log {mask_path_for_log(fail_log)}: {safe_error_message(e)}")
+                _log(
+                    f"[ingest] Could not write failure log {mask_path_for_log(fail_log)}: {safe_error_message(e)}"
+                )
     return total_indexed
 
 

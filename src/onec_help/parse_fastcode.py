@@ -24,7 +24,9 @@ def _create_opener() -> urllib.request.OpenerDirector:
 
 
 def _fetch_url(url: str, opener: urllib.request.OpenerDirector) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; 1c-help-parser)"})
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "Mozilla/5.0 (compatible; 1c-help-parser)"}
+    )
     with opener.open(req, timeout=30) as r:
         return r.read().decode("utf-8")
 
@@ -57,7 +59,11 @@ def _extract_detail_links(soup: Any) -> dict[str, str]:
             if h3:
                 title = h3.get_text(strip=True)
                 if title and title not in mapping:
-                    full = "https://fastcode.im" + href.split("?")[0] if href.startswith("/") else href.split("?")[0]
+                    full = (
+                        "https://fastcode.im" + href.split("?")[0]
+                        if href.startswith("/")
+                        else href.split("?")[0]
+                    )
                     mapping[title] = full
     return mapping
 
@@ -177,9 +183,7 @@ def run_parse(
         to_fetch = [(idx, it) for idx, it in enumerate(all_items) if it.get("detail_url")]
         total_detail = len(to_fetch)
         if total_detail > 0:
-            progress_done(
-                f"parse-fastcode │ Detail 0/{total_detail} │ fetching full code..."
-            )
+            progress_done(f"parse-fastcode │ Detail 0/{total_detail} │ fetching full code...")
         for di, (idx, it) in enumerate(to_fetch):
             url = it.pop("detail_url", None)
             if not url:

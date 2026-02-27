@@ -92,15 +92,15 @@ def _write_snippet_to_file(
     title: str = "Snippet",
 ) -> str | None:
     """Write snippet as .md with frontmatter to base_dir. Returns relative path or None."""
-    safe = re.sub(r'[^\w\s\-]', '', title)
-    safe = re.sub(r'\s+', '_', safe.strip()) or "snippet"
+    safe = re.sub(r"[^\w\s\-]", "", title)
+    safe = re.sub(r"\s+", "_", safe.strip()) or "snippet"
     safe = safe[:60]
     fname = f"{safe}_{int(time.time())}.md"
     out = base_dir / fname
     try:
         base_dir.mkdir(parents=True, exist_ok=True)
-        t = title.replace('\n', ' ').replace('"', "'")
-        d = description.replace('\n', ' ').replace('"', "'")
+        t = title.replace("\n", " ").replace('"', "'")
+        d = description.replace("\n", " ").replace('"', "'")
         content = f"""---
 title: "{t}"
 description: "{d}"
@@ -317,7 +317,11 @@ def run_mcp(
                     desc = payload.get("description", "") or payload.get("summary", "")[:200]
                     title = payload.get("title", "") or desc[:60]
                     src = " [пример]" if payload.get("domain") == "snippets" else ""
-                    block = f"### {title}{src}\n\n{desc}\n\n```bsl\n{code}\n```" if code else f"### {title}\n\n{desc}"
+                    block = (
+                        f"### {title}{src}\n\n{desc}\n\n```bsl\n{code}\n```"
+                        if code
+                        else f"### {title}\n\n{desc}"
+                    )
                     memory_parts.append(block)
             except Exception:
                 pass
@@ -340,9 +344,7 @@ def run_mcp(
                     if code_only:
                         blocks = _extract_code_blocks(content)
                         if blocks:
-                            block_text = "\n\n".join(
-                                f"```bsl\n{b}\n```" for b in blocks
-                            )
+                            block_text = "\n\n".join(f"```bsl\n{b}\n```" for b in blocks)
                             help_blocks.append(f"---\n## {path}\n\n{block_text}")
                         else:
                             help_blocks.append(f"---\n## {path}\n\n{content[:2000]}...")
@@ -410,7 +412,11 @@ def run_mcp(
 
             do_write_files = write_to_files
             if do_write_files is None:
-                do_write_files = os.environ.get("SAVE_SNIPPET_TO_FILES", "").lower() in ("1", "true", "yes")
+                do_write_files = os.environ.get("SAVE_SNIPPET_TO_FILES", "").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                )
             if do_write_files:
                 snippets_dir = os.environ.get("SNIPPETS_DIR", "").strip()
                 if snippets_dir:
@@ -455,7 +461,13 @@ def run_mcp(
         Returns: module_type (FormModule|ObjectModule|...), form_name, object_name if detectable."""
         parts = _path_parts(uri_or_path)
         name = parts[-1] if parts else ""
-        module_type = "ObjectModule" if name == "ObjectModule.bsl" else "FormModule" if name == "Module.bsl" else "Unknown"
+        module_type = (
+            "ObjectModule"
+            if name == "ObjectModule.bsl"
+            else "FormModule"
+            if name == "Module.bsl"
+            else "Unknown"
+        )
         form_name = ""
         object_name = ""
         if "Forms" in parts:

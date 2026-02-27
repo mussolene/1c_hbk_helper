@@ -83,7 +83,8 @@ def test_collect_from_folder_bsl_read_error_skipped(tmp_path: Path) -> None:
 
 def test_collect_from_folder_per_function(tmp_path: Path) -> None:
     """When per_function=True and file is large, split by procedures."""
-    code = """
+    code = (
+        """
 Процедура П1()
     Сообщить(1);
 КонецПроцедуры
@@ -91,7 +92,9 @@ def test_collect_from_folder_per_function(tmp_path: Path) -> None:
 Функция Ф1()
     Возврат Истина;
 КонецФункции
-""" + "\n" * 50  # pad to >= 50 lines
+"""
+        + "\n" * 50
+    )  # pad to >= 50 lines
     (tmp_path / "module.bsl").write_text(code, encoding="utf-8")
     items = collect_from_folder(tmp_path, per_function=True, per_function_min_lines=50)
     assert len(items) >= 1

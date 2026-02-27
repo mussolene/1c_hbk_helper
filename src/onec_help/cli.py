@@ -311,9 +311,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 def cmd_load_snippets(args: argparse.Namespace) -> int:
     """Load curated snippets from JSON and/or folder into onec_help_memory (domain=snippets).
     Sources: explicit path arg, or SNIPPETS_DIR env. docs/snippets/ — только примеры, не загружаются."""
-    path_arg = getattr(args, "snippets_file", None) or os.environ.get(
-        "SNIPPETS_JSON_PATH", ""
-    )
+    path_arg = getattr(args, "snippets_file", None) or os.environ.get("SNIPPETS_JSON_PATH", "")
     snippets_dir = os.environ.get("SNIPPETS_DIR", "")
 
     items: list[dict] = []
@@ -327,6 +325,7 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
 
     def _load_folder(d: Path, per_func: bool = False) -> None:
         from .snippets_loader import collect_from_folder
+
         items.extend(collect_from_folder(d, per_function=per_func))
 
     from_project = getattr(args, "from_project", None)
@@ -335,7 +334,9 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
         if from_project:
             d = Path(from_project.strip())
             if not d.exists() or not d.is_dir():
-                print(f"Error: --from-project path not found or not a directory: {d}", file=sys.stderr)
+                print(
+                    f"Error: --from-project path not found or not a directory: {d}", file=sys.stderr
+                )
                 return 1
             _load_folder(d, per_func=getattr(args, "per_function", False))
         elif path_arg and path_arg.strip():
@@ -440,9 +441,7 @@ def cmd_load_standards(args: argparse.Namespace) -> int:
             )
 
         store = get_memory_store()
-        n = store.upsert_curated_snippets(
-            items, progress_callback=_progress, domain="standards"
-        )
+        n = store.upsert_curated_snippets(items, progress_callback=_progress, domain="standards")
         progress_done(f"load-standards │ ✓ {n} loaded → onec_help_memory (domain=standards)")
         return 0
     except Exception as e:

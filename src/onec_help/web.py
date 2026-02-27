@@ -83,7 +83,9 @@ def get_content(html_path: str):
         content = get_html_content(html_path, base_dir)
         return jsonify({"content": content})
     except Exception as e:
-        logger.error("Error serving content for %s: %s", mask_path_for_log(html_path), type(e).__name__)
+        logger.error(
+            "Error serving content for %s: %s", mask_path_for_log(html_path), type(e).__name__
+        )
         return jsonify({"error": safe_error_message(e)}), 500
 
 

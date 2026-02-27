@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 try:
     import certifi
+
     _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 except ImportError:
     _SSL_CONTEXT = ssl.create_default_context()
@@ -51,7 +52,11 @@ def fetch_repo_archive(
     Returns (path_to_subpath, temp_dir). Caller must shutil.rmtree(temp_dir) when done."""
     # Normalize: github.com/owner/repo or owner/repo
     if "github.com" in repo_url:
-        base = repo_url.rstrip("/").replace("https://github.com/", "").replace("http://github.com/", "")
+        base = (
+            repo_url.rstrip("/")
+            .replace("https://github.com/", "")
+            .replace("http://github.com/", "")
+        )
     else:
         base = repo_url
     if base.endswith(".git"):
@@ -99,9 +104,11 @@ def collect_from_folder(dir_path: Path) -> list[dict[str, Any]]:
             continue
         title = _first_heading(raw) or f.stem
         desc = _first_paragraph(raw)
-        items.append({
-            "title": title,
-            "description": desc,
-            "code_snippet": raw.strip(),
-        })
+        items.append(
+            {
+                "title": title,
+                "description": desc,
+                "code_snippet": raw.strip(),
+            }
+        )
     return items

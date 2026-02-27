@@ -91,4 +91,8 @@ def _process_pending_memory() -> None:
         if n > 0:
             print(f"[watchdog] processed {n} pending memory entries", file=sys.stderr, flush=True)
     except Exception as e:
-        print(f"[watchdog] process_pending failed: {safe_error_message(e)}", file=sys.stderr, flush=True)
+        print(
+            f"[watchdog] process_pending failed: {safe_error_message(e)}",
+            file=sys.stderr,
+            flush=True,
+        )

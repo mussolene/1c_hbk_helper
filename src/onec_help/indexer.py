@@ -282,7 +282,12 @@ def get_index_status(
         info = client.get_collection(collection)
         points_count = getattr(info, "points_count", None) or getattr(info, "pointsCount", 0)
     except Exception as e:
-        return {"exists": True, "points_count": None, "error": safe_error_message(e), "collection": collection}
+        return {
+            "exists": True,
+            "points_count": None,
+            "error": safe_error_message(e),
+            "collection": collection,
+        }
     out: dict[str, Any] = {
         "exists": True,
         "points_count": points_count,
@@ -477,16 +482,10 @@ def search_index_keyword(
 
     query_keywords = _extract_keywords(query, max_tokens=20)
     use_keyword_filter = (
-        not use_type_method_mode
-        and bool(query_keywords)
-        and Filter
-        and FieldCondition
-        and MatchAny
+        not use_type_method_mode and bool(query_keywords) and Filter and FieldCondition and MatchAny
     )
     if use_keyword_filter:
-        must.append(
-            FieldCondition(key="keywords", match=MatchAny(any=query_keywords))
-        )
+        must.append(FieldCondition(key="keywords", match=MatchAny(any=query_keywords)))
     scroll_filter = Filter(must=must) if must and Filter else None
 
     out: list[dict[str, Any]] = []
@@ -519,12 +518,8 @@ def search_index_keyword(
             snippet = (payload.get("text") or "")[:SNIPPET_MAX_CHARS]
             links = payload.get("outgoing_links") or []
             if links:
-                titles = [
-                    lnk.get("target_title") or lnk.get("link_text", "") for lnk in links[:5]
-                ]
-                snippet = (
-                    snippet + "\nСвязанные: " + ", ".join(t for t in titles if t)
-                ).strip()
+                titles = [lnk.get("target_title") or lnk.get("link_text", "") for lnk in links[:5]]
+                snippet = (snippet + "\nСвязанные: " + ", ".join(t for t in titles if t)).strip()
             out.append(
                 {
                     "path": path,
