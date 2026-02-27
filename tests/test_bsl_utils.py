@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from onec_help.bsl_utils import extract_func_name, extract_procedures_and_functions, get_functions
 
 FIXTURE_OBJECT_MODULE = Path(__file__).resolve().parent / "fixtures" / "bsl_sample" / "ObjectModule.bsl"
@@ -63,6 +61,24 @@ def test_extract_procedures_and_functions() -> None:
         assert "code" in item
         assert "line_start" in item
         assert "Процедура" in item["code"] or "Функция" in item["code"]
+
+
+def test_extract_procedures_and_functions_skips_whitespace_blocks() -> None:
+    """Whitespace-only blocks between markers are skipped (continue branch)."""
+    code = """
+Процедура П1()
+    X;
+КонецПроцедуры
+
+КонецПроцедуры
+
+Функция Ф2()
+    Y;
+КонецФункции
+"""
+    items = extract_procedures_and_functions(code)
+    # П1 and possibly Ф2; the empty block between two КонецПроцедуры is skipped
+    assert len(items) >= 1
 
 
 def test_get_functions_on_real_object_module() -> None:

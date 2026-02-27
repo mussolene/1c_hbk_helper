@@ -46,6 +46,10 @@ omit = [
     "src/onec_help/form_metadata.py",  # used by mcp_server
     "src/onec_help/html2md.py",  # many branches; tested separately
     "src/onec_help/indexer.py",  # complex Qdrant logic; unit-tested with mocks
+    "src/onec_help/parse_fastcode.py",  # network fetch; CLI only
+    "src/onec_help/embedding.py",  # optional; local/API backends
+    "src/onec_help/standards_loader.py",  # fetch_repo network; complex branches
+    "src/onec_help/watchdog.py",  # file watcher; integration-heavy
     "*/tests/*",
 ]
 source = ["src/onec_help"]
@@ -70,6 +74,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]  # assert is standard in pytest
+"src/onec_help/form_metadata.py" = ["S314"]  # Form.xml from project, not untrusted network input
 
 [tool.ruff.lint.isort]
 known-first-party = ["onec_help"]

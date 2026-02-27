@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from onec_help.form_metadata import get_form_metadata, parse_form_xml
 
 
@@ -47,7 +45,7 @@ def test_get_form_metadata_not_found() -> None:
 def test_parse_form_xml_content() -> None:
     """Parse Form.xml from string content."""
     xml = """<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core">
   <Attributes>
     <Attribute name="Объект" id="1">
       <Type><v8:Type>cfg:DataProcessorObject.X</v8:Type></Type>

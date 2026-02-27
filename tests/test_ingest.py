@@ -109,6 +109,14 @@ def test_file_sha256_missing() -> None:
     assert _file_sha256(Path("/nonexistent/file.hbk")) is None
 
 
+def test_load_ingest_cache_error_returns_empty(tmp_path: Path) -> None:
+    """When cache read raises, _load_ingest_cache returns empty dict."""
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": "/nonexistent/cache.db"}, clear=False):
+        with patch("onec_help.ingest.sqlite3.connect", side_effect=OSError("read-only")):
+            c = _load_ingest_cache()
+    assert c == {}
+
+
 def test_load_save_ingest_cache(tmp_path: Path) -> None:
     """_load_ingest_cache returns entries from SQLite; _update_ingest_cache_entry persists one row."""
     cache_file = tmp_path / "cache.db"

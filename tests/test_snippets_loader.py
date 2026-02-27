@@ -47,6 +47,40 @@ def test_collect_from_folder_empty(tmp_path: Path) -> None:
     assert collect_from_folder(tmp_path) == []
 
 
+def test_collect_from_folder_md_no_frontmatter_uses_stem(tmp_path: Path) -> None:
+    """*.md without frontmatter uses filename as title."""
+    (tmp_path / "tip.md").write_text("```1c\nСообщить(1);\n```", encoding="utf-8")
+    items = collect_from_folder(tmp_path)
+    assert len(items) == 1
+    assert items[0]["title"] == "tip"
+
+
+def test_collect_from_folder_md_no_code_block_skipped(tmp_path: Path) -> None:
+    """*.md with no bsl/1c code block is skipped."""
+    (tmp_path / "doc.md").write_text("---\ntitle: Doc\n---\n\nJust text.", encoding="utf-8")
+    items = collect_from_folder(tmp_path)
+    assert len(items) == 0
+
+
+def test_collect_from_folder_md_empty_code_block_skipped(tmp_path: Path) -> None:
+    """*.md with empty code block is skipped."""
+    (tmp_path / "x.md").write_text("---\ntitle: X\n---\n\n```bsl\n\n```", encoding="utf-8")
+    items = collect_from_folder(tmp_path)
+    assert len(items) == 0
+
+
+def test_collect_from_folder_bsl_read_error_skipped(tmp_path: Path) -> None:
+    """OSError/UnicodeDecodeError on read is skipped."""
+    (tmp_path / "good.bsl").write_text("X;", encoding="utf-8")
+    bad = tmp_path / "bad.bsl"
+    bad.write_text("x", encoding="utf-8")
+    with open(bad, "wb") as f:
+        f.write(b"\xff\xfe invalid")
+    items = collect_from_folder(tmp_path)
+    assert len(items) == 1
+    assert items[0]["title"] == "good"
+
+
 def test_collect_from_folder_per_function(tmp_path: Path) -> None:
     """When per_function=True and file is large, split by procedures."""
     code = """

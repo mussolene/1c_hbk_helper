@@ -75,6 +75,25 @@ def test_unpack_hbk_error_message(tmp_path: Path) -> None:
         assert "zipfile" in msg.lower() or "7z" in msg.lower()
 
 
+def test_unpack_hbk_all_methods_fail_including_offset(tmp_path: Path) -> None:
+    """Large invalid file: offset loop and unzip are tried, then RuntimeError."""
+    archive = tmp_path / "large.hbk"
+    archive.write_bytes(b"x" * 3000)
+    out = tmp_path / "out"
+    with patch("onec_help.unpack.subprocess.run") as run:
+        run.return_value = MagicMock(returncode=2, stderr="Headers Error", stdout="")
+        run.side_effect = [
+            MagicMock(returncode=2),
+            MagicMock(returncode=2),
+            MagicMock(returncode=1),
+        ]
+        with pytest.raises(RuntimeError) as exc_info:
+            unpack_hbk(archive, out)
+        msg = str(exc_info.value)
+        assert "manually" in msg.lower() or "unpack" in msg.lower()
+        assert "zipfile" in msg.lower() or "7z" in msg.lower()
+
+
 def test_unpack_fallback_zipfile(tmp_path: Path) -> None:
     """When 7z fails, unpack via Python zipfile if the file is ZIP."""
     archive = tmp_path / "data.zip"
@@ -158,7 +177,7 @@ def test_unpack_hbk_via_offset(tmp_path: Path) -> None:
 def test_unpack_hbk_non_hbk_suffix_error(tmp_path: Path) -> None:
     """When suffix is not .hbk, error message does not mention manual unpack."""
     archive = tmp_path / "data.bin"
-    archive.write_bytes(b"not zip")
+    archive.write_bytes(b"x" * 3000)
     out = tmp_path / "out"
     with patch("onec_help.unpack.subprocess.run") as run:
         run.side_effect = [
@@ -169,6 +188,59 @@ def test_unpack_hbk_non_hbk_suffix_error(tmp_path: Path) -> None:
         with pytest.raises(RuntimeError) as exc_info:
             unpack_hbk(archive, out)
     assert "All unpack methods failed" in str(exc_info.value)
+
+
+def test_try_zipfile_from_offset_empty_data_returns_false(tmp_path: Path) -> None:
+    """When offset leaves no data, return False."""
+    archive = tmp_path / "tiny"
+    archive.write_bytes(b"x" * 100)
+    out = tmp_path / "out"
+    out.mkdir()
+    assert _try_zipfile_from_offset(archive, out, offset=200) is False
+
+
+def test_try_zipfile_from_offset_truncate_tail_applied(tmp_path: Path) -> None:
+    """truncate_tail removes trailing bytes before zip parse."""
+    archive = tmp_path / "arch.bin"
+    with open(archive, "wb") as f:
+        f.write(b"junk" * 200)
+    with zipfile.ZipFile(archive, "a", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("x.txt", "ok")
+    with open(archive, "ab") as f:
+        f.write(b"trailing_garbage_12345")
+    out = tmp_path / "out"
+    out.mkdir()
+    assert _try_zipfile_from_offset(archive, out, offset=0, truncate_tail=20) is True
+    assert (out / "x.txt").read_text() == "ok"
+
+
+def test_try_zipfile_from_offset_bad_zip_returns_false(tmp_path: Path) -> None:
+    """When data is not valid zip, return False."""
+    archive = tmp_path / "notzip"
+    archive.write_bytes(b"not a zip file contents")
+    out = tmp_path / "out"
+    out.mkdir()
+    assert _try_zipfile_from_offset(archive, out, offset=0) is False
+
+
+def test_unpack_hbk_7z_extracted_oserror_treated_as_false(tmp_path: Path) -> None:
+    """When output_dir.iterdir() raises OSError, _7z_extracted returns False."""
+    archive = tmp_path / "a.hbk"
+    archive.write_bytes(b"x")
+    out = tmp_path / "out"
+    out.mkdir()
+    orig_iterdir = Path.iterdir
+
+    def iterdir_mock(self):
+        if self.resolve() == out.resolve():
+            raise OSError("permission")
+        return orig_iterdir(self)
+
+    with patch.object(Path, "iterdir", iterdir_mock):
+        with patch("onec_help.unpack.subprocess.run") as run:
+            run.return_value = MagicMock(returncode=1, stderr="err")
+            with pytest.raises(RuntimeError):
+                unpack_hbk(archive, out)
 
 
 def test_unpack_hbk_7z_not_found_fallback_zipfile(tmp_path: Path) -> None:

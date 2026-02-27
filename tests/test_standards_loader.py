@@ -5,7 +5,30 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from onec_help.standards_loader import collect_from_folder, fetch_repo_archive
+from onec_help.standards_loader import (
+    _first_heading,
+    _first_paragraph,
+    collect_from_folder,
+    fetch_repo_archive,
+)
+
+
+def test_first_heading_no_match_returns_empty() -> None:
+    """When no # heading, return empty string."""
+    assert _first_heading("Plain text\n\nMore") == ""
+
+
+def test_first_paragraph_skips_table_and_list() -> None:
+    """Paragraph stops at | or - at line start."""
+    content = "# Title\n\nFirst para here.\n\n| Col |\n|-|\nSecond"
+    assert "First para" in _first_paragraph(content)
+
+
+def test_first_paragraph_limits_length() -> None:
+    """Paragraph truncated at 200 chars then 300 total."""
+    content = "# H\n\n" + ("word " * 60)
+    result = _first_paragraph(content)
+    assert len(result) <= 300
 
 
 def test_collect_from_folder_md(tmp_path: Path) -> None:
