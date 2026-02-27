@@ -87,3 +87,12 @@ def test_fetch_repo_archive_rejects_invalid_owner() -> None:
 
     with pytest.raises(ValueError, match="Invalid owner/repo"):
         fetch_repo_archive("https://github.com/../evil/repo")
+
+
+def test_fetch_repo_archive_has_https_validation() -> None:
+    """AUDIT-005: fetch_repo_archive enforces https scheme (SSRF protection)."""
+    import onec_help.standards_loader as sl
+
+    src = Path(sl.__file__).read_text()
+    assert 'startswith("https://")' in src
+    assert "SSRF" in src

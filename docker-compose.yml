@@ -1,6 +1,9 @@
 # compose-spec: https://docs.docker.com/compose/compose-file/
 # 1C Help: Qdrant + MCP + BSL LS bridge.
 # mcp: MCP-сервер (порт 5050) + cron для индексации из /opt/1cv8.
+# Режимы: single (по умолчанию) — mcp выполняет всё; split — mcp только API, ingest-worker — batch.
+# Split: docker compose -f docker-compose.split.yml up -d (включает этот файл через include)
+#
 # bsl-bridge: BSL LS для проекта (volume .:/projects). WORKSPACE_ROOT — путь к конфигу (обычно /projects или /projects/src).
 # На Mac: Docker Desktop → Settings → Resources → File sharing — добавьте /opt (или /opt/1cv8).
 # При старте контейнера (если есть /opt/1cv8) ingest запускается в фоне; логи: docker compose exec mcp tail -f /app/var/log/ingest.log
@@ -41,6 +44,7 @@ services:
     ports:
       - "${MCP_PORT:-5050}:5050"
     environment:
+      MCP_MODE: ${MCP_MODE:-full}
       QDRANT_HOST: ${QDRANT_HOST:-qdrant}
       QDRANT_PORT: ${QDRANT_PORT:-6333}
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-onec_help}

@@ -74,6 +74,8 @@ def fetch_repo_archive(
             f"Invalid owner/repo (only alphanumeric, underscore, hyphen, dot): {owner}/{repo}"
         )
     zip_url = f"https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip"
+    if not zip_url.lower().startswith("https://"):
+        raise ValueError("Only https:// scheme allowed (SSRF protection)")
     req = Request(zip_url, headers={"User-Agent": "onec_help/1.0"})
     with urlopen(req, timeout=60, context=_SSL_CONTEXT) as resp:
         data = resp.read()

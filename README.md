@@ -84,6 +84,7 @@ pip install -e ".[dev]"
 | `MCP_PORT` | Порт для MCP HTTP | `5050` |
 | `MCP_PATH` | URL-путь эндпоинта MCP | `/mcp` |
 | `PORT` | Порт веб-сервера (serve) | `5000` |
+| `SERVE_PORT` | Порт serve в Docker (split, профиль serve) | `5000` |
 | `HELP_SERVE_ALLOWED_DIRS` | Список путей через запятую (serve): разрешённые базовые каталоги для формы; если задан, ввод вне списка отклоняется | — |
 | `EMBEDDING_BACKEND` | Эмбеддинги: `local` (sentence-transformers), `openai_api` (внешний API) или `none` (отключены — плейсхолдер, только поиск по ключевым словам) | `openai_api` |
 | `EMBEDDING_MODEL` | Имя модели. Для openai_api (LM Studio): если такой модели нет на сервере, берётся первая из списка или популярная (text-text-embedding-mxbai-embed-large-v1, nomic-embed-text, all-MiniLM-L6-v2); для local — all-MiniLM-L6-v2 | `text-text-embedding-mxbai-embed-large-v1` (openai_api) |
@@ -94,6 +95,7 @@ pip install -e ".[dev]"
 | `EMBEDDING_WORKERS` | Число параллельных запросов к внешнему API (только openai_api). По умолчанию 4 | `4` |
 | `EMBEDDING_FORCE_BATCH` | Максимальная мощность: `1`/`true`/`yes` — батч 256 и 16 воркеров для любого типа embedding | — |
 | `EMBEDDING_TIMEOUT` | Таймаут HTTP-запроса к API (секунды). При ошибке — retry с backoff, затем плейсхолдер | `60` |
+| `MCP_MODE` | `api` — только MCP, без ingest/cron/watchdog (при split); `full` — всё в mcp (по умолчанию) | `full` |
 | `WATCHDOG_ENABLED` | `1` — запустить watchdog в фоне: мониторинг .hbk и обработка pending memory | `0` |
 | `WATCHDOG_POLL_INTERVAL` | Интервал проверки новых .hbk (секунды) | `600` |
 | `WATCHDOG_PENDING_INTERVAL` | Интервал обработки pending embeddings (секунды) | `600` |
@@ -118,6 +120,31 @@ docker compose up -d
 # По расписанию: в контейнере mcp запущен cron — раз в сутки в 3:00 переиндексация из /opt/1cv8
 # Watchdog (при WATCHDOG_ENABLED=1): мониторинг новых .hbk, инкрементальный ingest; обработка pending памяти
 ```
+
+### Режимы развёртывания
+
+**Single (по умолчанию)** — один контейнер `mcp` выполняет всё: MCP API, ingest при старте, cron, load-snippets, watchdog. Подходит для локальной разработки и малой нагрузки.
+
+```bash
+docker compose up -d
+```
+
+**Split** — разделение read и write: `mcp` только MCP API (быстрый отклик), `ingest-worker` — batch-операции (ingest, cron, load-snippets, watchdog). Рекомендуется при нескольких пользователях или тяжёлом ingest.
+
+```bash
+docker compose -f docker-compose.split.yml up -d
+```
+
+**Split + serve** — дополнительно веб-просмотр справки (Flask, порт 5000). Требуется `./data/unpacked` с распакованной справкой.
+
+```bash
+docker compose -f docker-compose.split.yml --profile serve up -d
+```
+
+- Индексация вручную (split): `docker compose -f docker-compose.split.yml exec ingest-worker python -m onec_help ingest`
+- Статус: `docker compose exec mcp python -m onec_help index-status` (split: добавьте `-f docker-compose.split.yml`)
+
+**Пересборка при изменениях:** пересобрать только один сервис — `docker compose up -d --build mcp` (split: `-f docker-compose.split.yml up -d --build mcp`). Подробнее — [docs/architecture.md](docs/architecture.md).
 
 ### Только распаковка .hbk
 
@@ -247,6 +274,7 @@ ruff check src tests && ruff format --check src tests
 
 ## Документация
 
+- [docs/architecture.md](docs/architecture.md) — сервисы, режимы развёртывания (single/split), ответственность.
 - [docs/run.md](docs/run.md) — запуск локально и в Docker.
 - [docs/search-and-mcp.md](docs/search-and-mcp.md) — поиск и рекомендации по MCP.
 - [docs/help_formats.md](docs/help_formats.md) — форматы справки (.hbk, HTML, Markdown).

@@ -1,0 +1,82 @@
+# Split mode: mcp = API only, ingest-worker = batch (ingest, cron, load-snippets, watchdog).
+# Usage: docker compose -f docker-compose.split.yml up -d
+#       (или docker compose -f docker-compose.yml -f docker-compose.split.yml up -d)
+#
+# include подтягивает qdrant, mcp, bsl-bridge из базового файла.
+# mcp runs with MCP_MODE=api — no ingest/cron/watchdog/load-snippets in mcp container.
+# ingest-worker handles all write operations to Qdrant.
+include:
+  - docker-compose.yml
+
+services:
+  mcp:
+    environment:
+      MCP_MODE: api
+
+  ingest-worker:
+    build:
+      context: .
+      args:
+        EMBEDDING_BACKEND: "${EMBEDDING_BACKEND:-openai_api}"
+    environment:
+      QDRANT_HOST: ${QDRANT_HOST:-qdrant}
+      QDRANT_PORT: ${QDRANT_PORT:-6333}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-onec_help}
+      QDRANT_STORAGE_PATH: /qdrant_storage
+      HELP_SOURCE_BASE: ${HELP_SOURCE_BASE:-/opt/1cv8}
+      HELP_LANGUAGES: ${HELP_LANGUAGES:-ru}
+      HELP_INGEST_TEMP: ${HELP_INGEST_TEMP:-/tmp/help_ingest}
+      INGEST_CACHE_FILE: ${INGEST_CACHE_FILE:-/app/var/ingest_cache/ingest_cache.db}
+      INGEST_FAILED_LOG: ${INGEST_FAILED_LOG:-/var/log/ingest_failed.log}
+      EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-openai_api}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-text-embedding-mxbai-embed-large-v1}
+      EMBEDDING_API_URL: ${EMBEDDING_API_URL:-http://host.docker.internal:1234/v1}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-64}
+      EMBEDDING_WORKERS: ${EMBEDDING_WORKERS:-4}
+      EMBEDDING_FORCE_BATCH: ${EMBEDDING_FORCE_BATCH:-0}
+      EMBEDDING_TIMEOUT: ${EMBEDDING_TIMEOUT:-60}
+      WATCHDOG_ENABLED: ${WATCHDOG_ENABLED:-0}
+      WATCHDOG_POLL_INTERVAL: ${WATCHDOG_POLL_INTERVAL:-600}
+      WATCHDOG_PENDING_INTERVAL: ${WATCHDOG_PENDING_INTERVAL:-600}
+      SNIPPETS_DIR: ${SNIPPETS_DIR:-/data/snippets}
+      STANDARDS_REPO: ${STANDARDS_REPO:-https://github.com/1C-Company/v8-code-style}
+      STANDARDS_SUBPATH: ${STANDARDS_SUBPATH:-docs}
+      STANDARDS_DIR: ${STANDARDS_DIR:-}
+      MEMORY_ENABLED: ${MEMORY_ENABLED:-0}
+      MEMORY_BASE_PATH: ${MEMORY_BASE_PATH:-}
+    volumes:
+      - /opt/1cv8:/opt/1cv8:ro
+      - ./data/qdrant:/qdrant_storage:ro
+      - ./data/ingest_cache:/app/var/ingest_cache
+      - ${SNIPPETS_HOST_PATH:-./snippets}:/data/snippets
+      - ${STANDARDS_HOST_PATH:-./standards}:/data/standards
+    command: ["sh", "-c", "sleep infinity"]
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Опционально: веб-просмотр справки.
+  # Запуск: docker compose -f docker-compose.split.yml --profile serve up -d
+  # Требуется ./data/unpacked с распакованной справкой (unpack-dir) или свой volume.
+  serve:
+    profiles:
+      - serve
+    build:
+      context: .
+      args:
+        EMBEDDING_BACKEND: "${EMBEDDING_BACKEND:-openai_api}"
+    ports:
+      - "${SERVE_PORT:-5000}:5000"
+    environment:
+      PORT: "5000"
+      HELP_SERVE_HOST: "0.0.0.0"
+      HELP_SERVE_ALLOWED_DIRS: "/data"
+    volumes:
+      - ./data/unpacked:/data:ro
+    command: ["python", "-m", "onec_help", "serve", "/data"]
+    depends_on:
+      qdrant:
+        condition: service_healthy

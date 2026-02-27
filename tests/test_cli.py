@@ -98,6 +98,15 @@ def test_cmd_serve(mock_web_app, help_sample_dir: Path) -> None:
         assert cmd_serve(args) == 0
 
 
+def test_cmd_serve_directory_not_found() -> None:
+    """serve returns 1 when directory does not exist."""
+    from onec_help.cli import cmd_serve
+
+    args = make_args(directory="/nonexistent/path/12345", debug=False)
+    with patch.dict("os.environ", {"HELP_SERVE_ALLOWED_DIRS": "/tmp"}):
+        assert cmd_serve(args) == 1
+
+
 def test_cmd_serve_rejects_without_allowlist(help_sample_dir: Path) -> None:
     """serve requires HELP_SERVE_ALLOWED_DIRS; returns 1 when not set."""
     from onec_help.cli import cmd_serve
@@ -109,6 +118,19 @@ def test_cmd_serve_rejects_without_allowlist(help_sample_dir: Path) -> None:
             # Ensure HELP_SERVE_ALLOWED_DIRS is unset
             os.environ.pop("HELP_SERVE_ALLOWED_DIRS", None)
             assert cmd_serve(args) == 1
+
+
+def test_cmd_serve_rejects_directory_outside_allowlist(tmp_path: Path) -> None:
+    """AUDIT-013: serve rejects directory not in HELP_SERVE_ALLOWED_DIRS."""
+    from onec_help.cli import cmd_serve
+
+    allowed_dir = tmp_path / "allowed"
+    allowed_dir.mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    args = make_args(directory=str(outside_dir), debug=False)
+    with patch.dict("os.environ", {"HELP_SERVE_ALLOWED_DIRS": str(allowed_dir)}):
+        assert cmd_serve(args) == 1
 
 
 @patch("onec_help.web.app")
