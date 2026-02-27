@@ -46,3 +46,7 @@ chore: ruff format
 ### Release notes
 
 При пуше тега (`v*`) workflow Release генерирует changelog из conventional commits с помощью [git-cliff](https://git-cliff.org/) и использует его как описание GitHub Release.
+
+### Версионирование
+
+Версия задаётся **только** в `pyproject.toml` (поле `[project] version`). Модуль `onec_help.__version__` подхватывает её из метаданных установленного пакета. При релизе: обновить версию в `pyproject.toml`, закоммитить, создать тег `vX.Y.Z`, запушить.

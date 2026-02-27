@@ -1,3 +1,8 @@
 """1C Help: unpack, convert to Markdown, index, MCP server."""
 
-__version__ = "0.2.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("onec-help")
+except PackageNotFoundError:
+    __version__ = "0.0.0.dev0"
