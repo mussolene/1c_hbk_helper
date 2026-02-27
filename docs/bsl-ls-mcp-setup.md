@@ -4,7 +4,7 @@
 
 ## Интегрированный вариант (этот проект)
 
-BSL LS встроен в `docker-compose.yml` и запускается вместе с qdrant и mcp. Проект 1С — `.nosync/CryptographicLib` — монтируется в volume.
+BSL LS встроен в `docker-compose.yml` и запускается вместе с qdrant и mcp. Проект 1С монтируется в volume `.:/projects`; код обычно в `src` или в корне.
 
 ```bash
 # Запустить всё (qdrant + mcp + bsl-bridge)
@@ -15,6 +15,8 @@ docker compose up -d
 ```
 
 Сервис `bsl-bridge` собирается из [mcp-bsl-lsp-bridge](https://github.com/SteelMorgan/mcp-bsl-lsp-bridge) (build context — GitHub). В `.cursor/mcp.json` добавлен `lsp-bsl-bridge`. Контейнер: `mcp-lsp-1c-hbk-helper`. Проверка: tool `lsp_status`.
+
+**Skill и Rules для Cursor:** см. [docs/cursor-examples/](cursor-examples/README.md) — примеры для индексации; при изменении workflow обновляйте `docs/cursor-examples/` как зависимость.
 
 Переменные в `.env` (опционально): `BSL_CONTAINER_MEMORY`, `BSL_LS_VERSION`, `MCP_LSP_BSL_JAVA_XMX` и др.
 
@@ -120,6 +122,24 @@ docker compose up -d
 
 ---
 
+## URI для document_diagnostics
+
+Пути к файлам в контейнере bsl-bridge отличаются от путей на хосте. Volume: `.:/projects`.
+
+| Путь на хосте | URI для document_diagnostics |
+|---------------|------------------------------|
+| `./src/DataProcessors/.../Module.bsl` | `file:///projects/src/DataProcessors/.../Module.bsl` |
+| `./DataProcessors/X/Forms/MyForm/Ext/Form/Module.bsl` | `file:///projects/DataProcessors/X/Forms/MyForm/Ext/Form/Module.bsl` |
+
+**Правило:** замените корень проекта на `/projects` и добавьте префикс `file://`.
+
+**Пример вызова:**
+```
+document_diagnostics(uri="file:///projects/src/DataProcessors/.../Forms/.../Ext/Form/Module.bsl")
+```
+
+---
+
 ## Основные инструменты (tools)
 
 | Tool | Назначение |
@@ -163,12 +183,20 @@ docker compose up -d
 
 ---
 
+## Batch diagnostics (workspace-wide)
+
+`document_diagnostics` проверяет один файл. Для проверки нескольких модулей вызывайте его для каждого URI. После массовых правок вызывайте `did_change_watched_files`, чтобы BSL LS обновил индекс.
+
+Batch/workspace diagnostics (одна операция «проверить всё») зависят от mcp-bsl-lsp-bridge — при необходимости откройте issue в [репозитории](https://github.com/SteelMorgan/mcp-bsl-lsp-bridge).
+
+---
+
 ## Устранение неполадок
 
 - **Медленная индексация** — на проектах 40k+ файлов может занимать 10+ минут. Рекомендуется 8+ ГБ RAM для BSL LS.
 - **Контейнер не запускается** — проверьте `docker compose logs`, доступность Java (BSL LS на Java).
 - **MCP не подключается** — убедитесь, что контейнер запущен (`docker ps`), имя в `mcp.json` совпадает с именем контейнера.
-- **Пути** — проект 1С монтируется из `./.nosync` в `/projects/.nosync` (volume `.:/projects`). Если `.nosync` отсутствует — создайте и поместите туда выгруженную конфигурацию 1С (EDT/XML).
+- **Пути** — проект монтируется в `/projects` (volume `.:/projects`). Код 1С обычно в `src` или в корне; укажите BSL_WORKSPACE_ROOT на каталог с Configuration.xml (EDT/XML).
 
 ---
 

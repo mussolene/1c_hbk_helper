@@ -1,0 +1,12 @@
+---
+description: MCP workflow when editing 1C code (1c-help + lsp-bsl-bridge)
+globs: "**/*.bsl"
+alwaysApply: false
+---
+
+# 1C MCP Workflow
+
+- When editing .bsl: use both MCPs — 1c-help (spravka, snippets) and lsp-bsl-bridge (diagnostics, navigation)
+- After edits: call `document_diagnostics` to verify
+- When generating usable example code: call `save_1c_snippet` for future context
+- URI for BSL LS in Docker: `file:///projects/<path>` (volume `.:/projects`, код обычно в `src`)

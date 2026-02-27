@@ -1,0 +1,9 @@
+---
+description: 1C project conventions and MCP checklist
+alwaysApply: true
+---
+
+# 1C Project Conventions
+
+- 1C code → BSL LS diagnostics; spravka/examples → 1c-help
+- Do not edit `.cursor/plans/`

@@ -1,0 +1,13 @@
+---
+description: BSL coding standards and BSL LS alignment
+globs: "**/*.bsl"
+alwaysApply: false
+---
+
+# 1C BSL Standards
+
+- Use `#Область` / `#КонецОбласти` for ПрограммныйИнтерфейс and СлужебныеПроцедурыИФункции
+- Replace magic numbers with named constants
+- Add semicolon after `ВызватьИсключение "..."`
+- Space after `//` in comments (`// text`, not `//text`)
+- For BSL LS suppressions: add comment with reason, e.g. `// BSLLS:Typo-off - КриптоПро brand name`

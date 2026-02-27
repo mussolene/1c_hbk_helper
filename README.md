@@ -210,7 +210,7 @@ MCP: http://localhost:5050/mcp.
 | Инструмент | Назначение |
 |------------|------------|
 | **search_1c_help** | Семантический поиск по справке. |
-| **search_1c_help_keyword** | Поиск по вхождению строки (точные термины: «МенеджерКриптографии», параметры запуска). |
+| **search_1c_help_keyword** | Поиск по вхождению строки (точные термины: имена API, параметры запуска). |
 | **get_1c_help_topic** | Полный текст темы по пути (с диска или из Qdrant). |
 | **get_1c_function_info** | Описание функции/метода 1С по имени. |
 | **list_1c_help_titles** | Список заголовков и путей; фильтр по началу пути (например `zif`). |
@@ -245,6 +245,7 @@ ruff check src tests && ruff format --check src tests
 - [docs/search-and-mcp.md](docs/search-and-mcp.md) — поиск и рекомендации по MCP.
 - [docs/help_formats.md](docs/help_formats.md) — форматы справки (.hbk, HTML, Markdown).
 - [docs/mcp.json.example](docs/mcp.json.example) — пример конфига MCP для Cursor.
+- [docs/cursor-examples/](docs/cursor-examples/README.md) — Skill и Rules для Cursor (1c-help + BSL LS); эталон для индексации; при доработке MCP обновлять как зависимость.
 
 ## Дальнейшие этапы
 
