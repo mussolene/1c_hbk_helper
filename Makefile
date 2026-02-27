@@ -4,7 +4,7 @@
 
 ARGS ?=
 
-.PHONY: build parse-fastcode load-snippets load-standards snippets up down ingest build-index index-status help
+.PHONY: build parse-fastcode load-snippets load-standards snippets up down bsl-start bsl-stop ingest build-index index-status help
 
 # Rebuild mcp image (required after adding new commands like parse-fastcode)
 build:
@@ -39,13 +39,21 @@ build-index:
 index-status:
 	docker compose exec mcp python -m onec_help index-status
 
-# Start services (qdrant + mcp)
+# Start services (qdrant + mcp + bsl-bridge)
 up:
-	docker compose up -d
+	BSL_HOST_PROJECTS_ROOT="$$(pwd)" docker compose up -d
 
 # Stop services
 down:
 	docker compose down
+
+# Start only BSL LS bridge (.nosync/CryptographicLib)
+bsl-start:
+	BSL_HOST_PROJECTS_ROOT="$$(pwd)" docker compose up -d bsl-bridge
+
+# Stop only BSL LS bridge
+bsl-stop:
+	docker compose stop bsl-bridge
 
 help:
 	@echo "1C Help MCP — Docker targets"
@@ -58,8 +66,10 @@ help:
 	@echo "  make ingest           Индексация .hbk из HELP_SOURCE_BASE (/opt/1cv8)"
 	@echo "  make build-index      Индексация из папки с .md (ARGS=путь)"
 	@echo "  make index-status     Статус индекса (топики, embeddings, размер БД)"
-	@echo "  make up               Start qdrant + mcp"
-	@echo "  make down             Stop services"
+	@echo "  make up               Start qdrant + mcp + bsl-bridge"
+	@echo "  make down             Stop all services"
+	@echo "  make bsl-start        Start only BSL LS bridge"
+	@echo "  make bsl-stop         Stop only BSL LS bridge"
 	@echo ""
 	@echo "Args via ARGS= (not --key=value):"
 	@echo "  make parse-fastcode ARGS='--pages 1-51'"

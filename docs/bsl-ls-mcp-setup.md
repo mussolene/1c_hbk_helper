@@ -1,0 +1,179 @@
+# Подключение BSL LS как MCP-сервера в Cursor
+
+Инструкция по настройке **mcp-bsl-lsp-bridge** — MCP-сервера, дающего AI-агентам (Cursor, Claude Code) доступ к BSL Language Server: навигация, поиск, диагностика, рефакторинг для кода 1С и OneScript.
+
+## Интегрированный вариант (этот проект)
+
+BSL LS встроен в `docker-compose.yml` и запускается вместе с qdrant и mcp. Проект 1С — `.nosync/CryptographicLib` — монтируется в volume.
+
+```bash
+# Запустить всё (qdrant + mcp + bsl-bridge)
+make up
+
+# Или напрямую
+docker compose up -d
+```
+
+Сервис `bsl-bridge` собирается из [mcp-bsl-lsp-bridge](https://github.com/SteelMorgan/mcp-bsl-lsp-bridge) (build context — GitHub). В `.cursor/mcp.json` добавлен `lsp-bsl-bridge`. Контейнер: `mcp-lsp-1c-hbk-helper`. Проверка: tool `lsp_status`.
+
+Переменные в `.env` (опционально): `BSL_CONTAINER_MEMORY`, `BSL_LS_VERSION`, `MCP_LSP_BSL_JAVA_XMX` и др.
+
+## Требования
+
+- Docker и Docker Compose
+- Cursor (или другая IDE с поддержкой MCP)
+- 8+ ГБ RAM (BSL LS требователен к памяти на крупных проектах)
+
+## Варианты подключения
+
+### Вариант 1: mcp-bsl-lsp-bridge (рекомендуется)
+
+Специализированный MCP-сервер для BSL LS. Работает в Docker, включает BSL LS, file watcher и полный набор инструментов.
+
+### Вариант 2: mcp-language-server (универсальный)
+
+Универсальный MCP, оборачивающий любой language server. Поддерживает BSL LS при наличии установленного [BSL Language Server](https://1c-syntax.github.io/bsl-language-server/). Конфигурация сложнее, требует ручной установки BSL LS.
+
+---
+
+## Подключение mcp-bsl-lsp-bridge (пошагово)
+
+### 1. Клонирование репозитория
+
+```bash
+git clone https://github.com/SteelMorgan/mcp-bsl-lsp-bridge.git
+cd mcp-bsl-lsp-bridge
+```
+
+### 2. Настройка окружения
+
+```bash
+cp env.example .env
+```
+
+Отредактируйте `.env`. Минимально обязательны:
+
+| Переменная | Описание |
+|------------|----------|
+| `MCP_PROJECT_NAME` | Имя проекта (часть имени контейнера) |
+| `HOST_PROJECTS_ROOT` | Путь к каталогу с кодом 1С на хосте |
+| `WORKSPACE_ROOT` | Путь к workspace внутри контейнера |
+
+**Примеры `WORKSPACE_ROOT`:**
+
+- Один каталог с конфигурацией:
+  ```bash
+  WORKSPACE_ROOT=/projects/main-config
+  ```
+
+- Конфигурация + расширения (общий родитель):
+  ```bash
+  # Структура:
+  # /projects/main-config/
+  # /projects/extension1/
+  WORKSPACE_ROOT=/projects
+  ```
+
+**Важно:** `HOST_PROJECTS_ROOT` — путь на вашей машине. `WORKSPACE_ROOT` — путь внутри контейнера (подкаталог от `/projects` или сам `/projects`). Docker монтирует `HOST_PROJECTS_ROOT` в `/projects`.
+
+### 3. Запуск контейнера
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+Имя контейнера: `${MCP_CONTAINER_PREFIX}-${MCP_PROJECT_NAME}` (по умолчанию, например, `mcp-lsp-demo`).
+
+### 4. Конфигурация Cursor
+
+Создайте или отредактируйте **`.cursor/mcp.json`** в корне проекта:
+
+```json
+{
+  "mcpServers": {
+    "1c-help": {
+      "url": "http://localhost:5050/mcp"
+    },
+    "lsp-bsl-bridge": {
+      "command": "docker",
+      "args": [
+        "exec",
+        "-i",
+        "mcp-lsp-1c-hbk-helper",
+        "mcp-lsp-bridge"
+      ]
+    }
+  }
+}
+```
+
+Имя контейнера: `mcp-lsp-1c-hbk-helper` (в этом проекте зафиксировано).
+
+### 5. Перезапуск Cursor
+
+После изменений в `.cursor/mcp.json` перезапустите Cursor, чтобы подхватить новый MCP-сервер.
+
+### 6. Проверка
+
+В Cursor (через Composer или чат) вызовите tool `lsp_status` — он покажет статус подключения и прогресс индексации BSL LS.
+
+---
+
+## Основные инструменты (tools)
+
+| Tool | Назначение |
+|------|------------|
+| `project_analysis` | Поиск символов, файлов, текста по проекту |
+| `symbol_explore` | Детальная информация о символе с кодом и документацией |
+| `definition` | Перейти к определению |
+| `hover` | Документация и сигнатура по курсору |
+| `call_hierarchy` | Кто вызывает / что вызывает (1 уровень) |
+| `call_graph` | Полный граф вызовов |
+| `document_diagnostics` | Ошибки, предупреждения, стилистика BSL LS |
+| `code_actions` | Автоматические исправления (quick-fix) |
+| `prepare_rename` / `rename` | Переименование символа |
+| `lsp_status` | Статус LSP и прогресс индексации |
+| `did_change_watched_files` | Уведомление об изменении файлов (после git pull) |
+
+---
+
+## Совместная работа с 1c-help
+
+В AGENTS.md рекомендуется использовать **оба** MCP:
+
+- **1c-help** — справка 1С, сниппеты, память
+- **lsp-bsl-bridge** — навигация, диагностика, рефакторинг
+
+Пример `.cursor/mcp.json` для обоих серверов:
+
+```json
+{
+  "mcpServers": {
+    "1c-help": {
+      "url": "http://localhost:5050/mcp"
+    },
+    "lsp-bsl-bridge": {
+      "command": "docker",
+      "args": ["exec", "-i", "mcp-lsp-1c-hbk-helper", "mcp-lsp-bridge"]
+    }
+  }
+}
+```
+
+---
+
+## Устранение неполадок
+
+- **Медленная индексация** — на проектах 40k+ файлов может занимать 10+ минут. Рекомендуется 8+ ГБ RAM для BSL LS.
+- **Контейнер не запускается** — проверьте `docker compose logs`, доступность Java (BSL LS на Java).
+- **MCP не подключается** — убедитесь, что контейнер запущен (`docker ps`), имя в `mcp.json` совпадает с именем контейнера.
+- **Пути** — проект 1С монтируется из `./.nosync` в `/projects/.nosync` (volume `.:/projects`). Если `.nosync` отсутствует — создайте и поместите туда выгруженную конфигурацию 1С (EDT/XML).
+
+---
+
+## Ссылки
+
+- [mcp-bsl-lsp-bridge](https://github.com/SteelMorgan/mcp-bsl-lsp-bridge) — репозиторий MCP-сервера
+- [BSL Language Server](https://1c-syntax.github.io/bsl-language-server/) — официальная документация BSL LS
+- [Документация mcp-bsl-lsp-bridge](https://github.com/SteelMorgan/mcp-bsl-lsp-bridge/tree/main/docs) — конфигурация, tools, архитектура

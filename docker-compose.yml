@@ -1,5 +1,7 @@
 # compose-spec: https://docs.docker.com/compose/compose-file/
-# 1C Help: Qdrant + MCP. Один контейнер mcp: MCP-сервер (порт 5050) + cron для индексации из /opt/1cv8.
+# 1C Help: Qdrant + MCP + BSL LS bridge.
+# mcp: MCP-сервер (порт 5050) + cron для индексации из /opt/1cv8.
+# bsl-bridge: BSL LS для .nosync/CryptographicLib (volume .:/projects).
 # На Mac: Docker Desktop → Settings → Resources → File sharing — добавьте /opt (или /opt/1cv8).
 # При старте контейнера (если есть /opt/1cv8) ingest запускается в фоне; логи: docker compose exec mcp tail -f /app/var/log/ingest.log
 # Индексация вручную: docker compose exec mcp python -m onec_help ingest
@@ -92,3 +94,35 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  # BSL LS MCP bridge — навигация, диагностика, рефакторинг для 1С.
+  # Cursor: tool lsp_status. Проект: .nosync/CryptographicLib (в volume .)
+  bsl-bridge:
+    build:
+      context: https://github.com/SteelMorgan/mcp-bsl-lsp-bridge.git#main
+      dockerfile: Dockerfile
+      args:
+        BSL_LS_VERSION: ${BSL_LS_VERSION:-latest}
+    container_name: mcp-lsp-1c-hbk-helper
+    restart: unless-stopped
+    mem_limit: ${BSL_CONTAINER_MEMORY:-4g}
+    cpus: ${BSL_CONTAINER_CPUS:-4}
+    environment:
+      HOST_PROJECTS_ROOT: ${BSL_HOST_PROJECTS_ROOT:-/projects}
+      PROJECTS_ROOT: /projects
+      WORKSPACE_ROOT: /projects/.nosync/CryptographicLib
+      BSL_LS_PORT: ${BSL_LS_PORT:-9999}
+      MCP_LSP_BSL_JAVA_XMX: ${MCP_LSP_BSL_JAVA_XMX:-2g}
+      MCP_LSP_BSL_JAVA_XMS: ${MCP_LSP_BSL_JAVA_XMS:-512m}
+      MCP_LSP_LOG_LEVEL: ${MCP_LSP_LOG_LEVEL:-info}
+      FILE_WATCHER_MODE: ${FILE_WATCHER_MODE:-polling}
+      FILE_WATCHER_INTERVAL: ${FILE_WATCHER_INTERVAL:-30s}
+    volumes:
+      # Корень проекта (включает .nosync/CryptographicLib для BSL LS)
+      - .:/projects:ro
+    healthcheck:
+      test: ["CMD", "sh", "-c", "nc -z localhost ${BSL_LS_PORT:-9999}"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 3

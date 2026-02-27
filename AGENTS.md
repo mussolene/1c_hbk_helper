@@ -9,7 +9,7 @@
 ## Команды и сценарии
 
 - **Локально:** `python -m onec_help unpack/build-docs/build-index/ingest/load-snippets/load-standards/parse-fastcode/watchdog/serve/mcp <args>`
-- **Docker:** `docker-compose up` (сервисы `qdrant` + `mcp`). В mcp смонтирован `/opt/1cv8`, cron раз в сутки в 3:00 запускает ingest; при `WATCHDOG_ENABLED=1` — watchdog в фоне (мониторинг .hbk, pending memory).
+- **Docker:** `docker-compose up` (сервисы `qdrant` + `mcp` + `bsl-bridge`). В mcp смонтирован `/opt/1cv8`, cron раз в сутки в 3:00 запускает ingest; при `WATCHDOG_ENABLED=1` — watchdog в фоне. bsl-bridge — BSL LS для `.nosync/CryptographicLib` (volume `.:/projects`).
 - **Индекс вручную:** `docker compose exec mcp python -m onec_help ingest` (каталог версий — `HELP_SOURCE_BASE`, подпапки = версии 1С, поиск .hbk рекурсивно, в т.ч. в `bin/` на Windows).
 - **Сниппеты:** `docs/snippets/` — примеры (не загружаются). Реальные — из тома `./snippets:/data/snippets`, при старте `load-snippets`. `make parse-fastcode`, `make load-snippets`, `make snippets`.
 - **Стандарты:** `make load-standards` — по умолчанию STANDARDS_REPO (авто-скачивание, temp удаляется); либо STANDARDS_DIR (volume) или путь в ARGS.
@@ -60,7 +60,7 @@
 
 ## Workflow разработки 1С с BSL LS
 
-1. **Индексация.** Запустить mcp-bsl-lsp-bridge с volume на каталог проекта → дождаться индексации (`lsp_status`).
+1. **Индексация.** `make up` или `docker compose up -d` — bsl-bridge входит в compose, volume `.:/projects` (включая `.nosync`). Дождаться индексации (`lsp_status`).
 2. **Ориентирование.** `project_analysis` — поиск символов/файлов; `symbol_explore` — детали по символу; `call_graph` — граф вызовов перед рефакторингом.
 3. **Написание кода.** `get_1c_code_answer` — примеры и API; `project_analysis` — где добавить код; `symbol_explore` — сигнатуры и паттерны; `save_1c_snippet` — сохранить новый фрагмент.
 4. **Рефакторинг.** `call_graph` → `document_diagnostics` → `code_actions` → `prepare_rename`/`rename`; после массовых правок — `did_change_watched_files`.
