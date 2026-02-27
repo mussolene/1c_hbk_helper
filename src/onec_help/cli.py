@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -46,16 +47,32 @@ def cmd_serve(args: argparse.Namespace) -> int:
     """Run Flask web viewer."""
     import logging
 
-    from .web import app
+    from .web import _allowed_base_dirs, _directory_allowed, app
+
+    dir_path = Path(args.directory).resolve()
+    if not dir_path.is_dir():
+        print(f"Error: directory not found or not a directory: {args.directory}", file=sys.stderr)
+        return 1
+    allowed = _allowed_base_dirs()
+    if not allowed:
+        print(
+            "Error: HELP_SERVE_ALLOWED_DIRS must be set (comma-separated paths) to restrict serve.",
+            file=sys.stderr,
+        )
+        return 1
+    if not _directory_allowed(str(dir_path)):
+        print("Error: Directory not in allowed list (HELP_SERVE_ALLOWED_DIRS)", file=sys.stderr)
+        return 1
 
     port = int(_env_path("PORT", "5000") or "5000")
-    app.config["BASE_DIR"] = args.directory
+    host = os.environ.get("HELP_SERVE_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    app.config["BASE_DIR"] = str(dir_path)
     use_debug = args.debug and os.environ.get("PRODUCTION") != "1"
     if args.debug and not use_debug:
         logging.warning("PRODUCTION=1 is set; debug mode disabled for security.")
     elif use_debug:
         logging.warning("Running with debug=True. Do not use in production (exposes tracebacks).")
-    app.run(host="0.0.0.0", port=port, debug=use_debug)
+    app.run(host=host, port=port, debug=use_debug)
     return 0
 
 
@@ -285,10 +302,11 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     if getattr(args, "no_cache", False):
         os.environ["INGEST_SKIP_CACHE"] = "1"
     try:
+        _default_temp = os.path.join(tempfile.gettempdir(), "help_ingest")
         n = run_ingest(
             source_dirs_with_versions=sources,
             languages=languages,
-            temp_base=args.temp_base or os.environ.get("HELP_INGEST_TEMP", "/tmp/help_ingest"),
+            temp_base=args.temp_base or os.environ.get("HELP_INGEST_TEMP") or _default_temp,
             qdrant_host=os.environ.get("QDRANT_HOST", "localhost"),
             qdrant_port=int(os.environ.get("QDRANT_PORT", "6333")),
             collection=os.environ.get("QDRANT_COLLECTION", "onec_help"),

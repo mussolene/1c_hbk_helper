@@ -17,6 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 mcp = [
     "fastmcp>=2.0",
+    "defusedxml>=0.7",
 ]
 embed = [
     "sentence-transformers>=2.2",
@@ -74,7 +75,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]  # assert is standard in pytest
-"src/onec_help/form_metadata.py" = ["S314"]  # Form.xml from project, not untrusted network input
+"src/onec_help/form_metadata.py" = ["S314", "S405"]  # defusedxml fallback; XML from MCP/user
 
 [tool.ruff.lint.isort]
 known-first-party = ["onec_help"]

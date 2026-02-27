@@ -45,11 +45,15 @@ def _first_paragraph(content: str) -> str:
     return " ".join(para)[:300].strip()
 
 
+_GITHUB_REPO_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
+
+
 def fetch_repo_archive(
     repo_url: str, subpath: str = "docs", branch: str = "master"
 ) -> tuple[Path, Path]:
     """Download GitHub repo as zip, extract to temp dir.
-    Returns (path_to_subpath, temp_dir). Caller must shutil.rmtree(temp_dir) when done."""
+    Returns (path_to_subpath, temp_dir). Caller must shutil.rmtree(temp_dir) when done.
+    Only https://github.com/ is allowed (SSRF protection)."""
     # Normalize: github.com/owner/repo or owner/repo
     if "github.com" in repo_url:
         base = (
@@ -65,6 +69,8 @@ def fetch_repo_archive(
     owner, repo = (parts[0], parts[1]) if len(parts) >= 2 else ("", base)
     if not owner or not repo:
         raise ValueError(f"Invalid repo URL: {repo_url}")
+    if not _GITHUB_REPO_RE.match(owner) or not _GITHUB_REPO_RE.match(repo):
+        raise ValueError(f"Invalid owner/repo (only alphanumeric, underscore, hyphen, dot): {owner}/{repo}")
     zip_url = f"https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip"
     req = Request(zip_url, headers={"User-Agent": "onec_help/1.0"})
     with urlopen(req, timeout=60, context=_SSL_CONTEXT) as resp:

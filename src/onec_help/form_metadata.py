@@ -1,7 +1,11 @@
 """Parse Form.xml from 1C EDT/XML to extract attributes and commands."""
 
-import xml.etree.ElementTree as ET
 from pathlib import Path
+
+try:
+    import defusedxml.ElementTree as ET
+except ImportError:
+    import xml.etree.ElementTree as ET  # noqa: S405
 
 
 def _strip_ns(tag: str) -> str:
@@ -50,10 +54,11 @@ def _parse_root(root: ET.Element) -> dict:
 
 def parse_form_xml(xml_content: str) -> dict:
     """Parse Form.xml content and return attributes and commands.
+    Uses defusedxml when available to prevent XXE/entity expansion on untrusted input.
     Returns {attributes: [{name, type}], commands: [{name, action}]}."""
     try:
         root = ET.fromstring(xml_content)
-    except ET.ParseError as e:
+    except (ET.ParseError, Exception) as e:
         return {"error": str(e), "attributes": [], "commands": []}
     return _parse_root(root)
 

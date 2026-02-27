@@ -44,6 +44,12 @@ _LMSTUDIO_PREFERRED_EMBEDDING_MODELS = (
 _EMBEDDING_API_URL = (
     (os.environ.get("EMBEDDING_API_URL") or "http://localhost:1234/v1").strip().rstrip("/")
 )
+
+
+def _is_safe_embedding_url(url: str) -> bool:
+    """Allow only http/https to prevent file:/ or custom scheme SSRF."""
+    u = (url or "").strip().lower()
+    return u.startswith("http://") or u.startswith("https://")
 _EMBEDDING_API_KEY = (os.environ.get("EMBEDDING_API_KEY") or "").strip()
 _EMBEDDING_DIMENSION = (os.environ.get("EMBEDDING_DIMENSION") or "").strip()
 
@@ -152,6 +158,14 @@ def _check_embedding_api_available() -> bool:
     if _EMBEDDING_BACKEND != "openai_api" or not _EMBEDDING_API_URL:
         _embedding_api_available = True
         return True
+    if not _is_safe_embedding_url(_EMBEDDING_API_URL):
+        _embedding_api_available = False
+        print(
+            "[embedding] EMBEDDING_API_URL must use http:// or https:// (security).",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
     try:
         req = urllib.request.Request(
             f"{_EMBEDDING_API_URL}/models",

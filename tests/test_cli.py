@@ -1,5 +1,6 @@
 """Tests for CLI."""
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -91,7 +92,21 @@ def test_cmd_serve(mock_web_app, help_sample_dir: Path) -> None:
     mock_web_app.config = {}
     mock_web_app.run = lambda **kw: None
     args = make_args(directory=str(help_sample_dir), debug=False)
-    assert cmd_serve(args) == 0
+    with patch.dict("os.environ", {"HELP_SERVE_ALLOWED_DIRS": str(help_sample_dir.parent)}, clear=False):
+        assert cmd_serve(args) == 0
+
+
+def test_cmd_serve_rejects_without_allowlist(help_sample_dir: Path) -> None:
+    """serve requires HELP_SERVE_ALLOWED_DIRS; returns 1 when not set."""
+    from onec_help.cli import cmd_serve
+
+    args = make_args(directory=str(help_sample_dir), debug=False)
+    with patch.dict("os.environ", {}, clear=True):
+        env = {k: v for k, v in os.environ.items() if k != "HELP_SERVE_ALLOWED_DIRS"}
+        with patch.dict("os.environ", env, clear=False):
+            # Ensure HELP_SERVE_ALLOWED_DIRS is unset
+            os.environ.pop("HELP_SERVE_ALLOWED_DIRS", None)
+            assert cmd_serve(args) == 1
 
 
 @patch("onec_help.web.app")
@@ -103,7 +118,9 @@ def test_cmd_serve_production_disables_debug(mock_web_app, help_sample_dir: Path
     mock_run = MagicMock()
     mock_web_app.run = mock_run
     args = make_args(directory=str(help_sample_dir), debug=True)
-    with patch.dict("os.environ", {"PRODUCTION": "1"}, clear=False):
+    with patch.dict(
+        "os.environ", {"PRODUCTION": "1", "HELP_SERVE_ALLOWED_DIRS": str(help_sample_dir.parent)}, clear=False
+    ):
         assert cmd_serve(args) == 0
     call_kw = mock_run.call_args[1]
     assert call_kw.get("debug") is False

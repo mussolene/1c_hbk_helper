@@ -2,6 +2,7 @@
 
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,37 @@ from typing import Any
 from ._utils import safe_error_message
 
 SNIPPET_MAX_CHARS = 850
+MAX_QUERY_CHARS = 65536  # 64 KB
+MAX_CODE_SNIPPET_CHARS = 65536  # 64 KB
+_RATE_LIMIT_REQUESTS = 120
+_RATE_LIMIT_WINDOW_SEC = 60
+_rate_timestamps: list[float] = []
+_rate_lock = threading.Lock()
+
+
+def _check_rate_limit() -> str | None:
+    """Return error message if over rate limit, else None. MCP_RATE_LIMIT_PER_MIN=0 disables."""
+    limit = 0
+    try:
+        limit = int(os.environ.get("MCP_RATE_LIMIT_PER_MIN", str(_RATE_LIMIT_REQUESTS)))
+    except ValueError:
+        limit = _RATE_LIMIT_REQUESTS
+    if limit <= 0:
+        return None
+    now = time.monotonic()
+    with _rate_lock:
+        _rate_timestamps[:] = [t for t in _rate_timestamps if now - t < _RATE_LIMIT_WINDOW_SEC]
+        if len(_rate_timestamps) >= limit:
+            return f"Rate limit exceeded ({limit} requests per minute). Try again later."
+        _rate_timestamps.append(now)
+    return None
+
+
+def _truncate_if_needed(value: str, max_chars: int, name: str) -> tuple[str, str | None]:
+    """Return (value, error) — truncate or error if over limit."""
+    if len(value) <= max_chars:
+        return (value, None)
+    return ("", f"{name} exceeds {max_chars} chars (got {len(value)}). Shorten the input.")
 
 # Prefer fastmcp; fallback to mcp package
 try:
@@ -214,7 +246,13 @@ def run_mcp(
         query: search text (e.g. 'Формат', 'Запрос.ПакетПолучения', 'синтаксис ОбъединитьПериоды').
         limit: max results (default 10). version, language: optional filters.
         include_user_memory: if True, also search saved snippets and mark source."""
-        results = _search(query, limit=limit, version=version, language=language)
+        err = _check_rate_limit()
+        if err:
+            return err
+        q, err = _truncate_if_needed(query or "", MAX_QUERY_CHARS, "query")
+        if err:
+            return err
+        results = _search(q, limit=limit, version=version, language=language)
         memory_results: list[dict[str, Any]] = []
         if include_user_memory:
             try:
@@ -253,8 +291,14 @@ def run_mcp(
         Use when semantic search misses specific API names. For code answers prefer get_1c_code_answer.
         For method names like Type.Method (e.g. HTTPСоединение.Получить) pass the full string.
         limit: max results (default 15). version, language: optional filters."""
+        err = _check_rate_limit()
+        if err:
+            return err
+        q, err = _truncate_if_needed((query or "").strip(), MAX_QUERY_CHARS, "query")
+        if err:
+            return err
         results = _search_keyword(
-            query.strip(),
+            q,
             limit=limit,
             version=version,
             language=language,
@@ -279,7 +323,13 @@ def run_mcp(
         Combines semantic + keyword search, then get_topic for each result.
         query: search text. limit: max topics with full content (default 5).
         version, language: optional filters."""
-        results = _hybrid_search(query, limit=limit, version=version, language=language)
+        err = _check_rate_limit()
+        if err:
+            return err
+        q, err = _truncate_if_needed(query or "", MAX_QUERY_CHARS, "query")
+        if err:
+            return err
+        results = _hybrid_search(q, limit=limit, version=version, language=language)
         if not results:
             return "No results found. Ensure build-index was run and Qdrant is available."
         parts = []
@@ -305,13 +355,19 @@ def run_mcp(
         Combines semantic + keyword search, full topic content, and memory. Prefer over search+get_topic chain.
         Traps: ПрочитатьJSON returns Structure by default — use ПрочитатьВСоответствие=Истина for Соответствие (Получить). HTTPСоединение.Получить — server only.
         query: natural language or API name. limit: max topics (default 5). include_memory: also search saved snippets. code_only: if True, return primarily code blocks from help."""
-        results = _hybrid_search(query, limit=limit, version=version, language=language)
+        err = _check_rate_limit()
+        if err:
+            return err
+        q, err = _truncate_if_needed(query or "", MAX_QUERY_CHARS, "query")
+        if err:
+            return err
+        results = _hybrid_search(q, limit=limit, version=version, language=language)
         memory_parts: list[str] = []
         if include_memory:
             try:
                 from .memory import get_memory_store
 
-                for m in get_memory_store().search_long(query, limit=min(5, limit)):
+                for m in get_memory_store().search_long(q, limit=min(5, limit)):
                     payload = m.get("payload", {}) or {}
                     code = payload.get("code_snippet", "")
                     desc = payload.get("description", "") or payload.get("summary", "")[:200]
@@ -330,7 +386,7 @@ def run_mcp(
                 "No results. Ensure index exists (get_1c_help_index_status). "
                 "Try search_1c_help_keyword with exact API name (e.g. ПроцессорВыводаРезультатаКомпоновкиДанныхВКоллекциюЗначений)."
             )
-        parts: list[str] = [f"## Запрос: {query}"]
+        parts: list[str] = [f"## Запрос: {q}"]
         if memory_parts:
             parts.append("\n### Из памяти\n\n" + "\n\n".join(memory_parts))
         if results:
@@ -365,6 +421,9 @@ def run_mcp(
         Content is read from disk or from index if files were not persisted.
         version, language: optional filters when reading from index.
         prefer_index: if True, read only from index (skip disk)."""
+        err = _check_rate_limit()
+        if err:
+            return err
         content = _get_topic(
             topic_path,
             version=version,
@@ -395,11 +454,17 @@ def run_mcp(
         """Save a 1C code snippet to user memory for future context.
         code_snippet: the code to remember. description: short explanation. title: optional short label for search.
         write_to_files: if True, also write to SNIPPETS_DIR as .md (default: SAVE_SNIPPET_TO_FILES env)."""
+        err = _check_rate_limit()
+        if err:
+            return err
+        cs, err = _truncate_if_needed(code_snippet or "", MAX_CODE_SNIPPET_CHARS, "code_snippet")
+        if err:
+            return err
         try:
             from .memory import get_memory_store
 
             payload: dict[str, Any] = {
-                "code_snippet": code_snippet,
+                "code_snippet": cs,
                 "description": description,
             }
             if title:
@@ -422,7 +487,7 @@ def run_mcp(
                 if snippets_dir:
                     out_path = _write_snippet_to_file(
                         Path(snippets_dir),
-                        code_snippet=code_snippet,
+                        code_snippet=cs,
                         description=description,
                         title=title or "Snippet",
                     )
@@ -440,9 +505,15 @@ def run_mcp(
     def get_form_metadata(xml_content: str) -> str:
         """Parse Form.xml content and return attributes and commands.
         xml_content: raw XML of Form.xml (read the file and pass its content)."""
+        err = _check_rate_limit()
+        if err:
+            return err
+        xc, err = _truncate_if_needed(xml_content or "", MAX_QUERY_CHARS, "xml_content")
+        if err:
+            return err
         from .form_metadata import parse_form_xml
 
-        data = parse_form_xml(xml_content)
+        data = parse_form_xml(xc)
         err = data.get("error")
         if err:
             return f"Parse error: {err}"

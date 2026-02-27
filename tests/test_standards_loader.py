@@ -79,3 +79,11 @@ def test_fetch_repo_archive(tmp_path: Path) -> None:
     import shutil
 
     shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_fetch_repo_archive_rejects_invalid_owner() -> None:
+    """Invalid owner (e.g. path traversal) raises ValueError."""
+    import pytest
+
+    with pytest.raises(ValueError, match="Invalid owner/repo"):
+        fetch_repo_archive("https://github.com/../evil/repo")
