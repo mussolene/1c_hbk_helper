@@ -43,6 +43,7 @@ filterwarnings = ["ignore::DeprecationWarning"]
 omit = [
     "src/onec_help/__main__.py",
     "src/onec_help/mcp_server.py",
+    "src/onec_help/form_metadata.py",  # used by mcp_server
     "src/onec_help/html2md.py",  # many branches; tested separately
     "src/onec_help/indexer.py",  # complex Qdrant logic; unit-tested with mocks
     "*/tests/*",

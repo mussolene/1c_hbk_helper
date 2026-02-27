@@ -66,8 +66,8 @@ def test_search_index(mock_client: MagicMock) -> None:
 
 def test_extract_keywords() -> None:
     """_extract_keywords extracts CamelCase and Cyrillic identifiers."""
-    assert "МенеджерКриптографии" in _extract_keywords("МенеджерКриптографии.Шифровать")
-    assert "Шифровать" in _extract_keywords("МенеджерКриптографии.Шифровать")
+    assert "ОбработкаДанных" in _extract_keywords("ОбработкаДанных.Выполнить")
+    assert "Выполнить" in _extract_keywords("ОбработкаДанных.Выполнить")
     assert "GetValue" in _extract_keywords("Object.GetValue(x)")
     assert _extract_keywords("ab") == []  # min 3 chars
     assert _extract_keywords("") == []
@@ -88,7 +88,7 @@ def test_build_index(mock_client: MagicMock, help_sample_dir: Path, tmp_path: Pa
 def test_build_index_keywords_in_payload(mock_client: MagicMock, tmp_path: Path) -> None:
     """build_index adds keywords from title and first paragraph to payload."""
     (tmp_path / "func.md").write_text(
-        "# МенеджерКриптографии.Шифровать\n\nШифрует данные.", encoding="utf-8"
+        "# ОбработкаДанных.Выполнить\n\nВыполняет операцию.", encoding="utf-8"
     )
     mock_instance = MagicMock()
     mock_client.return_value = mock_instance
@@ -99,7 +99,7 @@ def test_build_index_keywords_in_payload(mock_client: MagicMock, tmp_path: Path)
     payload = points[0].payload if hasattr(points[0], "payload") else {}
     kw = payload.get("keywords", []) if isinstance(payload, dict) else []
     assert kw, "keywords should be present"
-    assert "МенеджерКриптографии" in kw or "Шифровать" in kw
+    assert "ОбработкаДанных" in kw or "Выполнить" in kw
 
 
 @patch("onec_help.indexer.QdrantClient")

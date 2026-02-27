@@ -1,4 +1,4 @@
-"""Tests for .nosync/bsl_processor — run when .nosync exists."""
+"""Tests for bsl_processor script — run when fixture present."""
 
 import importlib.util
 from pathlib import Path
@@ -9,7 +9,7 @@ NOSYNC = Path(__file__).resolve().parent.parent / ".nosync"
 BSL_PROCESSOR = NOSYNC / "bsl_processor.py"
 
 
-@pytest.mark.skipif(not BSL_PROCESSOR.exists(), reason=".nosync/bsl_processor.py not present")
+@pytest.mark.skipif(not BSL_PROCESSOR.exists(), reason="bsl_processor fixture not present")
 def test_bsl_processor_import_and_error() -> None:
     """BSLProcessor imports and BSLProcessorError is a proper Exception."""
     spec = importlib.util.spec_from_file_location("bsl_processor", BSL_PROCESSOR)

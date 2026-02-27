@@ -329,8 +329,16 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
         from .snippets_loader import collect_from_folder
         items.extend(collect_from_folder(d, per_function=per_func))
 
+    from_project = getattr(args, "from_project", None)
+
     try:
-        if path_arg and path_arg.strip():
+        if from_project:
+            d = Path(from_project.strip())
+            if not d.exists() or not d.is_dir():
+                print(f"Error: --from-project path not found or not a directory: {d}", file=sys.stderr)
+                return 1
+            _load_folder(d, per_func=getattr(args, "per_function", False))
+        elif path_arg and path_arg.strip():
             p = Path(path_arg.strip())
             if not p.exists():
                 print(f"Error: path not found: {p}", file=sys.stderr)
@@ -351,7 +359,7 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
             _load_folder(d, per_func=getattr(args, "per_function", False))
         else:
             print(
-                "No source: set SNIPPETS_DIR or pass path. docs/snippets/ — examples only.",
+                "No source: set SNIPPETS_DIR, pass path, or use --from-project. docs/snippets/ — examples only.",
                 file=sys.stderr,
             )
             return 0
@@ -699,6 +707,13 @@ def main() -> int:
         action="store_true",
         dest="per_function",
         help="Split large .bsl by procedures/functions (each as snippet, min 50 lines)",
+    )
+    p_load_snippets.add_argument(
+        "--from-project",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Load snippets from 1C project path (e.g. src). Uses collect_from_folder on **/*.bsl.",
     )
     p_load_snippets.set_defaults(func=cmd_load_snippets)
 

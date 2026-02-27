@@ -6,7 +6,7 @@ import pytest
 
 from onec_help.bsl_utils import extract_func_name, extract_procedures_and_functions, get_functions
 
-NOSYNC_OBJECT_MODULE = Path(__file__).resolve().parent.parent / ".nosync" / "CryptographicLib" / "DataProcessors" / "МенеджерКриптографии" / "Ext" / "ObjectModule.bsl"
+FIXTURE_OBJECT_MODULE = Path(__file__).resolve().parent / "fixtures" / "bsl_sample" / "ObjectModule.bsl"
 
 
 def test_get_functions_splits_by_end_markers() -> None:
@@ -65,10 +65,9 @@ def test_extract_procedures_and_functions() -> None:
         assert "Процедура" in item["code"] or "Функция" in item["code"]
 
 
-@pytest.mark.skipif(not NOSYNC_OBJECT_MODULE.exists(), reason=".nosync fixture not present")
 def test_get_functions_on_real_object_module() -> None:
-    """get_functions and extract_func_name work on real .nosync ObjectModule.bsl."""
-    content = NOSYNC_OBJECT_MODULE.read_text(encoding="utf-8")
+    """get_functions and extract_func_name work on real ObjectModule.bsl fixture."""
+    content = FIXTURE_OBJECT_MODULE.read_text(encoding="utf-8")
     parts = get_functions(content)
     assert len(parts) > 1
     # Should find ПолучитьВсе, НайтиПоОтпечатку, etc.

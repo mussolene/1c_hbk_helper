@@ -456,7 +456,7 @@ def search_index_keyword(
     language: str | None = None,
 ) -> list[dict[str, Any]]:
     """Search by keyword (payload.keywords) or substring in title/text (no embedding).
-    Finds exact terms like МенеджерКриптографии."""
+    Finds exact terms (API names, identifiers)."""
     if QdrantClient is None:
         return []
     host = qdrant_host or os.environ.get("QDRANT_HOST", "localhost")
