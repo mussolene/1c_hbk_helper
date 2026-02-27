@@ -1,12 +1,12 @@
 ---
-description: MCP workflow when editing 1C code (1c-help + lsp-bsl-bridge)
+description: MCP workflow при редактировании кода 1С (1c-help + lsp-bsl-bridge). Циклические проверки с diagnostics.
 globs: "**/*.bsl"
 alwaysApply: false
 ---
 
 # 1C MCP Workflow
 
-- When editing .bsl: use both MCPs — 1c-help (spravka, snippets) and lsp-bsl-bridge (diagnostics, navigation)
-- After edits: call `document_diagnostics` to verify
-- When generating usable example code: call `save_1c_snippet` for future context
-- URI for BSL LS in Docker: `file:///projects/<path>` (volume `.:/projects`, код обычно в `src`)
+- Использовать оба MCP: 1c-help (справка, сниппеты), lsp-bsl-bridge (диагностика, навигация)
+- **Написание кода:** `get_1c_code_answer` / `search_1c_help_keyword` → реализация → `document_diagnostics` → при ERROR/WARNING: исправить и повторить до чистоты → `save_1c_snippet` при переиспользовании
+- **Рефакторинг:** сначала `call_graph` + `project_analysis` → правка одного файла → `document_diagnostics` → при ERROR: исправить и повторить → после batch: `did_change_watched_files`
+- URI для BSL LS в Docker: `file:///projects/<путь>` (volume `.:/projects`, код обычно в `src`)

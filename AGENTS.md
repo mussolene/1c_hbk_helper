@@ -62,10 +62,21 @@
 
 ## Workflow разработки 1С с BSL LS
 
-1. **Индексация.** `make up` или `docker compose up -d` — bsl-bridge входит в compose, volume `.:/projects`. Дождаться индексации (`lsp_status`).
-2. **Ориентирование.** `project_analysis` — поиск символов/файлов; `symbol_explore` — детали по символу; `call_graph` — граф вызовов перед рефакторингом.
-3. **Написание кода.** `get_1c_code_answer` — примеры и API; `project_analysis` — где добавить код; `symbol_explore` — сигнатуры и паттерны; `save_1c_snippet` — сохранить новый фрагмент.
-4. **Рефакторинг.** `call_graph` → `document_diagnostics` → `code_actions` → `prepare_rename`/`rename`; после массовых правок — `did_change_watched_files`.
-5. **Проверка.** `document_diagnostics` — финальная проверка.
+Циклы с проверками; при ошибках — возврат к шагу исправления.
 
-**Рефакторинг существующего кода:** `document_diagnostics(uri)` → приоритизация (ERROR > WARNING > INFO) → правки → повтор diagnostics. Один файл за раз; после batch — вызвать `did_change_watched_files`.
+1. **Индексация.** `make up` или `docker compose up -d` — bsl-bridge входит в compose, volume `.:/projects`. Дождаться индексации (`lsp_status`).
+2. **Ориентирование.** `project_analysis` — поиск символов/файлов; `symbol_explore` — детали по символу; `call_graph` — граф вызовов перед рефакторингом (обязательно перед правками).
+
+### Цикл «Написание кода»
+
+`get_1c_code_answer` / `search_1c_help_keyword` → реализация → `document_diagnostics` → при ERROR/WARNING: исправить и повторить diagnostics до чистоты → `save_1c_snippet` (если переиспользуемо) → опционально unit-тест 1С (xUnitFor1C, Vanessa-Automation).
+
+### Цикл «Рефакторинг»
+
+`call_graph` + `project_analysis` → `document_diagnostics` (базовое состояние) → правка одного файла → `document_diagnostics` → при ERROR: исправить и повторить → после batch: `did_change_watched_files` → следующий файл.
+
+### Слой тестирования
+
+- **BSL LS:** `document_diagnostics` — статический анализ (не runtime). Вызывать после каждой правки; цикл до чистоты.
+- **Python (onec_help):** `pytest tests --cov=src/onec_help --cov-fail-under=90`; `ruff check src tests && ruff format src tests`. При падении покрытия — добавить тесты.
+- **1C runtime:** xUnitFor1C (unit), Vanessa-Automation (BDD), CoverageBSL. При новой логике — предлагать/создавать тесты. Если есть `Tests/` или `features/` — считать тесты частью workflow.

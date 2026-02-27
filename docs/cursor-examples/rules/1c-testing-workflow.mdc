@@ -1,0 +1,33 @@
+---
+description: Workflow тестирования для кода 1С/BSL и Python (onec_help). Когда писать тесты, pytest, BSL LS.
+globs:
+  - "**/*.bsl"
+  - "**/tests/**"
+  - "**/*.feature"
+alwaysApply: false
+---
+
+# 1C Testing Workflow
+
+## BSL LS (статический анализ)
+
+- `document_diagnostics` — не runtime-тесты; ловит ошибки, предупреждения, стиль. Вызывать после каждой правки BSL.
+- Цикл до чистоты: исправить → `document_diagnostics` → повторить при ERROR/WARNING.
+
+## Python (onec_help)
+
+При изменении Python в этом проекте:
+
+```bash
+PYTHONPATH=src python -m pytest tests -v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=90
+ruff check src tests && ruff format src tests
+```
+
+При падении покрытия ниже 90% — добавить тесты перед merge.
+
+## Runtime-тесты 1С
+
+- **xUnitFor1C**: unit-тесты. При добавлении новой логики 1С — предлагать или создавать тесты.
+- **Vanessa-Automation**: BDD (`.feature`). Для приёмочного тестирования.
+- **CoverageBSL**: измерение покрытия.
+- Если в проекте есть `Tests/` или `features/` — считать тесты частью workflow.

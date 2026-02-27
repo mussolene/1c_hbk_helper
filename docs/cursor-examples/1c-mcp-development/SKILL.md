@@ -1,72 +1,98 @@
 ---
 name: 1c-mcp-development
-description: Guides the agent through 1C (BSL) development using 1c-help and lsp-bsl-bridge MCPs. Use when writing, refactoring, or reviewing 1C code, .bsl modules, or when the user mentions 1C, BSL, справка 1С, BSL LS.
+description: Ведёт агента по разработке 1С (BSL) с MCP 1c-help и lsp-bsl-bridge. Применять при написании, рефакторинге, ревью кода 1С, модулей .bsl, при упоминании 1C, BSL, справка 1С, BSL LS.
 ---
 
-# 1C Development with MCP
+# Разработка 1С с MCP
 
-## When to Use
+## Когда применять
 
-Apply this skill when:
+Использовать этот skill при:
 
-- Generating 1C/BSL code (procedures, functions, form modules)
-- Refactoring existing 1C code
-- Running BSL LS diagnostics
-- Searching 1C help for API usage
-- Working with `.bsl`, `.1c`, or `Form.xml` files
+- Генерации кода 1С/BSL (процедуры, функции, модули форм)
+- Рефакторинге существующего кода 1С
+- Запуске диагностики BSL LS
+- Поиске в справке 1С по API
+- Работе с файлами `.bsl`, `.1c`, `Form.xml`
 
-## Tool Selection Matrix
+## Матрица выбора инструментов
 
-| Scenario | MCP | Tool | Notes |
-|----------|-----|------|-------|
-| Examples, API usage | 1c-help | `get_1c_code_answer` | Prefer `code_only=True` when only code needed |
-| Exact API name lookup | 1c-help | `search_1c_help_keyword` | Pass full name e.g. `Тип.Метод` |
-| Topic details | 1c-help | `get_1c_help_topic` | Use `topic_path`, not `path` |
-| Save useful code | 1c-help | `save_1c_snippet` | After generating working example |
-| Diagnostics (one file) | lsp-bsl-bridge | `document_diagnostics` | URI: `file:///projects/<path>/Module.bsl` |
-| Quick-fixes | lsp-bsl-bridge | `code_actions` | Limited coverage; many require manual fix |
-| Navigation | lsp-bsl-bridge | `project_analysis`, `symbol_explore` | Before refactoring |
-| Rename | lsp-bsl-bridge | `call_graph` → `prepare_rename` → `rename` | Check call graph first |
-| After mass edits | lsp-bsl-bridge | `did_change_watched_files` | Notify LSP of changes |
+| Сценарий | MCP | Инструмент | Заметки |
+|----------|-----|------------|---------|
+| Примеры, API | 1c-help | `get_1c_code_answer` | `code_only=True`, если нужен только код |
+| Точный поиск по имени API | 1c-help | `search_1c_help_keyword` | Передавать полное имя, напр. `Тип.Метод` |
+| Детали топика | 1c-help | `get_1c_help_topic` | Параметр `topic_path`, не `path` |
+| Сохранить полезный код | 1c-help | `save_1c_snippet` | После рабочего примера |
+| Диагностика файла | lsp-bsl-bridge | `document_diagnostics` | URI: `file:///projects/<путь>/Module.bsl` |
+| Быстрые правки | lsp-bsl-bridge | `code_actions` | Ограниченная поддержка; часто — ручные правки |
+| Навигация | lsp-bsl-bridge | `project_analysis`, `symbol_explore` | Перед рефакторингом |
+| Переименование | lsp-bsl-bridge | `call_graph` → `prepare_rename` → `rename` | Сначала смотреть граф вызовов |
+| После массовых правок | lsp-bsl-bridge | `did_change_watched_files` | Уведомить LSP об изменениях |
 
-## Workflows
+## Архитектурное мышление
 
-### Generating Code
+Думать как senior-разработчик 1С: понимать влияние правок до их внесения.
 
-1. Call `get_1c_code_answer(query)` for examples
-2. If insufficient: `search_1c_help_keyword("Exact.API.Name")` or `get_1c_help_topic(topic_path)`
-3. Edit/adopt the code
-4. If the result is reusable: `save_1c_snippet(code_snippet, description, title)`
-5. Run `document_diagnostics(uri)` to verify
+- **Перед любым изменением:** вызвать `project_analysis` → `symbol_explore` → `call_graph` для понимания зависимостей и мест вызова.
+- **Модульность:** использовать `#Область ПрограммныйИнтерфейс` и `#Область СлужебныеПроцедурыИФункции`; избегать монолитных процедур.
+- **Контекст выполнения:** учитывать клиент/сервер, реквизиты формы, СКД vs запрос, толстый/тонкий клиент.
+- **Антипаттерны:** процедуры >100 строк, магические числа, отсутствие явной обработки ошибок.
+- **Перед рефакторингом:** всегда вызывать `call_graph` для оценки влияния.
 
-### Refactoring
+## Циклические workflows
 
-1. Call `document_diagnostics(uri)` for the file
-2. Prioritize: ERROR > WARNING > INFO
-3. Fix issues (one file at a time)
-4. Re-run `document_diagnostics` after edits
-5. After multiple files: call `did_change_watched_files` so LSP re-indexes
+### Написание кода (цикл до чистоты)
 
-### URI for document_diagnostics
+1. Вызвать `get_1c_code_answer(query)` для примеров.
+2. Если результат скудный или нерелевантный → вызвать `search_1c_help_keyword("Тип.Метод")` с полным именем или `get_1c_help_topic(topic_path)`.
+3. Реализовать или адаптировать код.
+4. Вызвать `document_diagnostics(uri)`.
+5. **При ERROR или WARNING:** исправить → повторить п. 4. Не продолжать, пока не чисто.
+6. Если результат переиспользуемый: вызвать `save_1c_snippet(code_snippet, description, title)`.
+7. По желанию добавить unit-тесты 1С (xUnitFor1C) или BDD (Vanessa-Automation) для новой логики.
 
-When using bsl-bridge in Docker (volume `.:/projects`):
+### Рефакторинг (цикл по файлам)
+
+1. Сначала вызвать `call_graph` и `project_analysis` для понимания влияния.
+2. Вызвать `document_diagnostics(uri)` для базового состояния.
+3. Редактировать по одному файлу.
+4. После каждой правки вызывать `document_diagnostics(uri)`.
+5. **При ERROR:** исправить → повторить п. 4.
+6. После batch правок: вызвать `did_change_watched_files` для переиндексации LSP.
+7. Повторить п. 3–6 для следующего файла.
+
+### Тестирование (Python onec_help)
+
+При изменении Python-кода в этом проекте:
+
+1. Редактировать код.
+2. Запустить `PYTHONPATH=src python -m pytest tests -v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=90`.
+3. **При падении тестов или покрытии < 90%:** исправить → повторить п. 2.
+4. Запустить `ruff check src tests && ruff format src tests`.
+
+Подробнее — [reference.md](reference.md): pytest, xUnitFor1C, CoverageBSL.
+
+## URI для document_diagnostics
+
+При bsl-bridge в Docker (volume `.:/projects`):
 
 ```
 file:///projects/src/DataProcessors/.../Forms/.../Ext/Form/Module.bsl
 ```
 
-Map host path to container: `./src/...` → `file:///projects/src/...` (volume `.:/projects`)
+Путь на хосте `./src/...` → в контейнере `file:///projects/src/...` (volume `.:/projects`)
 
-## Common Pitfalls
+## Типичные ошибки
 
-| Mistake | Fix |
-|---------|-----|
-| `get_1c_help_topic(path=...)` | Use `topic_path`, not `path` |
-| `ПрочитатьJSON` returns Соответствие | Add `ПрочитатьВСоответствие=Истина` |
-| `HTTPСоединение.Получить` on client | Server-only; use HTTPЗапрос or RPC |
-| Search for `Метод` only | Pass full `Тип.Метод` in `search_1c_help_keyword` |
-| Skipping `did_change_watched_files` | Call after batch edits so LSP stays in sync |
+| Ошибка | Исправление |
+|--------|-------------|
+| `get_1c_help_topic(path=...)` | Параметр `path` не использовать; только `topic_path` |
+| `ПрочитатьJSON` возвращает Соответствие | Добавить `ПрочитатьВСоответствие=Истина` |
+| `HTTPСоединение.Получить` на клиенте | Только сервер; использовать HTTPЗапрос или RPC |
+| Поиск только по `Метод` | Передавать полное `Тип.Метод` в `search_1c_help_keyword` |
+| Пропуск `did_change_watched_files` | Вызывать после batch правок, чтобы LSP оставался в синхронизации |
+| Продолжение при неисправленных diagnostics | Цикл: исправить → `document_diagnostics` до чистоты |
 
-## Additional Reference
+## Дополнительно
 
-See [reference.md](reference.md) for URI mapping details and more examples.
+См. [reference.md](reference.md): URI, примеры вызовов, команды тестирования (pytest, xUnitFor1C, CoverageBSL).

@@ -1,17 +1,17 @@
-# Reference: 1C MCP Development
+# Справка: разработка 1С с MCP
 
-## URI Mapping (Host ↔ Container)
+## Соответствие URI (хост ↔ контейнер)
 
-When bsl-bridge runs in Docker with `.:/projects`:
+Когда bsl-bridge в Docker с `.:/projects`:
 
-| Host path | Container URI (for document_diagnostics) |
-|-----------|------------------------------------------|
+| Путь на хосте | URI в контейнере (для document_diagnostics) |
+|---------------|---------------------------------------------|
 | `./src/.../Module.bsl` | `file:///projects/src/.../Module.bsl` |
 | `./DataProcessors/X/Module.bsl` | `file:///projects/DataProcessors/X/Module.bsl` |
 
-Rule: host `./` maps to `/projects`; prefix with `file://`.
+Правило: хост `./` → `/projects`; добавлять префикс `file://`.
 
-## Example document_diagnostics Call
+## Пример вызова document_diagnostics
 
 ```
 document_diagnostics(
@@ -19,33 +19,33 @@ document_diagnostics(
 )
 ```
 
-## Example get_1c_help_topic Call
+## Пример вызова get_1c_help_topic
 
 ```
 get_1c_help_topic(topic_path="Format971.md")
 ```
 
-Do **not** use `path` — the parameter is `topic_path`.
+Параметр **не** `path` — только `topic_path`.
 
-## Example search_1c_help_keyword Call
+## Пример вызова search_1c_help_keyword
 
 ```
 search_1c_help_keyword(query="ФайловыеОперации.НачатьУдалениеФайлов")
 ```
 
-Use full qualified names for types and methods.
+Использовать полные квалифицированные имена типов и методов.
 
-## Example get_form_metadata Call
+## Пример вызова get_form_metadata
 
-Read Form.xml, then pass its content:
+Прочитать Form.xml, передать содержимое:
 
 ```
-# 1. Read the file (e.g. .nosync/.../Forms/X/Ext/Form.xml)
-# 2. Call with xml_content
+# 1. Прочитать файл (напр. .nosync/.../Forms/X/Ext/Form.xml)
+# 2. Вызвать с xml_content
 get_form_metadata(xml_content="<Form ...>...</Form>")
 ```
 
-## Example save_1c_snippet Call
+## Пример вызова save_1c_snippet
 
 ```
 save_1c_snippet(
@@ -55,17 +55,41 @@ save_1c_snippet(
 )
 ```
 
-## BSL LS Diagnostics Without Quick-Fix
+## BSL LS: диагностики без быстрого исправления
 
-Many BSL LS diagnostics (e.g. SemicolonPresence, LineLength) do not have `code_actions` quick-fix. Fix manually:
+Многие диагностики BSL LS (SemicolonPresence, LineLength и др.) не имеют quick-fix в `code_actions`. Исправлять вручную:
 
-- Add semicolon after `ВызватьИсключение "..."`
-- Split long lines or add `// BSLLS:LineLength-off` with a brief reason
-- Use `#Область` / `#КонецОбласть` for structure
+- Добавить точку с запятой после `ВызватьИсключение "..."`
+- Разбить длинные строки или добавить `// BSLLS:LineLength-off` с кратким обоснованием
+- Использовать `#Область` / `#КонецОбласти` для структуры
 
-## Two MCPs Together
+## Два MCP вместе
 
 - **1c-help**: справка, сниппеты, память
 - **lsp-bsl-bridge**: навигация, диагностика, рефакторинг
 
-If 1c-help is unavailable (no index): rely on lsp-bsl-bridge and memory only.
+Если 1c-help недоступен (нет индекса): опираться только на lsp-bsl-bridge и memory.
+
+## Python-тесты (onec_help)
+
+Запуск тестов и проверка покрытия (≥90%):
+
+```bash
+pip install -e ".[dev]"
+PYTHONPATH=src python -m pytest tests -v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=90
+```
+
+Линтинг:
+
+```bash
+ruff check src tests && ruff format src tests
+```
+
+## Инструменты тестирования 1С/BSL
+
+- **BSL LS** (`document_diagnostics`): статический анализ — ошибки, предупреждения, стиль. Вызывать после каждой правки; это не runtime-тесты.
+- **xUnitFor1C**: unit-тесты для 1С. Обычно папка `Tests/` с тестовыми процедурами. Запуск через 1С:Предприятие или CLI.
+- **Vanessa-Automation**: BDD-тесты (Gherkin `.feature`). Для приёмочного и интеграционного тестирования.
+- **CoverageBSL**: измерение покрытия кода BSL в 1С:Предприятие и OneScript.
+
+При добавлении новой логики 1С — предлагать или создавать unit-тесты (xUnitFor1C) или BDD (Vanessa-Automation). Если в проекте есть `Tests/` или `features/` — считать тесты частью workflow.

@@ -19,7 +19,8 @@ docs/cursor-examples/
 └── rules/                    # Rules (.mdc)
     ├── 1c-bsl-standards.mdc
     ├── 1c-mcp-workflow.mdc
-    └── 1c-project-conventions.mdc
+    ├── 1c-project-conventions.mdc
+    └── 1c-testing-workflow.mdc
 ```
 
 ## Использование
