@@ -2,6 +2,7 @@
 
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +83,53 @@ def _get_topic(
         language=language,
         prefer_index=prefer_index,
     )
+
+
+def _write_snippet_to_file(
+    base_dir: Path,
+    code_snippet: str,
+    description: str = "",
+    title: str = "Snippet",
+) -> str | None:
+    """Write snippet as .md with frontmatter to base_dir. Returns relative path or None."""
+    safe = re.sub(r'[^\w\s\-]', '', title)
+    safe = re.sub(r'\s+', '_', safe.strip()) or "snippet"
+    safe = safe[:60]
+    fname = f"{safe}_{int(time.time())}.md"
+    out = base_dir / fname
+    try:
+        base_dir.mkdir(parents=True, exist_ok=True)
+        t = title.replace('\n', ' ').replace('"', "'")
+        d = description.replace('\n', ' ').replace('"', "'")
+        content = f"""---
+title: "{t}"
+description: "{d}"
+---
+
+```bsl
+{code_snippet}
+```
+"""
+        out.write_text(content, encoding="utf-8")
+        return fname
+    except (OSError, ValueError):
+        return None
+
+
+def _path_parts(uri_or_path: str) -> tuple[str, ...]:
+    """Extract path parts from URI or path string for structure parsing."""
+    raw = uri_or_path.strip()
+    if raw.startswith("file://"):
+        from urllib.parse import unquote, urlparse
+
+        parsed = urlparse(raw)
+        path_str = unquote(parsed.path)
+        if len(path_str) >= 3 and path_str[0] == "/" and path_str[2] == ":":
+            path_str = path_str[1:]  # Windows: /C:/...
+        raw = path_str
+    # Normalize separators and split
+    normalized = raw.replace("\\", "/").strip("/")
+    return tuple(p for p in normalized.split("/") if p)
 
 
 _CODE_BLOCK_RE = re.compile(r"```(\w*)\s*\n(.*?)```", re.DOTALL)
@@ -201,7 +249,7 @@ def run_mcp(
         version: str | None = None,
         language: str | None = None,
     ) -> str:
-        """Search 1C help by exact substring in title and text (e.g. 'МенеджерКриптографии', 'ПроцессорВыводаРезультатаКомпоновкиДанныхВКоллекциюЗначений').
+        """Search 1C help by exact substring in title and text (e.g. 'Формат', 'ПроцессорВыводаРезультатаКомпоновкиДанныхВКоллекциюЗначений').
         Use when semantic search misses specific API names. For code answers prefer get_1c_code_answer.
         For method names like Type.Method (e.g. HTTPСоединение.Получить) pass the full string.
         limit: max results (default 15). version, language: optional filters."""
@@ -340,9 +388,11 @@ def run_mcp(
         code_snippet: str,
         description: str = "",
         title: str = "",
+        write_to_files: bool | None = None,
     ) -> str:
         """Save a 1C code snippet to user memory for future context.
-        code_snippet: the code to remember. description: short explanation. title: optional short label for search."""
+        code_snippet: the code to remember. description: short explanation. title: optional short label for search.
+        write_to_files: if True, also write to SNIPPETS_DIR as .md (default: SAVE_SNIPPET_TO_FILES env)."""
         try:
             from .memory import get_memory_store
 
@@ -356,9 +406,78 @@ def run_mcp(
                 "save_snippet",
                 payload,
             )
-            return "Snippet saved to memory."
+            result = "Snippet saved to memory."
+
+            do_write_files = write_to_files
+            if do_write_files is None:
+                do_write_files = os.environ.get("SAVE_SNIPPET_TO_FILES", "").lower() in ("1", "true", "yes")
+            if do_write_files:
+                snippets_dir = os.environ.get("SNIPPETS_DIR", "").strip()
+                if snippets_dir:
+                    out_path = _write_snippet_to_file(
+                        Path(snippets_dir),
+                        code_snippet=code_snippet,
+                        description=description,
+                        title=title or "Snippet",
+                    )
+                    if out_path:
+                        result = f"Snippet saved to memory and to {out_path}."
+                    else:
+                        result = f"Snippet saved to memory. Could not write to SNIPPETS_DIR ({snippets_dir})."
+                else:
+                    result = "Snippet saved to memory. SNIPPETS_DIR not set — skip file write."
+            return result
         except Exception as e:
             return f"Failed to save: {safe_error_message(e)}"
+
+    @mcp.tool()
+    def get_form_metadata(xml_content: str) -> str:
+        """Parse Form.xml content and return attributes and commands.
+        xml_content: raw XML of Form.xml (read the file and pass its content)."""
+        from .form_metadata import parse_form_xml
+
+        data = parse_form_xml(xml_content)
+        err = data.get("error")
+        if err:
+            return f"Parse error: {err}"
+        lines = ["**Attributes:**"]
+        for a in data.get("attributes", []):
+            lines.append(f"- {a.get('name', '')}: {a.get('type', '')}")
+        lines.append("\n**Commands:**")
+        for c in data.get("commands", []):
+            lines.append(f"- {c.get('name', '')} → {c.get('action', '')}")
+        return "\n".join(lines) if lines else "No attributes or commands found."
+
+    @mcp.tool()
+    def get_module_info(uri_or_path: str) -> str:
+        """Infer module type and context from file path.
+        uri_or_path: path or file URI to Module.bsl / ObjectModule.bsl.
+        Returns: module_type (FormModule|ObjectModule|...), form_name, object_name if detectable."""
+        parts = _path_parts(uri_or_path)
+        name = parts[-1] if parts else ""
+        module_type = "ObjectModule" if name == "ObjectModule.bsl" else "FormModule" if name == "Module.bsl" else "Unknown"
+        form_name = ""
+        object_name = ""
+        if "Forms" in parts:
+            idx = parts.index("Forms")
+            if idx + 1 < len(parts):
+                form_name = parts[idx + 1]
+            if module_type == "Unknown":
+                module_type = "FormModule"
+        for obj_type in ("DataProcessors", "Catalogs", "Documents"):
+            if obj_type in parts:
+                idx = parts.index(obj_type)
+                if idx + 1 < len(parts):
+                    object_name = parts[idx + 1]
+                break
+        if name == "ObjectModule.bsl":
+            module_type = "ObjectModule"
+        lines = [f"**Module type:** {module_type}"]
+        if form_name:
+            lines.append(f"**Form:** {form_name}")
+        if object_name:
+            lines.append(f"**Object:** {object_name}")
+        return "\n".join(lines)
 
     @mcp.tool()
     def get_1c_help_related(
@@ -487,7 +606,7 @@ def run_mcp(
     ) -> str:
         """Get description, syntax, parameters, return value, and examples for a 1C function/method by name.
         When several matches (e.g. Формат, ФорматКартинки), use choose_index to pick the right one.
-        name: function or method name (e.g. 'Формат', 'МенеджерКриптографии').
+        name: function or method name (e.g. 'Формат', 'DataProcessor.Имя').
         path: optional - when given, fetch only this topic path (e.g. 'Format971.md'). choose_index: 1-based index when multiple matches."""
         name_clean = name.strip()
         if not name_clean:

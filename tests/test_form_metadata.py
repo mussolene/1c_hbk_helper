@@ -1,0 +1,63 @@
+"""Tests for form_metadata (Form.xml parsing)."""
+
+from pathlib import Path
+
+import pytest
+
+from onec_help.form_metadata import get_form_metadata, parse_form_xml
+
+
+def test_get_form_metadata_minimal(tmp_path: Path) -> None:
+    """Parse minimal Form.xml with one attribute and one command."""
+    form = tmp_path / "Form.xml"
+    form.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+  <Attributes>
+    <Attribute name="Объект" id="1">
+      <Type><v8:Type>DataProcessorObject.X</v8:Type></Type>
+    </Attribute>
+  </Attributes>
+  <Commands>
+    <Command name="Выполнить" id="1">
+      <Action>Выполнить</Action>
+    </Command>
+  </Commands>
+</Form>""",
+        encoding="utf-8",
+    )
+    data = get_form_metadata(form)
+    assert "error" not in data
+    assert len(data["attributes"]) == 1
+    assert data["attributes"][0]["name"] == "Объект"
+    assert "DataProcessorObject.X" in data["attributes"][0]["type"]
+    assert len(data["commands"]) == 1
+    assert data["commands"][0]["name"] == "Выполнить"
+    assert data["commands"][0]["action"] == "Выполнить"
+
+
+def test_get_form_metadata_not_found() -> None:
+    """Returns error when file does not exist."""
+    data = get_form_metadata(Path("/nonexistent/Form.xml"))
+    assert "error" in data
+    assert data["attributes"] == []
+    assert data["commands"] == []
+
+
+def test_parse_form_xml_content() -> None:
+    """Parse Form.xml from string content."""
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+  <Attributes>
+    <Attribute name="Объект" id="1">
+      <Type><v8:Type>cfg:DataProcessorObject.X</v8:Type></Type>
+    </Attribute>
+  </Attributes>
+  <Commands>
+    <Command name="Выполнить" id="1"><Action>Выполнить</Action></Command>
+  </Commands>
+</Form>"""
+    data = parse_form_xml(xml)
+    assert "error" not in data
+    assert data["attributes"][0]["name"] == "Объект"
+    assert data["commands"][0]["name"] == "Выполнить"
