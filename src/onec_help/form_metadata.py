@@ -1,6 +1,7 @@
 """Parse Form.xml from 1C EDT/XML to extract attributes and commands."""
 
 from pathlib import Path
+from xml.etree.ElementTree import Element  # for type hints; defusedxml returns compatible elements
 
 try:
     import defusedxml.ElementTree as ET
@@ -12,20 +13,20 @@ def _strip_ns(tag: str) -> str:
     return tag.split("}")[-1] if "}" in tag else tag
 
 
-def _text(el: ET.Element | None) -> str:
+def _text(el: Element | None) -> str:
     if el is None:
         return ""
     return (el.text or "").strip()
 
 
-def _iter_tag(root: ET.Element, local_name: str):
+def _iter_tag(root: Element, local_name: str):
     """Yield elements whose local tag name matches."""
     for el in root.iter():
         if _strip_ns(el.tag) == local_name:
             yield el
 
 
-def _parse_root(root: ET.Element) -> dict:
+def _parse_root(root: Element) -> dict:
     """Extract attributes and commands from Form root element."""
     attrs: list[dict] = []
     for attr in _iter_tag(root, "Attribute"):

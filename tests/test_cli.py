@@ -92,7 +92,9 @@ def test_cmd_serve(mock_web_app, help_sample_dir: Path) -> None:
     mock_web_app.config = {}
     mock_web_app.run = lambda **kw: None
     args = make_args(directory=str(help_sample_dir), debug=False)
-    with patch.dict("os.environ", {"HELP_SERVE_ALLOWED_DIRS": str(help_sample_dir.parent)}, clear=False):
+    with patch.dict(
+        "os.environ", {"HELP_SERVE_ALLOWED_DIRS": str(help_sample_dir.parent)}, clear=False
+    ):
         assert cmd_serve(args) == 0
 
 
@@ -119,7 +121,9 @@ def test_cmd_serve_production_disables_debug(mock_web_app, help_sample_dir: Path
     mock_web_app.run = mock_run
     args = make_args(directory=str(help_sample_dir), debug=True)
     with patch.dict(
-        "os.environ", {"PRODUCTION": "1", "HELP_SERVE_ALLOWED_DIRS": str(help_sample_dir.parent)}, clear=False
+        "os.environ",
+        {"PRODUCTION": "1", "HELP_SERVE_ALLOWED_DIRS": str(help_sample_dir.parent)},
+        clear=False,
     ):
         assert cmd_serve(args) == 0
     call_kw = mock_run.call_args[1]

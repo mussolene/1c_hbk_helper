@@ -70,7 +70,9 @@ def fetch_repo_archive(
     if not owner or not repo:
         raise ValueError(f"Invalid repo URL: {repo_url}")
     if not _GITHUB_REPO_RE.match(owner) or not _GITHUB_REPO_RE.match(repo):
-        raise ValueError(f"Invalid owner/repo (only alphanumeric, underscore, hyphen, dot): {owner}/{repo}")
+        raise ValueError(
+            f"Invalid owner/repo (only alphanumeric, underscore, hyphen, dot): {owner}/{repo}"
+        )
     zip_url = f"https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip"
     req = Request(zip_url, headers={"User-Agent": "onec_help/1.0"})
     with urlopen(req, timeout=60, context=_SSL_CONTEXT) as resp:

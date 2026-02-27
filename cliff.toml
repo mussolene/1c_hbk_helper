@@ -27,7 +27,3 @@ split_commits = false
 commit_preprocessors = [{ pattern = '\((\w+\s)?#([0-9]+)\)', replace = "" }]
 filter_commits = false
 sort_commits = "newest"
-
-[git.conventional_commits]
-types = ["feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore"]
-scope = true

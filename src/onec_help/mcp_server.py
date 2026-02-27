@@ -42,6 +42,7 @@ def _truncate_if_needed(value: str, max_chars: int, name: str) -> tuple[str, str
         return (value, None)
     return ("", f"{name} exceeds {max_chars} chars (got {len(value)}). Shorten the input.")
 
+
 # Prefer fastmcp; fallback to mcp package
 try:
     from fastmcp import FastMCP

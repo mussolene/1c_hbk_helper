@@ -50,6 +50,8 @@ def _is_safe_embedding_url(url: str) -> bool:
     """Allow only http/https to prevent file:/ or custom scheme SSRF."""
     u = (url or "").strip().lower()
     return u.startswith("http://") or u.startswith("https://")
+
+
 _EMBEDDING_API_KEY = (os.environ.get("EMBEDDING_API_KEY") or "").strip()
 _EMBEDDING_DIMENSION = (os.environ.get("EMBEDDING_DIMENSION") or "").strip()
 

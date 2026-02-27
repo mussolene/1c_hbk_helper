@@ -6,6 +6,7 @@ FROM python:3.14-slim
 ARG EMBEDDING_BACKEND=openai_api
 
 # Базовый slim не содержит: 7z, cron, gosu
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     p7zip-full \
     cron \
