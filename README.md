@@ -146,14 +146,22 @@ docker compose -f docker-compose.split.yml --profile serve up -d
 
 **Пересборка при изменениях:** пересобрать только один сервис — `docker compose up -d --build mcp` (split: `-f docker-compose.split.yml up -d --build mcp`). Подробнее — [docs/architecture.md](docs/architecture.md).
 
-### Только распаковка .hbk
+### Только распаковка .hbk (выгрузка справки в папку)
 
-Чтобы **только распаковать** .hbk в свою директорию (без индексации и MCP), используйте тот же образ **mcp** с другой командой:
+Чтобы **только распаковать** .hbk в свою директорию (без индексации и MCP):
+
+```bash
+make unpack-help
+# или с параметрами:
+make unpack-help HELP_SOURCE_PATH=/opt/1cv8 UNPACK_OUTPUT=data/unpacked HELP_LANGS=ru
+```
+
+Либо напрямую:
 
 ```bash
 docker compose run --rm \
   -v /opt/1cv8:/input:ro \
-  -v $(pwd)/unpacked:/output \
+  -v $(pwd)/data/unpacked:/output \
   mcp python -m onec_help unpack-dir /input -o /output -l ru
 ```
 
@@ -274,6 +282,7 @@ ruff check src tests && ruff format --check src tests
 
 ## Документация
 
+- `make help` — все команды Makefile (unpack-help, up-split, ingest-split и др.)
 - [docs/architecture.md](docs/architecture.md) — сервисы, режимы развёртывания (single/split), ответственность.
 - [docs/run.md](docs/run.md) — запуск локально и в Docker.
 - [docs/search-and-mcp.md](docs/search-and-mcp.md) — поиск и рекомендации по MCP.
