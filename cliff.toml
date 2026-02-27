@@ -1,0 +1,33 @@
+# git-cliff: changelog из conventional commits
+# https://git-cliff.org/docs/configuration
+
+[changelog]
+body = """
+## What's Changed
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | trim }}
+{% for commit in commits %}
+* {{ commit.message | trim }}\
+{% if commit.remote and commit.remote.username %} by @{{ commit.remote.username }}{%- endif %}\
+{% if commit.remote and commit.remote.pr_number %} in [#{{ commit.remote.pr_number }}](https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}/pull/{{ commit.remote.pr_number }}){%- endif %}
+
+{% endfor %}
+{% endfor %}
+{% if version and previous.version %}
+**Full Changelog**: https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}/compare/{{ previous.version }}...{{ version }}
+{% endif %}
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+commit_preprocessors = [{ pattern = '\((\w+\s)?#([0-9]+)\)', replace = "" }]
+filter_commits = false
+sort_commits = "newest"
+
+[git.conventional_commits]
+types = ["feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore"]
+scope = true

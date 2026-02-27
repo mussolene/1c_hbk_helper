@@ -1,0 +1,72 @@
+# NOTICE — Third-Party Licenses
+
+This project uses the following open-source software. Respective licenses and copyright notices apply.
+
+## Direct Dependencies
+
+### Flask
+- **License:** BSD-3-Clause
+- **Copyright:** 2010 Pallets
+- **URL:** https://github.com/pallets/flask
+
+### Beautiful Soup 4
+- **License:** MIT
+- **Copyright:** Leonard Richardson
+- **URL:** https://www.crummy.com/software/BeautifulSoup/
+
+### qdrant-client
+- **License:** Apache-2.0
+- **Copyright:** Andrey Vasnetsov, Qdrant
+- **URL:** https://github.com/qdrant/qdrant-client
+
+### FastMCP (optional, mcp extra)
+- **License:** Apache-2.0
+- **URL:** https://github.com/jlowin/fastmcp
+
+### sentence-transformers (optional, embed extra)
+- **License:** Apache-2.0
+- **Copyright:** Nils Reimers, Tom Aarsen, Hugging Face
+- **URL:** https://github.com/huggingface/sentence-transformers
+
+### pytest, pytest-cov (dev)
+- **License:** MIT
+- **URL:** https://github.com/pytest-dev/pytest
+
+### Ruff (dev)
+- **License:** MIT
+- **URL:** https://github.com/astral-sh/ruff
+
+## GitHub Actions (CI/CD)
+
+- **actions/checkout** (GitHub): MIT
+- **actions/setup-python** (GitHub): MIT
+- **softprops/action-gh-release**: MIT — https://github.com/softprops/action-gh-release
+- **orhun/git-cliff-action**: Apache-2.0, MIT — https://github.com/orhun/git-cliff-action
+- **wagoid/commitlint-github-action**: MIT — https://github.com/wagoid/commitlint-github-action
+- **docker/setup-buildx-action**, **docker/login-action**, **docker/metadata-action**, **docker/build-push-action** (Docker): Apache-2.0 — https://github.com/docker
+- **codecov/codecov-action**: Apache-2.0 — https://github.com/codecov/codecov-action
+
+## External Data Sources (загружаемые по запросу)
+
+### Стандарты (load-standards)
+- **1C-Company/v8-code-style** — стандарты разработки 1С (markdown из папки docs)
+  - **License:** Eclipse Public License v2.0 (EPL-2.0)
+  - **URL:** https://github.com/1C-Company/v8-code-style
+  - По умолчанию: `STANDARDS_REPO` (авто-скачивание с GitHub)
+
+### Шаблоны кода (parse-fastcode)
+- **FastCode.im** — шаблоны и примеры кода 1С
+  - **URL:** https://fastcode.im/Templates
+  - Контент загружается при `parse-fastcode`; условия использования — см. сайт
+
+### Справка и кодовая база
+- **Справка 1С** (.hbk): контент из установки платформы 1С пользователя (`HELP_SOURCE_BASE`). Проприетарный контент 1С.
+- **Кодовая база**: `load-snippets --from-project` и BSL LS работают с локальным проектом пользователя; внешние репозитории не загружаются.
+
+## System / Runtime
+
+- **p7zip** (p7zip-full): LGPL-2.0-or-later, Igor Pavlov
+- **Qdrant**: Apache-2.0 (vector DB)
+- **Python**: PSF License
+
+Full dependency tree and license details: `pip-licenses` or `uv pip compile --all-extras`.

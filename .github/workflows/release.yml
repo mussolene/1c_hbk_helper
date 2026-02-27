@@ -22,6 +22,17 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        id: git-cliff
+        with:
+          config: cliff.toml
+          args: -vv --latest --strip header
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install and build sdist
         run: |
           pip install build
@@ -33,7 +44,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: dist/*
-          generate_release_notes: true
+          body: ${{ steps.git-cliff.outputs.content }}
+          generate_release_notes: false
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
