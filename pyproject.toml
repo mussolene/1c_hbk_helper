@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "onec-help"
 version = "0.2.8"
 description = "1C Help: unpack .hbk, convert to Markdown, index in Qdrant, MCP server"
+license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

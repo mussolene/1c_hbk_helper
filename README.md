@@ -11,7 +11,7 @@
 
 Контрибьюторам: см. [CONTRIBUTING.md](CONTRIBUTING.md) (формат коммитов — Conventional Commits).
 
-Используемые библиотеки и лицензии: см. [NOTICE](NOTICE).
+Лицензия проекта: MIT, см. [LICENSE](LICENSE). Используемые библиотеки и лицензии: см. [NOTICE](NOTICE).
 
 ## Безопасность
 
