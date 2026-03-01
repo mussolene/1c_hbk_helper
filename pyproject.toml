@@ -37,25 +37,12 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=90"
-# mcp_server.py omitted from coverage (optional MCP runtime)
+addopts = "-v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=70"
 filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.coverage.run]
 omit = [
-    "src/onec_help/__main__.py",
-    "src/onec_help/mcp_server.py",
-    "src/onec_help/form_metadata.py",  # used by mcp_server
-    "src/onec_help/html2md.py",  # many branches; tested separately
-    "src/onec_help/indexer.py",  # complex Qdrant logic; unit-tested with mocks
-    "src/onec_help/parse_fastcode.py",  # network fetch; CLI only
-    "src/onec_help/parse_helpf.py",  # network fetch; CLI only
-    "src/onec_help/unpack.py",  # 7z/subprocess; integration-heavy
-    "src/onec_help/embedding.py",  # optional; local/API backends
-    "src/onec_help/standards_loader.py",  # fetch_repo network; complex branches
-    "src/onec_help/watchdog.py",  # file watcher; integration-heavy
-    "src/onec_help/cli.py",  # CLI dispatch; many branches; integration via subcommands
-    "src/onec_help/ingest.py",  # ingest pipeline; integration-heavy
+    "src/onec_help/__main__.py",  # entry point, delegates to cli
     "*/tests/*",
 ]
 source = ["src/onec_help"]
@@ -87,3 +74,10 @@ known-first-party = ["onec_help"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.15.2",
+]

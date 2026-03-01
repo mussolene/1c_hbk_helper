@@ -387,11 +387,27 @@ def run_mcp(
                         else (" [инструкция]" if d == "community_help" else "")
                     )
                     body = instruction if instruction else desc
-                    block = (
+                    link_line = ""
+                    detail_url = payload.get("detail_url")
+                    source_site = payload.get("source_site", "")
+                    source = payload.get("source", "")
+                    if detail_url:
+                        attr = (
+                            "FastCode"
+                            if source_site == "fastcode.im"
+                            else (
+                                "HelpF" + (f" ({source})" if source else "")
+                                if source_site == "helpf.pro"
+                                else "Источник"
+                            )
+                        )
+                        link_line = f"\n\n{attr}: {detail_url}"
+                    block_base = (
                         f"### {title}{src}\n\n{body}\n\n```bsl\n{code}\n```"
                         if code
                         else f"### {title}{src}\n\n{body}"
                     )
+                    block = block_base + link_line
                     memory_parts.append(block)
             except Exception as e:
                 logging.getLogger(__name__).debug("get_1c_code_answer memory block failed: %s", e)

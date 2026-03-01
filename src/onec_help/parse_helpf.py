@@ -274,6 +274,16 @@ def _extract_freelance_links(html: str) -> list[tuple[str, str]]:
     return result
 
 
+def _is_title_plus_noise(desc: str, title: str) -> bool:
+    """Проверяет, что описание = заголовок + мусор (теги, категория без пробела)."""
+    if not desc or not title or desc == title:
+        return desc == title
+    if not desc.startswith(title) or len(desc) - len(title) > 60:
+        return False
+    rest = desc[len(title) :].strip()
+    return bool(rest and len(rest) < 50)  # короткий хвост — вероятно теги
+
+
 def parse_faq_detail(html: str, title: str) -> tuple[str, str]:
     """Extract description and code from FAQ detail page. Returns (desc, code)."""
     from bs4 import BeautifulSoup
@@ -297,6 +307,8 @@ def parse_faq_detail(html: str, title: str) -> tuple[str, str]:
 
     # Full text for references (instruction); 8000 chars covers typical FAQ
     desc = " ".join(desc_parts)[:8000].strip() or title
+    if _is_title_plus_noise(desc, title):
+        desc = title  # оставляем только заголовок, детали — по ссылке
 
     blocks: list[str] = []
     for pre in soup.find_all("pre"):
@@ -319,6 +331,8 @@ def parse_file_detail(html: str, title: str) -> tuple[str, str]:
         if t and len(t) > 20:
             desc_parts.append(t)
     desc = " ".join(desc_parts)[:8000].strip()
+    if _is_title_plus_noise(desc, title):
+        desc = title
     blocks: list[str] = []
     for pre in soup.find_all("pre"):
         code = pre.get_text().strip()
@@ -491,9 +505,13 @@ def run_parse(
     for it in all_items:
         if it.get("source_url"):
             it["detail_url"] = it.pop("source_url")
-        it.pop("source", None)
+        it["source_site"] = "helpf.pro"
+        # source (faq/file/help/freelance) оставляем для атрибуции
         if not it.get("code_snippet") and not it.get("description"):
             it["description"] = (it.get("title", "") or "")[:500]
+        # instruction — полный текст локально; без detail fetch — хотя бы description
+        if not it.get("instruction") and (it.get("description") or "").strip():
+            it["instruction"] = it["description"]
 
     if skip_minimal:
         before = len(all_items)
@@ -519,11 +537,7 @@ def run_parse(
         )
         if it["type"] == "snippet":
             snippets_n += 1
-        # References: use instruction (full text); drop if redundant with description
-        if it["type"] == "reference" and it.get("instruction"):
-            pass  # keep instruction
-        elif it["type"] == "snippet" and it.get("instruction"):
-            it.pop("instruction", None)  # snippets use code_snippet
+        # instruction храним и для snippets, и для references — полный текст локально
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(all_items, ensure_ascii=False, indent=2), encoding="utf-8")

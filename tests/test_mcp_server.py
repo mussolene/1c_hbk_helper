@@ -1,5 +1,6 @@
 """Tests for MCP server (tools logic with mocked FastMCP)."""
 
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -55,3 +56,44 @@ plain block
     assert len(blocks) == 2
     assert "Код = 1;" in blocks[0]
     assert "plain block" in blocks[1]
+
+
+def test_check_rate_limit_disabled() -> None:
+    """Rate limit disabled when MCP_RATE_LIMIT_PER_MIN=0."""
+    with patch.dict(os.environ, {"MCP_RATE_LIMIT_PER_MIN": "0"}, clear=False):
+        assert mcp_server._check_rate_limit() is None
+
+
+def test_truncate_if_needed_ok() -> None:
+    """_truncate_if_needed returns value when within limit."""
+    val, err = mcp_server._truncate_if_needed("short", 100, "query")
+    assert val == "short"
+    assert err is None
+
+
+def test_truncate_if_needed_exceeds() -> None:
+    """_truncate_if_needed returns error when over limit."""
+    val, err = mcp_server._truncate_if_needed("x" * 200, 100, "query")
+    assert val == ""
+    assert "exceeds 100 chars" in (err or "")
+
+
+def test_write_snippet_to_file(help_sample_dir: Path) -> None:
+    """_write_snippet_to_file creates .md with frontmatter."""
+    out_dir = help_sample_dir / "snippets_out"
+    path = mcp_server._write_snippet_to_file(
+        out_dir, "Процедура Тест()\nКонецПроцедуры", "Описание", "Мой сниппет"
+    )
+    assert path is not None
+    assert path.endswith(".md")
+    full = out_dir / path
+    assert full.exists()
+    text = full.read_text(encoding="utf-8")
+    assert "Мой сниппет" in text
+    assert "Процедура Тест" in text
+
+
+def test_path_parts() -> None:
+    """_path_parts extracts parts from URI or path."""
+    assert mcp_server._path_parts("file:///projects/doc.html") == ("projects", "doc.html")
+    assert mcp_server._path_parts("dir/sub/file.bsl") == ("dir", "sub", "file.bsl")

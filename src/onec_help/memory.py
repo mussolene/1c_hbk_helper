@@ -316,6 +316,12 @@ class MemoryStore:
             }
             if instruction:
                 payload["instruction"] = instruction
+            if item.get("detail_url"):
+                payload["detail_url"] = item["detail_url"]
+            if item.get("source_site"):
+                payload["source_site"] = item["source_site"]
+            if item.get("source"):
+                payload["source"] = item["source"]
             point_id = f"{prefix}_{hashlib.sha256(title.encode()).hexdigest()[:12]}"
             numeric_id = int(hashlib.sha256(point_id.encode()).hexdigest()[:14], 16) % (2**63)
             valid.append((summary, payload, point_id, numeric_id))

@@ -6,12 +6,21 @@ from unittest.mock import patch
 
 import pytest
 
+
 # Pre-import submodules so patch("onec_help.<sub>.attr") works (CI Python 3.10 editable install)
 def _ensure_onec_help_submodules():
     """Bind submodules to onec_help package (Python 3.10 editable install quirk)."""
     import onec_help
 
-    for _name in ("embedding", "memory", "parse_fastcode", "standards_loader", "unpack", "watchdog", "web"):
+    for _name in (
+        "embedding",
+        "memory",
+        "parse_fastcode",
+        "standards_loader",
+        "unpack",
+        "watchdog",
+        "web",
+    ):
         _mod = __import__(f"onec_help.{_name}", fromlist=[_name])
         setattr(onec_help, _name, _mod)
 

@@ -28,6 +28,7 @@ build/
 htmlcov/
 .pytest_cache/
 .tox/
+**/snippets_out/
 
 # Local env / secrets (do not commit)
 .env

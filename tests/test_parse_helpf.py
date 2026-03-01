@@ -1,6 +1,19 @@
 """Tests for parse_helpf."""
 
-from onec_help.parse_helpf import _extract_faq_links, _extract_file_links
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import onec_help.parse_helpf as parse_helpf_module
+from onec_help.parse_helpf import (
+    _extract_faq_links,
+    _extract_file_links,
+    _extract_freelance_links,
+    _extract_help_links,
+    _is_title_plus_noise,
+    parse_faq_detail,
+    parse_file_detail,
+    run_parse,
+)
 
 
 def test_extract_faq_links_absolute_path() -> None:
@@ -36,3 +49,163 @@ def test_extract_faq_links_regex_fallback() -> None:
     assert len(items) == 1
     assert items[0][1] == "https://helpf.pro/faq/view/9999.html"
     assert "9999" in items[0][0]
+
+
+def test_extract_help_links() -> None:
+    """Extract Forum (help) links."""
+    html = '<a href="/help/view/123.html">Вопрос про запросы</a>'
+    items = _extract_help_links(html)
+    assert len(items) == 1
+    assert items[0][0] == "Вопрос про запросы"
+    assert items[0][1] == "https://helpf.pro/help/view/123.html"
+
+
+def test_extract_freelance_links() -> None:
+    """Extract Freelance links."""
+    html = '<a href="freelance/view/5.html">Проект интеграции</a>'
+    items = _extract_freelance_links(html)
+    assert len(items) == 1
+    assert "5" in items[0][1]
+
+
+def test_is_title_plus_noise_true() -> None:
+    """Title + short tag suffix is noise."""
+    assert _is_title_plus_noise("ИР Найти в спискеTurboConf ИР", "ИР Найти в списке") is True
+
+
+def test_is_title_plus_noise_false_long_rest() -> None:
+    """Long rest is real content."""
+    assert (
+        _is_title_plus_noise(
+            "Заголовок При использовании Git эта команда адаптера открывает инструмент.",
+            "Заголовок",
+        )
+        is False
+    )
+
+
+def test_parse_faq_detail() -> None:
+    """parse_faq_detail extracts description and code."""
+    html = """
+    <html><body>
+    <h1>Программная проверка счета на групповой</h1>
+    <p>Как известно делать проводки по счетам-группам нельзя.</p>
+    <pre>Процедура ПриЗаписи(Отказ)
+        Запрос = Новый Запрос;
+    КонецПроцедуры</pre>
+    </body></html>
+    """
+    desc, code = parse_faq_detail(html, "Проверка")
+    assert "проверка счета" in desc.lower()
+    assert "проводки" in desc
+    assert "Процедура ПриЗаписи" in code
+
+
+def test_parse_faq_detail_skips_razmestil() -> None:
+    """parse_faq_detail skips 'Разместил:' paragraphs."""
+    html = """
+    <html><body><h1>Тема</h1>
+    <p>Разместил: User1 Дата: 01.01.2020</p>
+    <p>Реальный контент с полезной информацией для разработчика.</p>
+    </body></html>
+    """
+    desc, code = parse_faq_detail(html, "Тема")
+    assert "Разместил" not in desc
+    assert "Реальный контент" in desc
+
+
+def test_parse_file_detail() -> None:
+    """parse_file_detail extracts from File page."""
+    html = """
+    <html><body>
+    <p>Конфигурация 1с для учета оргтехники и ТМЦ в офисе.</p>
+    </body></html>
+    """
+    desc, code = parse_file_detail(html, "Учет оргтехники")
+    assert "Учет оргтехники" in desc
+    assert "оргтехники" in desc
+    assert code == ""
+
+
+def test_run_parse_faq_mocked(tmp_path: Path) -> None:
+    """run_parse with mocked fetch produces JSON output."""
+    import json
+
+    listing_html = """
+    <html><body>
+    <a href="/faq/view/1922.html">Программная проверка счета</a>
+    </body></html>
+    """
+    detail_html = """
+    <html><body>
+    <h1>Программная проверка счета на групповой</h1>
+    <p>Как известно делать проводки по счетам-группам нельзя.</p>
+    </body></html>
+    """
+    out = tmp_path / "faq_snippets.json"
+
+    def mock_faq_listing(_p: int, _o) -> str:
+        return listing_html
+
+    orig = parse_helpf_module._SOURCE_CONFIG["faq"]
+    patched_faq = (mock_faq_listing, orig[1], orig[2], orig[3])
+    patched_config = {**parse_helpf_module._SOURCE_CONFIG, "faq": patched_faq}
+
+    with (
+        patch.object(parse_helpf_module, "_get_opener", return_value=MagicMock()),
+        patch.object(parse_helpf_module, "_SOURCE_CONFIG", patched_config),
+        patch.object(
+            parse_helpf_module,
+            "_fetch_url",
+            side_effect=lambda _url, _o: detail_html,
+        ),
+        patch("time.sleep"),
+    ):
+        result = run_parse(out, source="faq", pages=[1], fetch_detail=True, max_items=2)
+
+    assert result == 0
+    assert out.exists()
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert len(data) >= 1
+    assert any("проверка" in (i.get("title") or "").lower() for i in data)
+
+
+def test_run_parse_file_mocked(tmp_path: Path) -> None:
+    """run_parse with source=file and mocked fetch."""
+    import json
+
+    listing_html = """
+    <html><body>
+    <a href="/file/view/test-file.html">Тестовый файл</a>
+    </body></html>
+    """
+    detail_html = """
+    <html><body>
+    <p>Описание файла для тестирования парсера HelpF.</p>
+    </body></html>
+    """
+    out = tmp_path / "file_snippets.json"
+
+    def mock_file_listing(_p: int, _o) -> str:
+        return listing_html
+
+    orig = parse_helpf_module._SOURCE_CONFIG["file"]
+    patched_file = (mock_file_listing, orig[1], orig[2], orig[3])
+    patched_config = {**parse_helpf_module._SOURCE_CONFIG, "file": patched_file}
+
+    with (
+        patch.object(parse_helpf_module, "_get_opener", return_value=MagicMock()),
+        patch.object(parse_helpf_module, "_SOURCE_CONFIG", patched_config),
+        patch.object(
+            parse_helpf_module,
+            "_fetch_url",
+            side_effect=lambda _url, _o: detail_html,
+        ),
+        patch("time.sleep"),
+    ):
+        result = run_parse(out, source="file", pages=[1], fetch_detail=True, max_items=2)
+
+    assert result == 0
+    assert out.exists()
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert len(data) >= 1

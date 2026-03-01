@@ -19,6 +19,53 @@ from ._utils import progress_done, progress_line
 _DETAIL_LINK_RE = re.compile(r"/Templates/(\d+)/")
 _PAGE_RE = re.compile(r"[?&]Page=(\d+)")
 
+# Теги FastCode, которые могут склеиваться с заголовком в span.break-word
+_FASTCODE_KNOWN_TAGS = frozenset(
+    "TurboConf ИР БСП 1С Скрипты Starter Стартер Executor OneScript Powershell Инструменты Данные".split()
+)
+
+
+def _strip_tag_suffix(desc: str, title: str) -> str:
+    """Убирает из описания хвост из тегов (TurboConf ИР и т.п.), если описание = заголовок + теги."""
+    if not desc or not title:
+        return desc
+    desc = desc.strip()
+    # Описание = заголовок + теги без пробела (ИР Найти в спискеTurboConf ИР)
+    if desc == title:
+        return ""
+    if not desc.startswith(title):
+        return desc
+    rest = desc[len(title) :].strip()
+    if not rest or len(rest) > 80:
+        return desc
+    # Проверяем: rest выглядит как теги (слова из известного набора или короткие токены)
+    words = rest.replace(",", " ").split()
+    if not words:
+        return ""
+    for w in words:
+        w_clean = w.strip("#")
+        if len(w_clean) > 25:
+            return desc  # длинное слово — не тег, оставляем как есть
+        if w_clean not in _FASTCODE_KNOWN_TAGS and not re.match(r"^[А-Яа-яA-Za-z0-9#]+$", w_clean):
+            return desc
+    return ""  # rest — только теги, реального описания нет
+
+
+_FASTCODE_TAG_PATTERN = re.compile(
+    r"\s+(?:TurboConf|ИР|БСП|1С|Скрипты|Starter|Стартер|Executor|OneScript|Powershell|Инструменты|Данные)(?:\s+[А-Яа-яA-Za-z0-9#]+)*\s*$",
+    re.I,
+)
+
+
+def _strip_trailing_tags(desc: str) -> str:
+    """Убирает теги в конце описания (Real content. TurboConf ИР → Real content.)."""
+    if not desc or len(desc) < 30:
+        return desc
+    tail = _FASTCODE_TAG_PATTERN.search(desc)
+    if tail:
+        return desc[: tail.start()].rstrip()
+    return desc
+
 
 def _detect_total_pages(opener: urllib.request.OpenerDirector) -> list[int]:
     """Detect total pages by following pagination. FastCode shows ~6 links per page (sliding window)."""
@@ -116,18 +163,51 @@ def _extract_detail_links(soup: Any) -> dict[str, str]:
     return mapping
 
 
-def parse_detail_page(html: str) -> tuple[str, str]:
-    """Extract full description and code from detail page. Returns (desc, code)."""
+def parse_detail_page(html: str, title: str = "") -> tuple[str, str]:
+    """Extract full description and code from detail page. Returns (desc, code).
+    Собирает максимум текста для локального хранения (описание + документация)."""
     from bs4 import BeautifulSoup
 
     soup = BeautifulSoup(html, "html.parser")
-    desc = ""
+    desc_parts: list[str] = []
+
+    # h1 — заголовок
+    h1 = soup.find("h1")
+    if h1:
+        h1_text = h1.get_text(strip=True)
+        if h1_text:
+            desc_parts.append(h1_text)
+
+    # span.break-word — краткое описание
     for span in soup.find_all("span", class_=lambda c: c and "break-word" in c):
         t = span.get_text(strip=True)
-        if len(t) > len(desc) and len(t) < 1000:
-            desc = t
-    if not desc and soup.find("h1"):
-        desc = soup.find("h1").get_text(strip=True)
+        if t and len(t) > 30 and t not in desc_parts:
+            desc_parts.append(t)
+            break
+
+    # параграфы до первого pre — основная документация (без div — слишком объёмно)
+    for tag in soup.find_all(["p", "pre"]):
+        if tag.name == "pre":
+            break
+        t = tag.get_text(strip=True)
+        if t and len(t) > 40 and t not in desc_parts:
+            skip = ("Разместил:", "Подробнее", "Копировать", "Копировано")
+            if not any(s in t for s in skip):
+                desc_parts.append(t)
+
+    desc = " ".join(desc_parts)[:8000].strip()  # как в HelpF
+    if not desc and h1:
+        desc = h1.get_text(strip=True)
+
+    # Убираем теги из описания (ИР, TurboConf и т.п.)
+    if desc and title:
+        cleaned = _strip_tag_suffix(desc, title)
+        if cleaned == "" and desc != title:
+            desc = title
+        elif cleaned:
+            desc = cleaned
+    if desc:
+        desc = _strip_trailing_tags(desc)
 
     blocks: list[str] = []
     for pre in soup.find_all("pre"):
@@ -177,6 +257,8 @@ def parse_page(html: str) -> list[dict[str, Any]]:
             desc = _extract_desc_from_code(code)
         if not desc:
             desc = title
+        desc = _strip_tag_suffix(desc, title) or desc or title
+        desc = _strip_trailing_tags(desc) or desc
 
         item: dict[str, Any] = {
             "title": title,
@@ -249,23 +331,29 @@ def run_parse(
                 continue
             try:
                 detail_html = _fetch_url(url, opener)
-                desc, code = parse_detail_page(detail_html)
+                desc, code = parse_detail_page(detail_html, it.get("title", ""))
                 if code:
                     all_items[idx]["code_snippet"] = code
                 if desc:
                     all_items[idx]["description"] = desc[:500]
-                    if not code:
-                        all_items[idx]["instruction"] = desc  # full text for references
+                    all_items[idx]["instruction"] = (
+                        desc  # полный текст локально для сниппета и reference
+                    )
+                all_items[idx]["detail_url"] = url  # ссылка на документацию
             except Exception as e:
                 logging.getLogger(__name__).debug("fetch detail %s failed: %s", url[:60], e)
                 detail_err += 1
+                all_items[idx]["detail_url"] = url  # сохраняем ссылку даже при ошибке
             progress_line(
                 f"parse-fastcode │ Detail {di + 1}/{total_detail} │ {di + 1 - detail_err} ok │ {detail_err} err"
             )
             time.sleep(delay)
 
     for it in all_items:
-        it.pop("detail_url", None)
+        it["source_site"] = "fastcode.im"
+        # instruction — полный текст для локального доступа; без detail — хотя бы из листинга
+        if not it.get("instruction") and (it.get("description") or "").strip():
+            it["instruction"] = it["description"]
 
     from .snippet_classifier import classify_snippet_vs_reference
 
