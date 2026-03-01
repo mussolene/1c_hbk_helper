@@ -481,8 +481,15 @@ def _get_embedding_api_batch(texts: list[str]) -> list[list[float]]:
             _release_api_slot()
     global _resolved_api_model_id
     _resolved_api_model_id = None
+    # Retry with smaller batches before falling back to N single requests
+    if len(texts) > 1:
+        _log_fallback(
+            f"embedding API batch error ({len(texts)} texts), retrying with smaller batches: {type(last_err).__name__}"
+        )
+        mid = len(texts) // 2
+        return _get_embedding_api_batch(texts[:mid]) + _get_embedding_api_batch(texts[mid:])
     _log_fallback(
-        f"embedding API batch error, falling back to single requests: {type(last_err).__name__}"
+        f"embedding API batch error, falling back to single request: {type(last_err).__name__}"
     )
     return [_get_embedding_api_single(t) for t in texts]
 
