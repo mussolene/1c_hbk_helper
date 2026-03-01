@@ -95,7 +95,8 @@ def test_run_watchdog_triggers_ingest_on_hbk_change(
     tmp_path: Path,
 ) -> None:
     """When .hbk files exist and differ from cache, _run_ingest is called."""
-    (tmp_path / "1cv8_ru.hbk").write_bytes(b"x")
+    (tmp_path / "8.3.27").mkdir()
+    (tmp_path / "8.3.27" / "1cv8_ru.hbk").write_bytes(b"x")
     ingest_called = []
 
     def capture_ingest() -> None:
