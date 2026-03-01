@@ -6,6 +6,7 @@ Listing pages show truncated code. Items with detail links are fetched for full 
 from __future__ import annotations
 
 import json
+import logging
 import re
 import ssl
 import time
@@ -82,22 +83,36 @@ def _extract_desc_from_code(code: str) -> str:
     return " ".join(parts)[:500].strip()
 
 
+def _is_safe_fastcode_detail_url(href: str) -> str | None:
+    """Return safe detail URL or None. Reject protocol-relative (//evil.com), javascript:, data:, etc."""
+    h = (href or "").strip()
+    if not h or "?" in h.split("#")[0]:
+        return None
+    base = "https://fastcode.im"
+    # Relative path: /Templates/123/slug — safe
+    if h.startswith("/") and not h.startswith("//"):
+        return base + h.split("?")[0]
+    # Absolute: only allow fastcode.im
+    if h.lower().startswith("https://fastcode.im/"):
+        return h.split("?")[0]
+    return None
+
+
 def _extract_detail_links(soup: Any) -> dict[str, str]:
     """Build title -> detail_url mapping from links with /Templates/ID/slug."""
     mapping: dict[str, str] = {}
     for a in soup.find_all("a", href=True):
         href = a.get("href", "")
-        if _DETAIL_LINK_RE.search(href) and "?" not in href.split("#")[0]:
-            h3 = a.find_previous("h3")
-            if h3:
-                title = h3.get_text(strip=True)
-                if title and title not in mapping:
-                    full = (
-                        "https://fastcode.im" + href.split("?")[0]
-                        if href.startswith("/")
-                        else href.split("?")[0]
-                    )
-                    mapping[title] = full
+        if not _DETAIL_LINK_RE.search(href):
+            continue
+        full = _is_safe_fastcode_detail_url(href)
+        if not full:
+            continue
+        h3 = a.find_previous("h3")
+        if h3:
+            title = h3.get_text(strip=True)
+            if title and title not in mapping:
+                mapping[title] = full
     return mapping
 
 
@@ -187,7 +202,8 @@ def run_parse(
         progress_line("parse-fastcode │ Detecting total pages...")
         try:
             pages = _detect_total_pages(opener)
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).debug("detect total pages failed: %s", e)
             pages = [1]
         progress_done(f"parse-fastcode │ detected {len(pages)} pages")
         time.sleep(delay)
@@ -202,7 +218,8 @@ def run_parse(
     for i, page in enumerate(pages):
         try:
             html = _fetch_page(page, opener)
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).debug("fetch page %s failed: %s", page, e)
             list_err += 1
             progress_done(f"parse-fastcode │ Page {page} fetch error")
             continue
@@ -239,7 +256,8 @@ def run_parse(
                     all_items[idx]["description"] = desc[:500]
                     if not code:
                         all_items[idx]["instruction"] = desc  # full text for references
-            except Exception:
+            except Exception as e:
+                logging.getLogger(__name__).debug("fetch detail %s failed: %s", url[:60], e)
                 detail_err += 1
             progress_line(
                 f"parse-fastcode │ Detail {di + 1}/{total_detail} │ {di + 1 - detail_err} ok │ {detail_err} err"

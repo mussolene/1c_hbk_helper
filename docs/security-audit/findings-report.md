@@ -1,8 +1,19 @@
 # Отчёт о находках аудита безопасности 1C Help MCP
 
 **Дата:** 2026-02-27  
+**Последнее обновление:** 2026-03-01  
 **Инструменты:** pip-audit, bandit, ruff  
-**Ограничения:** trivy и hadolint не установлены — Docker-образ не сканировался.
+**CI:** trivy, hadolint — [.github/workflows/security.yml](../../.github/workflows/security.yml)
+
+---
+
+## Последний прогон сканов (2026-03-01)
+
+| Инструмент | Результат |
+|------------|-----------|
+| pip-audit | 1 уязвимость: pip 25.3 (CVE-2026-1703) → remediated в CI (upgrade pip>=26) |
+| bandit | 24 Medium, 33 Low — большая часть в backlog (AUDIT-001–017 исправлены или приняты) |
+| ruff | 0 находок |
 
 ---
 
@@ -160,8 +171,12 @@ Ruff check (с учётом pyproject.toml ignores): 0 находок.
 
 ---
 
-## Рекомендации по запуску дополнительных инструментов
+## Дополнительные находки bandit (информационно)
 
-- **trivy:** `trivy image python:3.14-slim` — сканирование базового образа; `trivy fs .` — filesystem.
-- **hadolint:** `hadolint Dockerfile` — линтинг Dockerfile.
-- **semgrep:** правила `p/python` для глубокого SAST.
+- **B108** (cli.py): `unpack-diag` default `--output-dir /tmp/unpack_diag` — диагностическая утилита, низкий риск.
+- **B323** (parse_helpf.py): `ssl._create_unverified_context()` — fallback при отсутствии CA bundle (Mac); помечено `# noqa: S323`.
+
+## Запуск сканов
+
+- **Локально:** см. [README.md](README.md) и [audit-runbook.md](audit-runbook.md).
+- **CI:** hadolint, trivy fs — автоматически при push/PR.

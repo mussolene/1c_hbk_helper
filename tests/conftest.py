@@ -7,10 +7,23 @@ from unittest.mock import patch
 import pytest
 
 # Pre-import submodules so patch("onec_help.<sub>.attr") works (CI Python 3.10 editable install)
-import onec_help.embedding  # noqa: F401
-import onec_help.standards_loader  # noqa: F401
-import onec_help.unpack  # noqa: F401
-import onec_help.watchdog  # noqa: F401
+def _ensure_onec_help_submodules():
+    """Bind submodules to onec_help package (Python 3.10 editable install quirk)."""
+    import onec_help
+
+    for _name in ("embedding", "memory", "parse_fastcode", "standards_loader", "unpack", "watchdog", "web"):
+        _mod = __import__(f"onec_help.{_name}", fromlist=[_name])
+        setattr(onec_help, _name, _mod)
+
+
+_ensure_onec_help_submodules()
+
+
+@pytest.fixture(autouse=True)
+def _ensure_onec_help_refs():
+    """Re-bind submodules before each test (Python 3.10 patch target lookup)."""
+    _ensure_onec_help_submodules()
+    yield
 
 
 @pytest.fixture
@@ -42,6 +55,7 @@ def embedding_backend_none_for_network_tests(request):
             import onec_help.embedding as emb
 
             importlib.reload(emb)
+            _ensure_onec_help_submodules()
             yield
     else:
         yield

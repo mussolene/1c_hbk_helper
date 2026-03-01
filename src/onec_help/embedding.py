@@ -5,6 +5,7 @@ Retry, timeout and batch support for indexing. Lazy import of sentence-transform
 
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
@@ -272,8 +273,8 @@ def get_embedding_dimension() -> int:
             vec = _get_embedding_api_single(".")
             _cached_api_dimension = len(vec)
             return _cached_api_dimension
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).debug("embedding dimension detect failed: %s", e)
         finally:
             _dimension_detecting = False
     return VECTOR_SIZE
@@ -300,8 +301,8 @@ def _resolve_openai_api_model() -> str:
         for item in data.get("models") or []:
             if isinstance(item, dict) and item.get("key"):
                 model_ids.append(str(item["key"]))
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).debug("models list fetch failed: %s", e)
     if _EMBEDDING_MODEL in model_ids:
         _resolved_api_model_id = _EMBEDDING_MODEL
         return _resolved_api_model_id
@@ -343,8 +344,8 @@ def _resolve_openai_api_model() -> str:
                 urllib.request.urlopen(post, timeout=120)
                 _resolved_api_model_id = key
                 return _resolved_api_model_id
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).debug("model load API failed: %s", e)
     _resolved_api_model_id = _EMBEDDING_MODEL
     return _resolved_api_model_id
 

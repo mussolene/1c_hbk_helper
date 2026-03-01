@@ -1,5 +1,6 @@
 """Build and query Qdrant index from Markdown help."""
 
+import logging
 import os
 import re
 import sys
@@ -135,8 +136,8 @@ def build_index(
                 struct = parse_content_file(root / "__categories__")
                 tree = build_tree(root, struct)
                 path_to_section = _build_path_to_section(tree)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).debug("build path_to_section failed: %s", e)
 
     paths_to_index: list[Path] = []
     for path in docs_dir.rglob("*.md"):
@@ -217,10 +218,10 @@ def build_index(
             except TypeError:
                 try:
                     progress_callback(total, "embedding")
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                except Exception as e:
+                    logging.getLogger(__name__).debug("progress_callback failed: %s", e)
+            except Exception as e:
+                logging.getLogger(__name__).debug("progress_callback failed: %s", e)
         texts_for_embedding = [it[1][:max_input_chars] for it in items]
         vectors = embedding.get_embedding_batch(
             texts_for_embedding,
@@ -292,10 +293,10 @@ def build_index(
             except TypeError:
                 try:
                     progress_callback(total, "writing")
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                except Exception as e:
+                    logging.getLogger(__name__).debug("progress_callback failed: %s", e)
+            except Exception as e:
+                logging.getLogger(__name__).debug("progress_callback failed: %s", e)
     return total
 
 
@@ -350,8 +351,8 @@ def get_index_status(
             out["versions"] = sorted(versions)
         if languages:
             out["languages"] = sorted(languages)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).debug("get_index_status payload scan failed: %s", e)
     return out
 
 
@@ -366,7 +367,8 @@ def get_all_collections_status(
     port = qdrant_port or int(os.environ.get("QDRANT_PORT", "6333"))
     try:
         client = QdrantClient(host=host, port=port, check_compatibility=False)
-    except Exception:
+    except Exception as e:
+        logging.getLogger(__name__).debug("get_all_collections QdrantClient failed: %s", e)
         return []
     result: list[dict[str, Any]] = []
     try:
@@ -404,8 +406,8 @@ def get_all_collections_status(
                         "segments_count": None,
                     }
                 )
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).debug("get_all_collections iterate failed: %s", e)
     return result
 
 

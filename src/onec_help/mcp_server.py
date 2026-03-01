@@ -1,5 +1,6 @@
 """MCP server for 1C Help: search_1c_help, get_1c_help_topic, get_1c_function_info."""
 
+import logging
 import os
 import re
 import threading
@@ -260,8 +261,8 @@ def run_mcp(
                 from .memory import get_memory_store
 
                 memory_results = get_memory_store().search_long(query, limit=min(5, limit))
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).debug("search_long failed: %s", e)
         if not results and not memory_results:
             return "No results found. Ensure build-index was run and Qdrant is available."
         lines = []
@@ -392,8 +393,8 @@ def run_mcp(
                         else f"### {title}{src}\n\n{body}"
                     )
                     memory_parts.append(block)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).debug("get_1c_code_answer memory block failed: %s", e)
         if not results and not memory_parts:
             return (
                 "No results. Ensure index exists (get_1c_help_index_status). "
@@ -452,8 +453,8 @@ def run_mcp(
                     "get_topic",
                     {"topic_path": topic_path, "title": title},
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).debug("write_event get_topic failed: %s", e)
             return content
         return "Topic not found."
 
@@ -693,8 +694,8 @@ def run_mcp(
             ingest = read_ingest_status()
             if not ingest:
                 ingest = read_last_ingest_run()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).debug("read_ingest_status failed: %s", e)
         if ingest:
             status = ingest.get("status", "")
             if status == "in_progress":

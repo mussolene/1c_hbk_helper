@@ -5,6 +5,7 @@ Triple-write on each event; long uses embedding or pending queue when unavailabl
 
 import hashlib
 import json
+import logging
 import os
 import threading
 import time
@@ -174,8 +175,8 @@ class MemoryStore:
                 collection_name=_MEMORY_COLLECTION,
                 points=[PointStruct(id=numeric_id, vector=vector, payload=payload)],
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).debug("memory _upsert_long failed: %s", e)
 
     def _append_pending(self, payload: dict[str, Any], ts: float) -> None:
         try:

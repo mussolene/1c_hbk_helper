@@ -8,12 +8,14 @@
 |------|----------|
 | [nda-checklist.md](nda-checklist.md) | Чеклист NDA при работе с конфиденциальным кодом |
 | [nda-executor-template.md](nda-executor-template.md) | Шаблон соглашения о неразглашении для исполнителя аудита |
+| [audit-runbook.md](audit-runbook.md) | Runbook: пошаговый сценарий аудита (4 фазы) |
+| [code-review-verification.md](code-review-verification.md) | Верификация критических участков кода |
 | [findings-report.md](findings-report.md) | Отчёт о находках (pip-audit, bandit, ручной анализ) |
 | [recommendations-backlog.md](recommendations-backlog.md) | Приоритизированный backlog исправлений |
 
 ## План аудита
 
-Полный план аудита — `.cursor/plans/security_audit_plan_*.plan.md` (или `docs/security-audit-prompt.md` как исходный промпт).
+Полный план — `docs/security-audit-prompt.md` (промпт), [audit-runbook.md](audit-runbook.md) (сценарий выполнения).
 
 ## Запуск сканов
 
