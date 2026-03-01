@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 
 def _env_path(name: str, default=None):
@@ -410,35 +411,80 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
         return 1
 
 
+def _parse_standards_repo_spec(spec: str, default_branch: str = "master") -> tuple[str, str]:
+    """Parse 'owner/repo' or 'owner/repo:branch'. Returns (repo_url, branch)."""
+    spec = spec.strip()
+    if ":" in spec:
+        repo, branch = spec.rsplit(":", 1)
+        return repo.strip(), (branch.strip() or default_branch)
+    return spec, default_branch
+
+
+_DEFAULT_STANDARDS_REPOS = "1C-Company/v8-code-style:master,zeegin/v8std:main"
+
+
 def cmd_load_standards(args: argparse.Namespace) -> int:
-    """Load v8-code-style standards (markdown) into onec_help_memory (domain=standards).
-    Source: path arg, STANDARDS_DIR (mounted volume), or STANDARDS_REPO (auto-download, temp, delete)."""
+    """Load standards (markdown) into onec_help_memory (domain=standards).
+    Sources: path arg, STANDARDS_DIR, STANDARDS_REPOS (comma-separated, loaded jointly),
+    or STANDARDS_REPO (single, legacy). By default loads both v8-code-style and v8std."""
     path_arg = getattr(args, "standards_path", None) or os.environ.get("STANDARDS_DIR", "")
     path_arg = (path_arg or "").strip()
-    standards_repo = os.environ.get("STANDARDS_REPO", "").strip()
+    standards_repos = (os.environ.get("STANDARDS_REPOS") or "").strip()
+    standards_repo = (os.environ.get("STANDARDS_REPO") or "").strip()
     standards_subpath = os.environ.get("STANDARDS_SUBPATH", "docs").strip() or "docs"
-    standards_branch = os.environ.get("STANDARDS_BRANCH", "master").strip() or "master"
-    temp_dir = None
+    default_branch = (
+        os.environ.get("STANDARDS_BRANCH", "master").strip() or "master"
+    )
+    # Fallback: when no source is set, use default repos (both v8-code-style and v8std)
+    if not path_arg and not standards_repos and not standards_repo:
+        standards_repos = _DEFAULT_STANDARDS_REPOS
+    temp_dirs: list[Path] = []
+    dirs_to_load: list[Path] = []
 
     if path_arg:
         d = Path(path_arg)
         if not d.exists() or not d.is_dir():
             print(f"Error: path not found or not a directory: {d}", file=sys.stderr)
             return 1
+        dirs_to_load.append(d)
+    elif standards_repos:
+        for spec in standards_repos.split(","):
+            if not spec.strip():
+                continue
+            repo_url, branch = _parse_standards_repo_spec(spec, default_branch)
+            if "github.com" not in repo_url:
+                repo_url = f"https://github.com/{repo_url}"
+            try:
+                from .standards_loader import fetch_repo_archive
+
+                d, tmp = fetch_repo_archive(
+                    repo_url, subpath=standards_subpath, branch=branch
+                )
+                dirs_to_load.append(d)
+                temp_dirs.append(tmp)
+            except Exception as e:
+                print(f"Error fetching {repo_url}: {e}", file=sys.stderr)
+                for t in temp_dirs:
+                    import shutil
+
+                    shutil.rmtree(t, ignore_errors=True)
+                return 1
     elif standards_repo:
         try:
             from .standards_loader import fetch_repo_archive
 
-            d, temp_dir = fetch_repo_archive(
-                standards_repo, subpath=standards_subpath, branch=standards_branch
+            d, tmp = fetch_repo_archive(
+                standards_repo, subpath=standards_subpath, branch=default_branch
             )
+            dirs_to_load.append(d)
+            temp_dirs.append(tmp)
         except Exception as e:
             print(f"Error fetching {standards_repo}: {e}", file=sys.stderr)
             return 1
     else:
         print(
-            "No source: set STANDARDS_REPO (e.g. https://github.com/1C-Company/v8-code-style) "
-            "or STANDARDS_DIR / pass path.",
+            "No source: set STANDARDS_REPOS (e.g. 1C-Company/v8-code-style:master,zeegin/v8std:main) "
+            "or STANDARDS_REPO or STANDARDS_DIR / pass path.",
             file=sys.stderr,
         )
         return 0
@@ -448,9 +494,12 @@ def cmd_load_standards(args: argparse.Namespace) -> int:
         from .memory import get_memory_store
         from .standards_loader import collect_from_folder
 
-        items = collect_from_folder(d)
+        items: list[dict[str, Any]] = []
+        for d in dirs_to_load:
+            items.extend(collect_from_folder(d))
+
         if not items:
-            print(f"No .md files in {d}", file=sys.stderr)
+            print("No .md files found.", file=sys.stderr)
             return 0
 
         def _progress(loaded: int, tot: int, skipped: int) -> None:
@@ -466,10 +515,10 @@ def cmd_load_standards(args: argparse.Namespace) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     finally:
-        if temp_dir is not None:
-            import shutil
+        import shutil
 
-            shutil.rmtree(temp_dir, ignore_errors=True)
+        for tmp in temp_dirs:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 def cmd_parse_fastcode(args: argparse.Namespace) -> int:

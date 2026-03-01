@@ -38,9 +38,8 @@ load-snippets:
 load-snippets-from-project:
 	$(COMPOSE) run --rm -v "$${PROJECT_PATH:=$(CURDIR)}:/project:ro" mcp python -m onec_help load-snippets --from-project /project $(ARGS)
 
-# Load v8-code-style docs into onec_help_memory (domain=standards).
-# По умолчанию STANDARDS_REPO — авто-скачивание, temp удаляется после загрузки.
-# Либо STANDARDS_DIR=/data/standards + volume, либо ARGS=path.
+# Load standards into onec_help_memory (domain=standards).
+# По умолчанию оба репо: v8-code-style и v8std. Либо STANDARDS_DIR, либо ARGS=path.
 load-standards:
 	$(COMPOSE) run --rm mcp python -m onec_help load-standards $(ARGS)
 
@@ -113,7 +112,7 @@ help:
 	@echo "  make parse-fastcode   Parse FastCode.im → fastcode_snippets.json"
 	@echo "  make load-snippets    Load snippets from SNIPPETS_DIR"
 	@echo "  make load-snippets-from-project  Load snippets from 1C project (mounts .)"
-	@echo "  make load-standards   Load v8-code-style docs (STANDARDS_REPO auto or STANDARDS_DIR/ARGS)"
+	@echo "  make load-standards   Load standards (STANDARDS_REPOS — оба репо по умолчанию, или STANDARDS_DIR)"
 	@echo "  make snippets         parse-fastcode + load-snippets"
 	@echo "  make unpack-help      Выгрузка справки в папку (распаковка .hbk без индексации)"
 	@echo "  make ingest           Индексация .hbk из HELP_SOURCE_BASE (/opt/1cv8)"

@@ -13,7 +13,7 @@
 - **Split mode:** `docker compose -f docker-compose.split.yml up -d` — mcp только API (MCP_MODE=api), ingest-worker — batch (ingest, cron, load-snippets, watchdog). Индексация вручную: `exec ingest-worker python -m onec_help ingest`.
 - **Индекс вручную:** `docker compose exec mcp python -m onec_help ingest` (single) или `docker compose -f docker-compose.split.yml exec ingest-worker python -m onec_help ingest` (split). (каталог версий — `HELP_SOURCE_BASE`, подпапки = версии 1С, поиск .hbk рекурсивно, в т.ч. в `bin/` на Windows).
 - **Сниппеты:** `docs/snippets/` — примеры (не загружаются). Реальные — из тома `./snippets:/data/snippets`, при старте `load-snippets`. `load-snippets --from-project src` — из проекта 1С. `make parse-fastcode`, `make load-snippets`, `make snippets`.
-- **Стандарты:** `make load-standards` — по умолчанию STANDARDS_REPO (авто-скачивание, temp удаляется); либо STANDARDS_DIR (volume) или путь в ARGS.
+- **Стандарты:** `make load-standards` — по умолчанию STANDARDS_REPOS загружает совместно 1C-Company/v8-code-style и zeegin/v8std (v8std.ru).
 
 ## Структура кода
 
@@ -58,7 +58,7 @@
 
 - **Два MCP:** при генерации кода — 1c-help (`get_1c_code_answer`, `search_1c_help_keyword`); при проверке/рефакторинге — lsp-bsl-bridge (`document_diagnostics`, `code_actions`). Если 1c-help недоступен (нет индекса) — опереться на BSL LS и memory.
 - **После правок 1С:** вызывать `document_diagnostics` для проверки ошибок, предупреждений и соответствия стандартам BSL LS. URI для Docker: `file:///projects/<path>/Module.bsl` (volume `.:/projects`).
-- **Стандарты:** учитывать правила 1С (BSL LS diagnostics + v8-code-style из `load-standards`).
+- **Стандарты:** учитывать правила 1С (BSL LS diagnostics + v8-code-style и v8std из `load-standards`).
 
 ## Workflow разработки 1С с BSL LS
 

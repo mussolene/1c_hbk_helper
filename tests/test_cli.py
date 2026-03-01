@@ -717,10 +717,37 @@ def test_cmd_load_standards_from_repo(mock_fetch, mock_get_store, tmp_path: Path
     args = make_args(standards_path=None)
     with patch.dict(
         "os.environ",
-        {"STANDARDS_DIR": "", "STANDARDS_REPO": "https://github.com/1C-Company/v8-code-style"},
+        {"STANDARDS_DIR": "", "STANDARDS_REPOS": "", "STANDARDS_REPO": "https://github.com/1C-Company/v8-code-style"},
     ):
         assert cmd_load_standards(args) == 0
     mock_fetch.assert_called_once()
+    mock_store.upsert_curated_snippets.assert_called_once()
+
+
+@patch("onec_help.memory.get_memory_store")
+@patch("onec_help.standards_loader.fetch_repo_archive")
+def test_cmd_load_standards_from_repos(mock_fetch, mock_get_store, tmp_path: Path) -> None:
+    """cmd_load_standards fetches from STANDARDS_REPOS (multiple repos) when set."""
+    (tmp_path / "a.md").write_text("# A\n\nFrom first.", encoding="utf-8")
+    (tmp_path / "b.md").write_text("# B\n\nFrom second.", encoding="utf-8")
+    mock_fetch.side_effect = [
+        (tmp_path, Path("/tmp/tmp1")),
+        (tmp_path, Path("/tmp/tmp2")),
+    ]
+    mock_store = MagicMock()
+    mock_store.upsert_curated_snippets.return_value = 2
+    mock_get_store.return_value = mock_store
+    args = make_args(standards_path=None)
+    with patch.dict(
+        "os.environ",
+        {
+            "STANDARDS_DIR": "",
+            "STANDARDS_REPOS": "1C-Company/v8-code-style:master,zeegin/v8std:main",
+            "STANDARDS_REPO": "",
+        },
+    ):
+        assert cmd_load_standards(args) == 0
+    assert mock_fetch.call_count == 2
     mock_store.upsert_curated_snippets.assert_called_once()
 
 

@@ -74,8 +74,8 @@ services:
       WATCHDOG_PENDING_INTERVAL: ${WATCHDOG_PENDING_INTERVAL:-600}
       # Каталог сниппетов (*.bsl, *.1c, *.md, snippets.json). При старте — load-snippets
       SNIPPETS_DIR: ${SNIPPETS_DIR:-/data/snippets}
-      # Стандарты: STANDARDS_REPO — авто-скачивание (temp, удаление после загрузки); STANDARDS_DIR — смонтированная папка
-      STANDARDS_REPO: ${STANDARDS_REPO:-https://github.com/1C-Company/v8-code-style}
+      # Стандарты: STANDARDS_REPOS — оба репо загружаются совместно; STANDARDS_DIR — смонтированная папка
+      STANDARDS_REPOS: ${STANDARDS_REPOS:-1C-Company/v8-code-style:master,zeegin/v8std:main}
       STANDARDS_SUBPATH: ${STANDARDS_SUBPATH:-docs}
       STANDARDS_DIR: ${STANDARDS_DIR:-}
     volumes:

@@ -49,10 +49,14 @@ This project uses the following open-source software. Respective licenses and co
 ## External Data Sources (загружаемые по запросу)
 
 ### Стандарты (load-standards)
+Оба репозитория загружаются совместно по умолчанию (`STANDARDS_REPOS`).
+
 - **1C-Company/v8-code-style** — стандарты разработки 1С (markdown из папки docs)
   - **License:** Eclipse Public License v2.0 (EPL-2.0)
   - **URL:** https://github.com/1C-Company/v8-code-style
-  - По умолчанию: `STANDARDS_REPO` (авто-скачивание с GitHub)
+
+- **zeegin/v8std** — стандарты разработки 1С (v8std.ru, markdown из папки docs)
+  - **URL:** https://github.com/zeegin/v8std | https://v8std.ru
 
 ### Шаблоны кода (parse-fastcode)
 - **FastCode.im** — шаблоны и примеры кода 1С
