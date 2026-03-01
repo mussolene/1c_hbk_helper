@@ -168,11 +168,9 @@ def _render_index_status_compact(
         storage_path = os.environ.get("QDRANT_STORAGE_PATH")
         if storage_path and os.path.isdir(storage_path):
             try:
-                total = sum(
-                    os.path.getsize(os.path.join(d, f))
-                    for d, _, fs in os.walk(storage_path)
-                    for f in fs
-                )
+                from ._utils import dir_size_on_disk
+
+                total = dir_size_on_disk(storage_path)
                 parts.append(f"DB:{total / (1024 * 1024):.1f}MB")
             except OSError:
                 parts.append("DB:—")
@@ -294,11 +292,9 @@ def _render_index_status_rich(
         if storage_path:
             if os.path.isdir(storage_path):
                 try:
-                    sz = sum(
-                        os.path.getsize(os.path.join(d, f))
-                        for d, _, fs in os.walk(storage_path)
-                        for f in fs
-                    )
+                    from ._utils import dir_size_on_disk
+
+                    sz = dir_size_on_disk(storage_path)
                     line(f"│   DB: {sz / (1024 * 1024):.1f} MB".ljust(w - 1) + "│")
                 except OSError:
                     line("│   DB: —".ljust(w - 1) + "│")
@@ -932,9 +928,21 @@ def cmd_load_standards(args: argparse.Namespace) -> int:
         return 0
 
     try:
+        import shutil as _shutil
+
         from ._utils import progress_done, progress_line
         from .memory import get_memory_store
         from .standards_loader import collect_from_folder
+
+        # Копировать загруженные репо в папку standards (если загрузка из репо, а не из path)
+        if temp_dirs:
+            standards_out = Path(os.environ.get("STANDARDS_DIR") or "data/standards").resolve()
+            standards_out.mkdir(parents=True, exist_ok=True)
+            for d in dirs_to_load:
+                subdir = d.parent.name
+                dest = standards_out / subdir
+                _shutil.copytree(d, dest, dirs_exist_ok=True)
+            progress_done(f"load-standards │ copied to {standards_out}")
 
         items: list[dict[str, Any]] = []
         for d in dirs_to_load:

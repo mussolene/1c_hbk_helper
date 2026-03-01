@@ -687,13 +687,9 @@ def run_mcp(
         storage_path = os.environ.get("QDRANT_STORAGE_PATH")
         if storage_path and os.path.isdir(storage_path):
             try:
-                total = 0
-                for dirpath, _dirnames, filenames in os.walk(storage_path):
-                    for f in filenames:
-                        try:
-                            total += os.path.getsize(os.path.join(dirpath, f))
-                        except OSError:
-                            pass
+                from ._utils import dir_size_on_disk
+
+                total = dir_size_on_disk(storage_path)
                 lines.append(f"DB size: **{total / (1024 * 1024):.1f} MB**")
             except OSError:
                 pass

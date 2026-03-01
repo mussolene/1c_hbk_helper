@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from onec_help._utils import (
+    dir_size_on_disk,
     format_duration,
     mask_path_for_log,
     path_inside_base,
@@ -84,3 +85,28 @@ def test_path_inside_base_path_equals_base() -> None:
     """When path resolves to base itself, return True."""
     base = Path(__file__).resolve().parent
     assert path_inside_base(base, base) is True
+
+
+def test_dir_size_on_disk(tmp_path: Path) -> None:
+    """dir_size_on_disk sums file sizes; deduplicates hard links."""
+    (tmp_path / "a.txt").write_text("x" * 100)
+    (tmp_path / "b.txt").write_text("y" * 200)
+    sz = dir_size_on_disk(tmp_path)
+    assert sz >= 300
+
+
+def test_dir_size_on_disk_hardlink(tmp_path: Path) -> None:
+    """dir_size_on_disk counts hard-linked file once (matches du), not 2x."""
+    import os
+
+    target = tmp_path / "target"
+    target.write_text("content" * 100)
+    link = tmp_path / "link"
+    try:
+        os.link(target, link)
+    except OSError:
+        return
+    sz_with_link = dir_size_on_disk(tmp_path)
+    link.unlink(missing_ok=True)
+    sz_single = dir_size_on_disk(tmp_path)
+    assert sz_with_link <= sz_single * 1.1

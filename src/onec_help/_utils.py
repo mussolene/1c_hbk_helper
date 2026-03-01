@@ -67,6 +67,30 @@ def format_duration(sec: float) -> str:
     return " ".join(parts)
 
 
+def dir_size_on_disk(path: str | Path) -> int:
+    """Return actual disk usage in bytes (matches du). Deduplicates hard links via inode."""
+    root = Path(path)
+    if not root.exists() or not root.is_dir():
+        return 0
+    seen: set[tuple[int, int]] = set()
+    total_blocks = 0
+    fallback_bytes = 0
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for f in filenames:
+            try:
+                fp = Path(dirpath) / f
+                st = fp.stat()
+                key = (st.st_ino, st.st_dev)
+                if key not in seen:
+                    seen.add(key)
+                    if hasattr(st, "st_blocks") and st.st_blocks:
+                        total_blocks += st.st_blocks
+                    fallback_bytes += st.st_size
+            except OSError:
+                pass
+    return (total_blocks * 512) if total_blocks > 0 else fallback_bytes
+
+
 def path_inside_base(path: Path, base: Path) -> bool:
     """Return True if path resolves to a location under base (prevents path traversal)."""
     try:
