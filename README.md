@@ -78,7 +78,7 @@ pip install -e ".[dev]"
 | `HELP_LANGUAGES` | Языки справки (ingest) | `ru` |
 | `HELP_INGEST_TEMP` | Временный каталог для ingest (если не задан — `$TMPDIR/help_ingest` или `tempfile.gettempdir()`) | — |
 | `HELP_SERVE_HOST` | Хост для serve (127.0.0.1 — только localhost; 0.0.0.0 — для Docker) | `127.0.0.1` |
-| `INGEST_CACHE_FILE` | Путь к SQLite-кэшу ingest (хэш .hbk → уже проиндексировано; при перезапуске не перепарсивать и не пересчитывать embedding). В Docker по умолчанию `/qdrant_storage/ingest_cache.db` | `/tmp/onec_help_ingest_cache.db` |
+| `INGEST_CACHE_FILE` | Путь к SQLite-кэшу: хэш .hbk, статус ingest (ingest_current, ingest_runs). Ingest и index-status читают/пишут в одну БД — статистика реальная. По умолчанию `data/ingest_cache/ingest_cache.db`; в Docker — `/app/var/ingest_cache/ingest_cache.db` (volume `./data/ingest_cache`) | `data/ingest_cache/ingest_cache.db` |
 | `INGEST_SKIP_CACHE` | `1`/`true` — полная переиндексация без кэша (или `ingest --no-cache`) | — |
 | `INGEST_FAILED_LOG` | Файл для списка неудачных .hbk | — |
 | `MCP_TRANSPORT` | Транспорт MCP: `stdio`, `http` или `streamable-http` (для Docker/Cursor рекомендуется streamable-http) | `streamable-http` |
