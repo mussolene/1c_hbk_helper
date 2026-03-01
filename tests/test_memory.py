@@ -234,7 +234,10 @@ def test_process_pending_embedding_available(tmp_path: Path) -> None:
         )
     )
     with patch("onec_help.embedding.is_embedding_available", return_value=True):
-        with patch("onec_help.embedding.get_embedding", return_value=[0.1] * 384):
+        with patch(
+            "onec_help.embedding.get_embedding_batch",
+            return_value=[[0.1] * 384],
+        ):
             with patch("qdrant_client.QdrantClient") as mock_qc:
                 mock_client = MagicMock()
                 mock_client.collection_exists.return_value = True
@@ -331,7 +334,10 @@ def test_upsert_curated_snippets_embedding_unavailable(tmp_path: Path) -> None:
 def test_upsert_curated_snippets_success(tmp_path: Path) -> None:
     """upsert_curated_snippets embeds and upserts to long memory."""
     with patch("onec_help.embedding.is_embedding_available", return_value=True):
-        with patch("onec_help.embedding.get_embedding", return_value=[0.1] * 384):
+        with patch(
+            "onec_help.embedding.get_embedding_batch",
+            return_value=[[0.1] * 384, [0.1] * 384],
+        ):
             with patch("qdrant_client.QdrantClient") as mock_qc:
                 mock_client = MagicMock()
                 mock_client.collection_exists.return_value = False
@@ -352,7 +358,10 @@ def test_upsert_curated_snippets_success(tmp_path: Path) -> None:
 def test_upsert_curated_snippets_skips_invalid(tmp_path: Path) -> None:
     """upsert_curated_snippets skips items without title and code_snippet."""
     with patch("onec_help.embedding.is_embedding_available", return_value=True):
-        with patch("onec_help.embedding.get_embedding", return_value=[0.1] * 384):
+        with patch(
+            "onec_help.embedding.get_embedding_batch",
+            return_value=[[0.1] * 384],
+        ):
             with patch("qdrant_client.QdrantClient") as mock_qc:
                 mock_client = MagicMock()
                 mock_client.collection_exists.return_value = False

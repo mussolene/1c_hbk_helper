@@ -218,7 +218,7 @@ class MemoryStore:
 
     def process_pending(self) -> int:
         """Process pending_memory.json: embed and upsert to onec_help_memory when embedding available.
-        Returns number of processed items."""
+        Returns number of processed items. Uses get_embedding_batch for throughput."""
         from . import embedding
 
         if not embedding.is_embedding_available():
@@ -232,8 +232,8 @@ class MemoryStore:
             data = json.loads(raw)
             if not isinstance(data, list):
                 return 0
-            processed = 0
-            remaining = []
+            remaining: list[dict[str, Any]] = []
+            to_process: list[tuple[dict[str, Any], str, dict[str, Any]]] = []
             for item in data:
                 if not isinstance(item, dict):
                     remaining.append(item)
@@ -241,11 +241,25 @@ class MemoryStore:
                 payload = item.get("payload", {})
                 if not payload:
                     continue
+                summary = self._format_long_summary(payload)
+                to_process.append((item, summary, {**payload, "summary": summary}))
+            if not to_process:
+                return 0
+            texts = [s for _, s, _ in to_process]
+            vectors = embedding.get_embedding_batch(texts)
+            if len(vectors) != len(to_process):
+                vectors = embedding.get_embedding_batch(texts)
+            if len(vectors) != len(to_process):
+                remaining.extend(item for item, _, _ in to_process)
+                self.pending_path.write_text(
+                    json.dumps(remaining, ensure_ascii=False, indent=0), encoding="utf-8"
+                )
+                return 0
+            processed = 0
+            for (item, _, full_payload), vec in zip(to_process, vectors, strict=True):
                 try:
-                    summary = self._format_long_summary(payload)
-                    vec = embedding.get_embedding(summary)
                     self._upsert_long(
-                        item.get("id", str(uuid.uuid4())), vec, {**payload, "summary": summary}
+                        item.get("id", str(uuid.uuid4())), vec, full_payload
                     )
                     processed += 1
                 except Exception:
@@ -267,17 +281,17 @@ class MemoryStore:
         """Bulk upsert curated items into long memory.
         items: [{title, description, code_snippet}, ...]. Returns count of upserted items.
         progress_callback: optional (done, total, skipped) called periodically.
-        domain: 'snippets' | 'standards' — filter for search_long."""
+        domain: 'snippets' | 'standards' — filter for search_long.
+        Uses get_embedding_batch for throughput (same benefits as help indexer)."""
         from . import embedding
 
         if not embedding.is_embedding_available():
             return 0
         total = len(items)
-        count = 0
         skipped = 0
-        report_every = max(1, total // 20) if total > 20 else 1
+        valid: list[tuple[str, dict[str, Any], str, int]] = []
         prefix = domain[:8]
-        for i, item in enumerate(items):
+        for item in items:
             if not isinstance(item, dict):
                 skipped += 1
                 continue
@@ -288,25 +302,38 @@ class MemoryStore:
                 skipped += 1
                 continue
             summary = f"{title} | {desc} | {code[:300]}"
+            payload = {
+                "title": title,
+                "description": desc,
+                "code_snippet": code,
+                "domain": domain,
+                "summary": summary,
+            }
+            point_id = f"{prefix}_{hashlib.sha256(title.encode()).hexdigest()[:12]}"
+            numeric_id = int(hashlib.sha256(point_id.encode()).hexdigest()[:14], 16) % (2**63)
+            valid.append((summary, payload, point_id, numeric_id))
+        if not valid:
+            if progress_callback:
+                progress_callback(0, total, skipped)
+            return 0
+        texts = [s for s, _, _, _ in valid]
+        vectors = embedding.get_embedding_batch(texts)
+        if len(vectors) != len(valid):
+            vectors = embedding.get_embedding_batch(texts)
+        if len(vectors) != len(valid):
+            skipped += len(valid)
+            if progress_callback:
+                progress_callback(0, total, skipped)
+            return 0
+        count = 0
+        for (_, payload, point_id, numeric_id), vec in zip(valid, vectors, strict=True):
             try:
-                vec = embedding.get_embedding(summary)
-                payload = {
-                    "title": title,
-                    "description": desc,
-                    "code_snippet": code,
-                    "domain": domain,
-                    "summary": summary,
-                }
-                point_id = f"{prefix}_{hashlib.sha256(title.encode()).hexdigest()[:12]}"
-                numeric_id = int(hashlib.sha256(point_id.encode()).hexdigest()[:14], 16) % (2**63)
                 self._upsert_long(point_id, vec, payload, numeric_id=numeric_id)
                 count += 1
             except Exception:
                 skipped += 1
-            if progress_callback and (i + 1) % report_every == 0:
-                progress_callback(count, total, skipped)
         if progress_callback:
-            progress_callback(count, total, skipped)
+            progress_callback(count, total, skipped + (len(valid) - count))
         return count
 
     def search_long(
