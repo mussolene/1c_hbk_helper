@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Any
 
 
+def _make_args(**kwargs: Any) -> argparse.Namespace:
+    """Build argparse-like namespace for cmd_* calls."""
+    return argparse.Namespace(**kwargs)
+
+
 def _env_path(name: str, default=None):
     v = os.environ.get(name)
     if v:
@@ -144,13 +149,16 @@ def _short_error(err: str, max_len: int = 40) -> str:
     return e
 
 
-def _render_index_status_compact(s, collections, ingest, spinner, format_duration) -> tuple[str, int]:
+def _render_index_status_compact(
+    s, collections, ingest, spinner, format_duration
+) -> tuple[str, int]:
     """Single-line compact output (for piping/scripts)."""
     prefix = f"{spinner} index-status".strip() if spinner else "index-status"
     parts: list[str] = []
     if collections:
         total_pts = sum(
-            p for c in collections
+            p
+            for c in collections
             if (p := c.get("points_count")) is not None and isinstance(p, int)
         )
         col_strs = [f"{c.get('name', '?')}:{c.get('points_count', '—')} pts" for c in collections]
@@ -203,10 +211,14 @@ def _render_index_status_compact(s, collections, ingest, spinner, format_duratio
                 ing.append(f"ETA {format_duration(eta)}")
             if eta_finish is not None:
                 import time as _t
+
                 lt = _t.localtime(eta_finish)
                 ing.append(f"finish ~{_t.strftime('%H:%M', lt)}")
             parts.append(" ".join(ing))
         parts.append(f"embed: {backend}")
+        mw = ingest.get("max_workers")
+        if mw is not None:
+            parts.append(f"workers:{mw}")
         ctp = ingest.get("current_task_points") or 0
         cte = ingest.get("current_task_estimated_total") or 0
         if ctp > 0:
@@ -216,27 +228,36 @@ def _render_index_status_compact(s, collections, ingest, spinner, format_duratio
             _sp = {"embedding": 0, "writing": 1, "indexing": 2, "build_docs": 3, "unpack": 4}
             c0 = min(current, key=lambda c: (_sp.get(c.get("stage", ""), 99), c.get("path", "")))
             st = (c0.get("stage") or "").replace("build_docs", "build")
-            cur = f"{c0.get('version','')}/{c0.get('language','')} {c0.get('path','')} {st}"
+            cur = f"{c0.get('version', '')}/{c0.get('language', '')} {c0.get('path', '')} {st}"
             if len(current) > 1:
-                cur += f" +{len(current)-1}"
+                cur += f" +{len(current) - 1}"
             parts.append(f"cur:{cur.strip()}")
+        completed = ingest.get("completed_files") or []
+        if completed:
+            ok_c = sum(1 for f in completed if f.get("status") == "ok")
+            skip_c = sum(1 for f in completed if f.get("status") in ("skip", "cached"))
+            fail_c = sum(1 for f in completed if f.get("status") == "fail")
+            parts.append(f"done:{ok_c}ok/{skip_c}skip/{fail_c}fail")
         folders = ingest.get("folders") or []
         total_err = sum(fo.get("err_count", 0) for fo in folders)
         if total_err > 0:
             failed_tasks = ingest.get("failed_tasks") or []
             if not failed_tasks:
                 from .ingest import read_ingest_failed_log
+
                 failed_tasks = read_ingest_failed_log(limit=3)
             err = f"Failed: {total_err}"
             if failed_tasks:
                 ft = failed_tasks[0]
                 short = (ft.get("path") or "").replace(".hbk", "") or ft.get("error", "")[:20]
-                err += f" {short}:{_short_error(ft.get('error',''))}"
+                err += f" {short}:{_short_error(ft.get('error', ''))}"
             parts.append(err)
     return f"{prefix} │ {' │ '.join(parts)}\n", 0
 
 
-def _render_index_status_rich(s, collections, ingest, spinner, format_duration, host, port) -> tuple[str, int]:
+def _render_index_status_rich(
+    s, collections, ingest, spinner, format_duration, host, port
+) -> tuple[str, int]:
     """Rich multi-line status: collections, operations, current files, elapsed, ETA, errors."""
     lines: list[str] = []
     try:
@@ -257,7 +278,8 @@ def _render_index_status_rich(s, collections, ingest, spinner, format_duration, 
     line(f"│ Collections (Qdrant) {''.rjust(w - 24)}│")
     if collections:
         total_pts = sum(
-            p for c in collections
+            p
+            for c in collections
             if (p := c.get("points_count")) is not None and isinstance(p, int)
         )
         for c in collections:
@@ -279,9 +301,9 @@ def _render_index_status_rich(s, collections, ingest, spinner, format_duration, 
                     )
                     line(f"│   DB: {sz / (1024 * 1024):.1f} MB".ljust(w - 1) + "│")
                 except OSError:
-                    line(f"│   DB: —".ljust(w - 1) + "│")
+                    line("│   DB: —".ljust(w - 1) + "│")
             else:
-                line(f"│   DB: —".ljust(w - 1) + "│")
+                line("│   DB: —".ljust(w - 1) + "│")
         if s.get("versions"):
             vv = ", ".join(s["versions"][:5])
             if len(s.get("versions", [])) > 5:
@@ -290,7 +312,7 @@ def _render_index_status_rich(s, collections, ingest, spinner, format_duration, 
         if s.get("languages"):
             line(f"│   lang: {', '.join(s['languages'])}".ljust(w - 1) + "│")
     else:
-        line(f"│   (no collections)".ljust(w - 1) + "│")
+        line("│   (no collections)".ljust(w - 1) + "│")
     line(f"├{sep}┤")
 
     # 2. Operations + 3. Current files + 4. Elapsed + 5. ETA
@@ -304,6 +326,14 @@ def _render_index_status_rich(s, collections, ingest, spinner, format_duration, 
         current_task_pts = ingest.get("current_task_points", 0) or 0
         current_list = ingest.get("current") or []
 
+        max_workers = ingest.get("max_workers")
+        embedding_workers = ingest.get("embedding_workers")
+        workers_str = ""
+        if max_workers is not None:
+            workers_str = f"workers: {max_workers}"
+            if embedding_workers is not None:
+                workers_str += f", embed_w: {embedding_workers}"
+
         line(f"│ Operations {''.rjust(w - 14)}│")
         if status == "completed":
             line(f"│   ✓ done │ embed: {backend}".ljust(w - 1) + "│")
@@ -314,6 +344,8 @@ def _render_index_status_rich(s, collections, ingest, spinner, format_duration, 
             last_run_str += f", {pts} pts"
             if fail_cnt > 0:
                 last_run_str += f", {fail_cnt} failed"
+            if workers_str:
+                last_run_str += f" │ {workers_str}"
             line(f"│   {last_run_str}".ljust(w - 1) + "│")
         else:
             # Dynamic stages — embedding/writing first (main work), then preparing
@@ -322,6 +354,7 @@ def _render_index_status_rich(s, collections, ingest, spinner, format_duration, 
             for c in current_list:
                 st = c.get("stage") or "?"
                 by_stage[st] = by_stage.get(st, 0) + 1
+
             def _stage_sort_key(item: tuple[str, int]) -> tuple[int, str]:
                 stage_name, _ = item
                 display = stage_name.replace("build_docs", "build")
@@ -329,9 +362,16 @@ def _render_index_status_rich(s, collections, ingest, spinner, format_duration, 
                     return (_stage_order.index(stage_name), display)
                 except ValueError:
                     return (99, display)
-            parts = [f"{k.replace('build_docs','build')} ({v})" for k, v in sorted(by_stage.items(), key=_stage_sort_key)]
+
+            parts = [
+                f"{k.replace('build_docs', 'build')} ({v})"
+                for k, v in sorted(by_stage.items(), key=_stage_sort_key)
+            ]
             stages_str = ", ".join(parts) if parts else "in progress"
-            line(f"│   {stages_str} │ embed: {backend}".ljust(w - 1) + "│")
+            line_str = f"│   {stages_str} │ embed: {backend}"
+            if workers_str:
+                line_str += f" │ {workers_str}"
+            line(f"{line_str}".ljust(w - 1) + "│")
 
         # Progress bar: use pts when we have estimate; else tasks
         effective_pts = pts + current_task_pts
@@ -372,24 +412,63 @@ def _render_index_status_rich(s, collections, ingest, spinner, format_duration, 
             line(f"│   ETA: {format_duration(eta)}".ljust(w - 1) + "│")
         if eta_finish is not None:
             import time as _t
+
             finish_str = _t.strftime("%H:%M", _t.localtime(eta_finish))
             line(f"│   ≈ finish: ~{finish_str}".ljust(w - 1) + "│")
+
+        # Summary: tasks, done, ok/skip/fail, workers, pts
+        completed = ingest.get("completed_files") or []
+        ok_c = sum(1 for f in completed if f.get("status") == "ok")
+        skip_c = sum(1 for f in completed if f.get("status") in ("skip", "cached"))
+        fail_c = sum(1 for f in completed if f.get("status") == "fail")
+        summary_parts = [f"{total} tasks", f"{done} done"]
+        if ok_c or skip_c or fail_c:
+            summary_parts.append(f"{ok_c} ok, {skip_c} skip, {fail_c} fail")
+        if effective_pts > 0:
+            summary_parts.append(f"{effective_pts} pts")
+        if workers_str:
+            summary_parts.append(workers_str)
+        line(f"│   Summary: {' │ '.join(summary_parts)}".ljust(w - 1) + "│")
+
+        if completed:
+            line(f"├{sep}┤")
+            line(f"│ Files (per file) {''.rjust(w - 18)}│")
+            for f in completed[-12:]:
+                path_s = (f.get("path") or "?").replace(".hbk", "")
+                ver = f.get("version", "")
+                lang = f.get("language", "")
+                pts = f.get("points", 0)
+                st = f.get("status", "?")
+                line(f"│   {ver}/{lang} {path_s} {pts} pts [{st}]".ljust(w - 1) + "│")
+            if len(completed) > 12:
+                line(f"│   ... +{len(completed) - 12} more".ljust(w - 1) + "│")
 
         current = ingest.get("current") or []
         if current:
             line(f"├{sep}┤")
             line(f"│ Current files {''.rjust(w - 16)}│")
-            _stage_priority = {"embedding": 0, "writing": 1, "indexing": 2, "build_docs": 3, "unpack": 4}
+            _stage_priority = {
+                "embedding": 0,
+                "writing": 1,
+                "indexing": 2,
+                "build_docs": 3,
+                "unpack": 4,
+            }
             current_sorted = sorted(
                 current,
                 key=lambda c: (_stage_priority.get(c.get("stage", ""), 99), c.get("path", "")),
             )
-            for c in current_sorted[:5]:
+            for i, c in enumerate(current_sorted[:5], 1):
                 v = c.get("version", "")
                 lang = c.get("language", "")
                 path = (c.get("path") or "").replace(".hbk", "")
                 stage = (c.get("stage") or "").replace("build_docs", "build")
-                line(f"│   {v}/{lang} {path} [{stage}]".ljust(w - 1) + "│")
+                pts_info = ""
+                if c.get("points") is not None and c.get("estimated_total") is not None:
+                    pts_info = f" {c['points']}/{c['estimated_total']} pts"
+                elif c.get("points") is not None:
+                    pts_info = f" {c['points']} pts"
+                line(f"│   [W{i}] {v}/{lang} {path} [{stage}]{pts_info}".ljust(w - 1) + "│")
             if len(current) > 5:
                 line(f"│   ... +{len(current) - 5} more".ljust(w - 1) + "│")
 
@@ -399,10 +478,11 @@ def _render_index_status_rich(s, collections, ingest, spinner, format_duration, 
         failed_tasks = ingest.get("failed_tasks") or []
         if not failed_tasks and total_err > 0:
             from .ingest import read_ingest_failed_log
+
             failed_tasks = read_ingest_failed_log(limit=20)
         if failed_tasks:
             line(f"├{sep}┤")
-            line(f"│ Errors — Failed: {total_err} {''.rjust(w - 22)}│")
+            line(f"│ Errors ({total_err}) {''.rjust(w - 16)}│")
             by_cat: dict[str, list[tuple[str, str]]] = {}
             for ft in failed_tasks:
                 path = (ft.get("path") or "?").replace(".hbk", "")
@@ -449,6 +529,8 @@ def _render_index_status(*, spinner: str = "", compact: bool = False) -> tuple[s
     if not ingest:
         last_run = read_last_ingest_run()
         if last_run:
+            from .ingest import read_ingest_cache_entries
+
             ingest = {
                 "status": "completed",
                 "embedding_backend": last_run.get("embedding_backend", "none"),
@@ -460,6 +542,7 @@ def _render_index_status(*, spinner: str = "", compact: bool = False) -> tuple[s
                 "current": [],
                 "folders": [],
                 "failed_tasks": [],
+                "completed_files": read_ingest_cache_entries(limit=50),
             }
     collections = get_all_collections_status(qdrant_host=host, qdrant_port=port)
     if not collections and s.get("exists"):
@@ -476,14 +559,10 @@ def _render_index_status(*, spinner: str = "", compact: bool = False) -> tuple[s
 
     # --- Compact (single line) ---
     if compact:
-        return _render_index_status_compact(
-            s, collections, ingest, spinner, format_duration
-        )
+        return _render_index_status_compact(s, collections, ingest, spinner, format_duration)
 
     # --- Rich multi-line ---
-    return _render_index_status_rich(
-        s, collections, ingest, spinner, format_duration, host, port
-    )
+    return _render_index_status_rich(s, collections, ingest, spinner, format_duration, host, port)
 
 
 def cmd_index_status(args: argparse.Namespace) -> int:
@@ -734,14 +813,32 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
         from ._utils import progress_done, progress_line
         from .memory import get_memory_store
 
+        # Split by type: snippet→snippets, reference→community_help (parse-helpf, parse-fastcode)
+        by_domain: dict[str, list[dict]] = {"snippets": [], "community_help": []}
+        for it in items:
+            t = (it.get("type") or "snippet").lower()
+            domain = "community_help" if t == "reference" else "snippets"
+            by_domain[domain].append(it)
+
         def _progress(loaded: int, tot: int, skipped: int) -> None:
             progress_line(
                 f"load-snippets │ {loaded + skipped}/{tot} │ {loaded} loaded │ {skipped} skip"
             )
 
         store = get_memory_store()
-        n = store.upsert_curated_snippets(items, progress_callback=_progress)
-        progress_done(f"load-snippets │ ✓ {n} loaded → onec_help_memory")
+        total_loaded = 0
+        domain_counts: list[str] = []
+        for domain, domain_items in by_domain.items():
+            if not domain_items:
+                continue
+            n = store.upsert_curated_snippets(
+                domain_items, progress_callback=_progress, domain=domain
+            )
+            total_loaded += n
+            domain_counts.append(f"{domain}={n}")
+        progress_done(
+            f"load-snippets │ ✓ {total_loaded} loaded ({', '.join(domain_counts)}) → onec_help_memory"
+        )
         return 0
     except json.JSONDecodeError as e:
         print(f"Error: invalid JSON: {e}", file=sys.stderr)
@@ -864,11 +961,13 @@ def cmd_parse_fastcode(args: argparse.Namespace) -> int:
     """Parse FastCode templates into snippets JSON."""
     from .parse_fastcode import run_parse
 
-    if "-" in args.pages:
-        lo, hi = args.pages.split("-", 1)
-        pages = list(range(int(lo), int(hi) + 1))
-    else:
-        pages = [int(p) for p in args.pages.split(",")]
+    pages = None
+    if args.pages and args.pages.lower() != "auto":
+        if "-" in args.pages:
+            lo, hi = args.pages.split("-", 1)
+            pages = list(range(int(lo), int(hi) + 1))
+        else:
+            pages = [int(p) for p in args.pages.split(",")]
 
     out_path = args.out
     if not out_path:
@@ -880,6 +979,37 @@ def cmd_parse_fastcode(args: argparse.Namespace) -> int:
     out = Path(out_path)
     fetch_detail = not getattr(args, "no_fetch_detail", False)
     return run_parse(out=out, pages=pages, delay=args.delay, fetch_detail=fetch_detail)
+
+
+def cmd_parse_helpf(args: argparse.Namespace) -> int:
+    """Parse HelpF.pro FAQ and Files into snippets JSON."""
+    from .parse_helpf import run_parse
+
+    pages = None
+    if args.pages and args.pages.lower() != "auto":
+        if "-" in args.pages:
+            lo, hi = args.pages.split("-", 1)
+            pages = list(range(int(lo), int(hi) + 1))
+        else:
+            pages = [int(p) for p in args.pages.split(",")]
+
+    out_path = args.out
+    if not out_path:
+        snippets_dir = os.environ.get("SNIPPETS_DIR", "")
+        if snippets_dir:
+            out_path = str(Path(snippets_dir) / "helpf_snippets.json")
+        else:
+            out_path = "snippets/helpf_snippets.json"
+    out = Path(out_path)
+    fetch_detail = not getattr(args, "no_fetch_detail", False)
+    return run_parse(
+        out=out,
+        source=args.source,
+        pages=pages,
+        max_items=getattr(args, "max_items", 0),
+        delay=args.delay,
+        fetch_detail=fetch_detail,
+    )
 
 
 def cmd_watchdog(args: argparse.Namespace) -> int:
@@ -924,6 +1054,120 @@ def cmd_mcp(args: argparse.Namespace) -> int:
             return 1
         raise
     return 0
+
+
+def _collection_has_data(qdrant_host: str, qdrant_port: int, collection: str) -> bool:
+    """Return True if collection exists and has points > 0."""
+    try:
+        from qdrant_client import QdrantClient
+
+        client = QdrantClient(host=qdrant_host, port=qdrant_port, check_compatibility=False)
+        if not client.collection_exists(collection):
+            return False
+        info = client.get_collection(collection)
+        pts = getattr(info, "points_count", None) or getattr(info, "pointsCount", 0)
+        return (pts or 0) > 0
+    except Exception:
+        return False
+
+
+def _clear_before_reinit(
+    qdrant_host: str = "localhost",
+    qdrant_port: int = 6333,
+    collection: str = "onec_help",
+) -> bool:
+    """Delete Qdrant collections (onec_help, onec_help_memory) and ingest cache. Returns True on success."""
+    try:
+        from qdrant_client import QdrantClient
+
+        client = QdrantClient(host=qdrant_host, port=qdrant_port, check_compatibility=False)
+        for coll in (collection, "onec_help_memory"):
+            if client.collection_exists(coll):
+                client.delete_collection(coll)
+                print(f"Dropped Qdrant collection: {coll}", file=sys.stderr)
+    except Exception as e:
+        print(f"Warning: could not drop Qdrant collections: {e}", file=sys.stderr)
+    from .ingest import clear_ingest_cache
+
+    if clear_ingest_cache():
+        print("Cleared ingest cache.", file=sys.stderr)
+    return True
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    """Initial load: ingest (help), load-snippets, load-standards. Does not erase existing data."""
+    ingest_args = _make_args(
+        sources=getattr(args, "sources", None),
+        sources_file=getattr(args, "sources_file", None),
+        languages=getattr(args, "languages", None) or os.environ.get("HELP_LANGUAGES"),
+        temp_base=os.environ.get("HELP_INGEST_TEMP") or None,
+        workers=None,
+        max_tasks=None,
+        quiet=getattr(args, "quiet", False),
+        dry_run=False,
+        recreate=False,
+        no_cache=False,
+        index_batch_size=500,
+        embedding_batch_size=None,
+        embedding_workers=None,
+    )
+    rc = cmd_ingest(ingest_args)
+    if rc != 0:
+        return rc
+    snippets_args = _make_args(
+        snippets_file=os.environ.get("SNIPPETS_JSON_PATH", ""),
+        per_function=getattr(args, "per_function", False),
+        from_project=getattr(args, "from_project", None),
+    )
+    rc = cmd_load_snippets(snippets_args)
+    if rc != 0:
+        return rc
+    standards_args = _make_args(standards_path=os.environ.get("STANDARDS_DIR", ""))
+    return cmd_load_standards(standards_args)
+
+
+def cmd_reinit(args: argparse.Namespace) -> int:
+    """Reinit: erase Qdrant + cache, then init. If DB exists with data, runs init (no wipe) unless --force."""
+    qdrant_host = os.environ.get("QDRANT_HOST", "localhost")
+    qdrant_port = int(os.environ.get("QDRANT_PORT", "6333"))
+    collection = os.environ.get("QDRANT_COLLECTION", "onec_help")
+    force = getattr(args, "force", False)
+    if not force and _collection_has_data(qdrant_host, qdrant_port, collection):
+        if not getattr(args, "quiet", False):
+            print(
+                "Index exists with data; skipping wipe. Use --force to erase and reindex.",
+                file=sys.stderr,
+            )
+        return cmd_init(args)
+    _clear_before_reinit(qdrant_host=qdrant_host, qdrant_port=qdrant_port, collection=collection)
+    reinit_args = _make_args(
+        sources=getattr(args, "sources", None),
+        sources_file=getattr(args, "sources_file", None),
+        languages=getattr(args, "languages", None) or os.environ.get("HELP_LANGUAGES"),
+        temp_base=os.environ.get("HELP_INGEST_TEMP") or None,
+        workers=None,
+        max_tasks=None,
+        quiet=getattr(args, "quiet", False),
+        dry_run=False,
+        recreate=True,
+        no_cache=True,
+        index_batch_size=500,
+        embedding_batch_size=None,
+        embedding_workers=None,
+    )
+    rc = cmd_ingest(reinit_args)
+    if rc != 0:
+        return rc
+    snippets_args = _make_args(
+        snippets_file=os.environ.get("SNIPPETS_JSON_PATH", ""),
+        per_function=getattr(args, "per_function", False),
+        from_project=getattr(args, "from_project", None),
+    )
+    rc = cmd_load_snippets(snippets_args)
+    if rc != 0:
+        return rc
+    standards_args = _make_args(standards_path=os.environ.get("STANDARDS_DIR", ""))
+    return cmd_load_standards(standards_args)
 
 
 def main() -> int:
@@ -1105,6 +1349,46 @@ def main() -> int:
     )
     p_ingest.set_defaults(func=cmd_ingest)
 
+    # init — ingest + load-snippets + load-standards (no erase)
+    p_init = sub.add_parser(
+        "init",
+        help="Initial load: ingest help, load snippets, load standards (uses env; does not erase)",
+    )
+    p_init.add_argument(
+        "--sources", "-s", type=str, nargs="*", help="path:version (or HELP_SOURCE_BASE)"
+    )
+    p_init.add_argument("--sources-file", type=str, help="File with path or path:version lines")
+    p_init.add_argument("--languages", "-l", type=str, default=None, help="e.g. ru or ru,en")
+    p_init.add_argument("--quiet", "-q", action="store_true", help="Less output")
+    p_init.add_argument(
+        "--per-function", action="store_true", help="Split .bsl by procedures for snippets"
+    )
+    p_init.add_argument("--from-project", type=str, help="Load snippets from 1C project path")
+    p_init.set_defaults(func=cmd_init)
+
+    # reinit — erase collections + cache, then init (skip wipe if DB exists, unless --force)
+    p_reinit = sub.add_parser(
+        "reinit",
+        help="Init load. If index exists with data, runs init (no wipe). Use --force to erase and reindex.",
+    )
+    p_reinit.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Always erase collections and cache before init",
+    )
+    p_reinit.add_argument(
+        "--sources", "-s", type=str, nargs="*", help="path:version (or HELP_SOURCE_BASE)"
+    )
+    p_reinit.add_argument("--sources-file", type=str, help="File with path or path:version lines")
+    p_reinit.add_argument("--languages", "-l", type=str, default=None, help="e.g. ru or ru,en")
+    p_reinit.add_argument("--quiet", "-q", action="store_true", help="Less output")
+    p_reinit.add_argument(
+        "--per-function", action="store_true", help="Split .bsl by procedures for snippets"
+    )
+    p_reinit.add_argument("--from-project", type=str, help="Load snippets from 1C project path")
+    p_reinit.set_defaults(func=cmd_reinit)
+
     # load-snippets
     p_load_snippets = sub.add_parser(
         "load-snippets",
@@ -1160,8 +1444,8 @@ def main() -> int:
     p_parse_fastcode.add_argument(
         "--pages",
         type=str,
-        default="1-51",
-        help="Page range, e.g. 1-51 or 1,2,3",
+        default="auto",
+        help="Page range: auto (detect from site), 1-51, or 1,2,3",
     )
     p_parse_fastcode.add_argument(
         "--delay",
@@ -1176,6 +1460,50 @@ def main() -> int:
         help="Do not fetch detail pages (faster, but code may be truncated)",
     )
     p_parse_fastcode.set_defaults(func=cmd_parse_fastcode)
+
+    # parse-helpf
+    p_parse_helpf = sub.add_parser(
+        "parse-helpf",
+        help="Parse HelpF.pro FAQ/Files into snippets JSON",
+    )
+    p_parse_helpf.add_argument(
+        "--out",
+        type=str,
+        default=None,
+        help="Output path (default: SNIPPETS_DIR/helpf_snippets.json or ./snippets/helpf_snippets.json)",
+    )
+    p_parse_helpf.add_argument(
+        "--source",
+        type=str,
+        default="faq",
+        choices=("faq", "file", "all"),
+        help="Source: faq, file, or all",
+    )
+    p_parse_helpf.add_argument(
+        "--pages",
+        type=str,
+        default="auto",
+        help="Page range: auto (detect from site), 1-10, or 1,2,3",
+    )
+    p_parse_helpf.add_argument(
+        "--max-items",
+        type=int,
+        default=0,
+        help="Max detail pages to fetch (0 = all)",
+    )
+    p_parse_helpf.add_argument(
+        "--delay",
+        type=float,
+        default=1.0,
+        help="Delay between requests in seconds",
+    )
+    p_parse_helpf.add_argument(
+        "--no-fetch-detail",
+        action="store_true",
+        dest="no_fetch_detail",
+        help="Do not fetch detail pages (listing only, no full content)",
+    )
+    p_parse_helpf.set_defaults(func=cmd_parse_helpf)
 
     # index-status (ingest: embedding speed, per-folder, ETA, total time)
     p_status = sub.add_parser(

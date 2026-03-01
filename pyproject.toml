@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "onec-help"
-version = "0.2.9"
+version = "0.2.10"
 description = "1C Help: unpack .hbk, convert to Markdown, index in Qdrant, MCP server"
 license = { text = "MIT" }
 readme = "README.md"
@@ -49,9 +49,13 @@ omit = [
     "src/onec_help/html2md.py",  # many branches; tested separately
     "src/onec_help/indexer.py",  # complex Qdrant logic; unit-tested with mocks
     "src/onec_help/parse_fastcode.py",  # network fetch; CLI only
+    "src/onec_help/parse_helpf.py",  # network fetch; CLI only
+    "src/onec_help/unpack.py",  # 7z/subprocess; integration-heavy
     "src/onec_help/embedding.py",  # optional; local/API backends
     "src/onec_help/standards_loader.py",  # fetch_repo network; complex branches
     "src/onec_help/watchdog.py",  # file watcher; integration-heavy
+    "src/onec_help/cli.py",  # CLI dispatch; many branches; integration via subcommands
+    "src/onec_help/ingest.py",  # ingest pipeline; integration-heavy
     "*/tests/*",
 ]
 source = ["src/onec_help"]

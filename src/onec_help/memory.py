@@ -279,7 +279,7 @@ class MemoryStore:
         """Bulk upsert curated items into long memory.
         items: [{title, description, code_snippet}, ...]. Returns count of upserted items.
         progress_callback: optional (done, total, skipped) called periodically.
-        domain: 'snippets' | 'standards' — filter for search_long.
+        domain: 'snippets' | 'community_help' | 'standards' — filter for search_long.
         Uses get_embedding_batch for throughput (same benefits as help indexer)."""
         from . import embedding
 

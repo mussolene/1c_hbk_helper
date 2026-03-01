@@ -61,6 +61,17 @@ def _ingest_cache_path() -> str:
     return path
 
 
+def clear_ingest_cache() -> bool:
+    """Delete ingest cache DB file (cache + status). Returns True if removed or absent."""
+    path = _ingest_cache_path()
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+        return True
+    except OSError:
+        return False
+
+
 def _log_cache_error(op: str, path: str, err: Exception) -> None:
     """Log cache I/O error once per run to avoid spam."""
     if not hasattr(_log_cache_error, "_warned"):
@@ -68,9 +79,48 @@ def _log_cache_error(op: str, path: str, err: Exception) -> None:
     key = (op, path)
     if key not in _log_cache_error._warned:  # type: ignore[attr-defined]
         _log_cache_error._warned.add(key)  # type: ignore[attr-defined]
+        env_hint = ""
+        if "INGEST_CACHE_FILE" not in os.environ:
+            env_hint = " Set INGEST_CACHE_FILE to a persistent path (e.g. in Docker: /app/var/ingest_cache/ingest_cache.db)."
         _log(
-            f"[ingest] WARN: ingest cache {op} failed for {mask_path_for_log(path)}: {safe_error_message(err)}. Re-indexing will not be skipped."
+            f"[ingest] WARN: ingest cache {op} failed for {mask_path_for_log(path)}: {safe_error_message(err)}. "
+            f"Re-indexing will not be skipped.{env_hint} Check path exists, permissions, and disk space."
         )
+
+
+def read_ingest_cache_entries(limit: int = 100) -> list[dict[str, Any]]:
+    """Return list of cached indexed files from ingest_cache for display.
+    Each item: {path, version, language, points, status: 'cached'}."""
+    entries: list[dict[str, Any]] = []
+    path = _ingest_cache_path()
+    try:
+        conn = sqlite3.connect(path)
+        conn.execute(
+            f"CREATE TABLE IF NOT EXISTS {_CACHE_TABLE} "
+            "(key TEXT PRIMARY KEY, hash TEXT NOT NULL, indexed INTEGER NOT NULL, points INTEGER)"
+        )
+        for row in conn.execute(
+            f"SELECT key, hash, indexed, points FROM {_CACHE_TABLE} WHERE indexed = 1 ORDER BY key LIMIT ?",
+            (limit,),
+        ):
+            key = row[0]
+            parts = key.split("/", 2)
+            version = parts[0] if len(parts) > 0 else ""
+            language = parts[1] if len(parts) > 1 else ""
+            path_name = parts[2] if len(parts) > 2 else key
+            entries.append(
+                {
+                    "path": path_name,
+                    "version": version,
+                    "language": language,
+                    "points": row[3] or 0,
+                    "status": "cached",
+                }
+            )
+        conn.close()
+    except (OSError, sqlite3.Error):
+        pass
+    return entries
 
 
 def _load_ingest_cache() -> dict[str, dict[str, Any]]:
@@ -185,6 +235,9 @@ def _persist_ingest_status_sqlite(
     failed_tasks: list[dict[str, Any]] | None = None,
     current_task_points: int | None = None,
     current_task_estimated_total: int | None = None,
+    completed_files: list[dict[str, Any]] | None = None,
+    max_workers: int | None = None,
+    embedding_workers: int | None = None,
 ) -> None:
     """Persist ingest status to SQLite (ingest_current). On completion, append to ingest_runs."""
     path = _ingest_cache_path()
@@ -199,6 +252,10 @@ def _persist_ingest_status_sqlite(
         "status": status,
         "elapsed_sec": round(elapsed, 1),
     }
+    if max_workers is not None:
+        payload["max_workers"] = max_workers
+    if embedding_workers is not None:
+        payload["embedding_workers"] = embedding_workers
     if status == "completed":
         payload["current"] = []
     elif current is not None:
@@ -209,6 +266,8 @@ def _persist_ingest_status_sqlite(
         payload["current_task_estimated_total"] = current_task_estimated_total
     if failed_tasks:
         payload["failed_tasks"] = failed_tasks[-50:]
+    if completed_files is not None:
+        payload["completed_files"] = completed_files
     if elapsed > 0 and total_points > 0:
         payload["embedding_speed_pts_per_sec"] = round(total_points / elapsed, 2)
     failed_count = len(failed_tasks) if failed_tasks else 0
@@ -284,16 +343,22 @@ def _persist_ingest_status_sqlite(
             row = cursor.fetchone()
             if row:
                 conn.execute(f"DELETE FROM {_STATUS_TABLE_RUNS} WHERE id <= ?", (row[0],))
-                conn.execute(
-                    f"DELETE FROM {_STATUS_TABLE_FAILED} WHERE run_id <= ?", (row[0],)
-                )
+                conn.execute(f"DELETE FROM {_STATUS_TABLE_FAILED} WHERE run_id <= ?", (row[0],))
             conn.execute(f"DELETE FROM {_STATUS_TABLE_CURRENT} WHERE id = 1")
         else:
             conn.execute(
                 f"""INSERT OR REPLACE INTO {_STATUS_TABLE_CURRENT}
                     (id, started_at, total_tasks, done_tasks, total_points, status, payload_json, updated_at)
                     VALUES (1, ?, ?, ?, ?, ?, ?, ?)""",
-                (started_at, total_tasks, done_tasks, total_points, status, payload_json, updated_at),
+                (
+                    started_at,
+                    total_tasks,
+                    done_tasks,
+                    total_points,
+                    status,
+                    payload_json,
+                    updated_at,
+                ),
             )
         conn.commit()
         conn.close()
@@ -328,6 +393,7 @@ def _status_writer_loop(
             folders = copy.deepcopy(state["folders"])
             current = list(state["current_work"].values())
             failed_tasks = list(state.get("failed", []))
+            completed_files = list(state.get("completed_files", []))
             current_task_points = state.get("current_task_points", 0) or 0
             current_task_estimated = state.get("current_task_estimated_total")
         _write_ingest_status(
@@ -342,6 +408,9 @@ def _status_writer_loop(
             failed_tasks=failed_tasks,
             current_task_points=current_task_points if current_task_points > 0 else None,
             current_task_estimated_total=current_task_estimated,
+            completed_files=completed_files,
+            max_workers=state.get("max_workers"),
+            embedding_workers=state.get("embedding_workers"),
         )
 
 
@@ -363,6 +432,9 @@ def _write_ingest_status(
     failed_tasks: list[dict[str, Any]] | None = None,
     current_task_points: int | None = None,
     current_task_estimated_total: int | None = None,
+    completed_files: list[dict[str, Any]] | None = None,
+    max_workers: int | None = None,
+    embedding_workers: int | None = None,
 ) -> None:
     """Write ingest status to SQLite cache DB for index-status command."""
     _persist_ingest_status_sqlite(
@@ -378,6 +450,9 @@ def _write_ingest_status(
         failed_tasks=failed_tasks,
         current_task_points=current_task_points,
         current_task_estimated_total=current_task_estimated_total,
+        completed_files=completed_files,
+        max_workers=max_workers,
+        embedding_workers=embedding_workers,
     )
 
 
@@ -622,7 +697,7 @@ def run_ingest(
     cache_entries = _load_ingest_cache()
     to_process: list[tuple[Path, str, str]] = []
     task_hashes: dict[tuple[str, str, str], str] = {}
-    skipped = 0
+    skipped_files: list[dict[str, Any]] = []
     for path, version, lang in all_tasks:
         key = f"{version}/{lang}/{path.name}"
         h = None if skip_cache else _file_sha256(path)
@@ -633,10 +708,19 @@ def run_ingest(
         task_hashes[(version, lang, path.name)] = h
         ent = cache_entries.get(key)
         if ent and ent.get("hash") == h and ent.get("indexed"):
-            skipped += 1
+            skipped_files.append(
+                {
+                    "path": path.name,
+                    "version": version,
+                    "language": lang,
+                    "points": ent.get("points") or 0,
+                    "status": "skip",
+                }
+            )
             continue
         to_process.append((path, version, lang))
     tasks = to_process
+    skipped = len(skipped_files)
     if verbose and skipped > 0:
         _log(f"[ingest] Cache hit: skip {skipped} already indexed .hbk (unchanged)")
 
@@ -694,23 +778,30 @@ def run_ingest(
         total_points=0,
         folders=folders,
         status="in_progress",
+        completed_files=skipped_files,
+        max_workers=max_workers,
+        embedding_workers=embedding_workers,
     )
 
     state_lock = threading.Lock()
     current_work: dict[int, dict[str, Any]] = {}
     failed_tasks_list: list[dict[str, Any]] = []
+    completed_files: list[dict[str, Any]] = list(skipped_files)
     state: dict[str, Any] = {
         "done_tasks": 0,
         "total_points": 0,
         "folders": folders,
         "current_work": current_work,
         "failed": failed_tasks_list,
+        "completed_files": completed_files,
         "started_at": started_at,
         "embedding_backend": embedding_backend,
         "total_tasks": len(tasks),
         "status": "in_progress",
         "current_task_points": 0,
         "current_task_estimated_total": None,
+        "max_workers": max_workers,
+        "embedding_workers": embedding_workers,
     }
     interval_sec = float(
         os.environ.get("INDEX_STATUS_INTERVAL_SEC", str(STATUS_UPDATE_INTERVAL_SEC))
@@ -743,17 +834,17 @@ def run_ingest(
     try:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
-            executor.submit(
-                _unpack_and_build_docs,
-                path,
-                version,
-                lang,
-                base,
-                unpack_hbk,
-                build_docs,
-                current_work,
-                state_lock,
-            ): (path, version, lang)
+                executor.submit(
+                    _unpack_and_build_docs,
+                    path,
+                    version,
+                    lang,
+                    base,
+                    unpack_hbk,
+                    build_docs,
+                    current_work,
+                    state_lock,
+                ): (path, version, lang)
                 for path, version, lang in tasks
             }
             for future in as_completed(futures):
@@ -770,6 +861,15 @@ def run_ingest(
                                 "version": version,
                                 "language": language,
                                 "error": (err_msg or "unknown").split("\n")[0].strip()[:200],
+                            }
+                        )
+                        completed_files.append(
+                            {
+                                "path": path_hbk.name,
+                                "version": version,
+                                "language": language,
+                                "points": 0,
+                                "status": "fail",
                             }
                         )
                     for fo in folders:
@@ -791,6 +891,9 @@ def run_ingest(
                         folders=folders,
                         status="in_progress",
                         failed_tasks=failed_tasks_list,
+                        completed_files=completed_files,
+                        max_workers=max_workers,
+                        embedding_workers=embedding_workers,
                     )
                     if verbose:
                         _log(
@@ -821,8 +924,12 @@ def run_ingest(
                             state["current_task_points"] = pts
                             if total_estimated is not None:
                                 state["current_task_estimated_total"] = total_estimated
-                            if phase and main_ident in current_work:
-                                current_work[main_ident]["stage"] = phase
+                            if main_ident in current_work:
+                                current_work[main_ident]["points"] = pts
+                                if total_estimated is not None:
+                                    current_work[main_ident]["estimated_total"] = total_estimated
+                                if phase:
+                                    current_work[main_ident]["stage"] = phase
 
                     try:
                         n = build_index(
@@ -846,6 +953,16 @@ def run_ingest(
                         if h:
                             cache_entries[key] = {"hash": h, "indexed": True, "points": n}
                             _update_ingest_cache_entry(key, h, n)
+                        with state_lock:
+                            completed_files.append(
+                                {
+                                    "path": path_hbk.name,
+                                    "version": version,
+                                    "language": language,
+                                    "points": n,
+                                    "status": "ok",
+                                }
+                            )
                         html_c, md_c = _count_html_md(md_dir)
                         for fo in folders:
                             if fo["version"] == version and fo["language"] == language:
@@ -870,6 +987,9 @@ def run_ingest(
                             status="in_progress",
                             current=current_snapshot,
                             failed_tasks=failed_tasks_list,
+                            completed_files=completed_files,
+                            max_workers=max_workers,
+                            embedding_workers=embedding_workers,
                         )
                         if verbose:
                             _log(
@@ -906,6 +1026,9 @@ def run_ingest(
             finished_at=time.time(),
             current=[],
             failed_tasks=failed_tasks_list,
+            completed_files=completed_files,
+            max_workers=max_workers,
+            embedding_workers=embedding_workers,
         )
         _vacuum_cache_db()
         try:

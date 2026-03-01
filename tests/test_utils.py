@@ -66,6 +66,10 @@ def test_format_duration() -> None:
     assert format_duration(3661) == "1h 1m"
     assert format_duration(7200) == "2h"
     assert format_duration(90061) == "1d 1h"
+    assert format_duration(-1) == "—"
+    assert format_duration(float("nan")) == "—"
+    assert format_duration(3605) == "1h 5s"
+    assert format_duration(86700) == "1d 5m"
 
 
 def test_path_inside_base_valueerror_returns_false() -> None:

@@ -6,11 +6,16 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
 from ._utils import safe_error_message
+from .ingest import _ingest_cache_path
+
+
+def _watchdog_state_path() -> Path:
+    """State file path: same directory as ingest cache (persists across container restarts)."""
+    return Path(_ingest_cache_path()).parent / "watchdog_hbk_cache.json"
 
 
 def run_watchdog(
@@ -33,7 +38,8 @@ def run_watchdog(
     if not base.exists() or not base.is_dir():
         print(f"[watchdog] HELP_SOURCE_BASE not a directory: {base}", file=sys.stderr, flush=True)
         return
-    cache_path = Path(tempfile.gettempdir()) / "watchdog_hbk_cache.json"
+    cache_path = _watchdog_state_path()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
     last_hbk: dict = {}
     if cache_path.exists():
         try:

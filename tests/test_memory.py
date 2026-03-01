@@ -355,6 +355,17 @@ def test_upsert_curated_snippets_success(tmp_path: Path) -> None:
                     assert payload.get("domain") == "snippets"
 
 
+def test_format_long_summary_fallback(tmp_path: Path) -> None:
+    """_format_long_summary uses description/code when no title/query/topic_path."""
+    store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+    result = store._format_long_summary(
+        {"description": "Test desc", "code_snippet": "Сообщить(1);"}
+    )
+    assert "1C snippet:" in result
+    assert "Test desc" in result
+    assert "Сообщить" in result
+
+
 def test_upsert_curated_snippets_skips_invalid(tmp_path: Path) -> None:
     """upsert_curated_snippets skips items without title and code_snippet."""
     with patch("onec_help.embedding.is_embedding_available", return_value=True):
@@ -374,3 +385,191 @@ def test_upsert_curated_snippets_skips_invalid(tmp_path: Path) -> None:
                 ]
                 n = store.upsert_curated_snippets(items)
                 assert n == 1
+
+
+def test_trim_medium_no_file(tmp_path: Path) -> None:
+    """_trim_medium returns early when medium_path does not exist."""
+    store = MemoryStore(tmp_path, short_limit=5, medium_limit=10, medium_ttl_days=7)
+    assert not store.medium_path.exists()
+    store._trim_medium()
+    assert not store.medium_path.exists()
+
+
+def test_trim_medium_empty_lines(tmp_path: Path) -> None:
+    """_trim_medium handles empty file."""
+    store = MemoryStore(tmp_path, short_limit=5, medium_limit=10, medium_ttl_days=7)
+    store.medium_path.write_text("")
+    store._trim_medium()
+    assert store.medium_path.read_text() == ""
+
+
+def test_trim_medium_trims_over_limit(tmp_path: Path) -> None:
+    """_trim_medium trims to medium_limit when kept exceeds it."""
+    import time
+
+    store = MemoryStore(tmp_path, short_limit=5, medium_limit=3, medium_ttl_days=7)
+    cutoff = time.time() - 1
+    lines = [json.dumps({"ts": cutoff + i, "summary": f"s{i}"}) for i in range(5)]
+    store.medium_path.write_text("\n".join(lines))
+    store._trim_medium()
+    kept = [json.loads(ln) for ln in store.medium_path.read_text().strip().split("\n") if ln]
+    assert len(kept) <= 3
+
+
+def test_append_pending_empty_existing(tmp_path: Path) -> None:
+    """_append_pending handles existing file with empty content."""
+    store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+    store.pending_path.write_text("")
+    store._append_pending({"topic_path": "z.md"}, 1.0)
+    data = json.loads(store.pending_path.read_text())
+    assert len(data) == 1
+    assert data[0]["payload"]["topic_path"] == "z.md"
+
+
+def test_process_pending_data_not_list(tmp_path: Path) -> None:
+    """process_pending returns 0 when data is not a list."""
+    with patch("onec_help.embedding.is_embedding_available", return_value=True):
+        store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+        store.pending_path.write_text('{"a": 1}')
+        assert store.process_pending() == 0
+
+
+def test_process_pending_skips_empty_payload(tmp_path: Path) -> None:
+    """process_pending skips items with empty payload."""
+    with patch("onec_help.embedding.is_embedding_available", return_value=True):
+        store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+        store.pending_path.write_text('[{"id":"x","payload":{},"created_at":0}]')
+        assert store.process_pending() == 0
+
+
+def test_process_pending_vectors_mismatch_retry(tmp_path: Path) -> None:
+    """process_pending retries when vectors count mismatches; if still wrong, writes back remaining."""
+    store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+    store.pending_path.write_text(
+        json.dumps([{"id": "i1", "payload": {"title": "A"}, "created_at": 1.0}])
+    )
+    with patch("onec_help.embedding.is_embedding_available", return_value=True):
+        with patch(
+            "onec_help.embedding.get_embedding_batch",
+            return_value=[],  # always wrong count
+        ):
+            n = store.process_pending()
+    assert n == 0
+    remaining = json.loads(store.pending_path.read_text())
+    assert len(remaining) == 1
+
+
+def test_process_pending_upsert_exception(tmp_path: Path) -> None:
+    """process_pending keeps failed item in remaining when _upsert_long raises."""
+    store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+    store.pending_path.write_text(
+        json.dumps(
+            [{"id": "i1", "payload": {"title": "A", "code_snippet": "x"}, "created_at": 1.0}]
+        )
+    )
+    upsert_call_count = 0
+
+    def upsert_side_effect(*args, **kwargs):
+        nonlocal upsert_call_count
+        upsert_call_count += 1
+        if upsert_call_count == 1:
+            raise RuntimeError("Qdrant down")
+        return None
+
+    with patch("onec_help.embedding.is_embedding_available", return_value=True):
+        with patch(
+            "onec_help.embedding.get_embedding_batch",
+            return_value=[[0.1] * 384],
+        ):
+            with patch.object(store, "_upsert_long", side_effect=upsert_side_effect):
+                n = store.process_pending()
+                assert n == 0
+                remaining = json.loads(store.pending_path.read_text())
+                assert len(remaining) == 1
+
+
+def test_upsert_curated_skips_non_dict(tmp_path: Path) -> None:
+    """upsert_curated_snippets skips non-dict items."""
+    with patch("onec_help.embedding.is_embedding_available", return_value=True):
+        with patch(
+            "onec_help.embedding.get_embedding_batch",
+            return_value=[[0.1] * 384],
+        ):
+            with patch("qdrant_client.QdrantClient") as mock_qc:
+                mock_client = MagicMock()
+                mock_client.collection_exists.return_value = False
+                mock_qc.return_value = mock_client
+                store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+                items = [{"title": "A", "code_snippet": "x"}, "not a dict", None]
+                n = store.upsert_curated_snippets(items)
+                assert n == 1
+
+
+def test_upsert_curated_vectors_mismatch(tmp_path: Path) -> None:
+    """upsert_curated_snippets returns 0 and calls progress_callback when vectors mismatch."""
+    store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+    items = [{"title": "A", "code_snippet": "x"}]
+    progress_calls = []
+
+    def cb(done, total, skipped):
+        progress_calls.append((done, total, skipped))
+
+    with patch("onec_help.embedding.is_embedding_available", return_value=True):
+        with patch(
+            "onec_help.embedding.get_embedding_batch",
+            return_value=[[0.1] * 384, [0.1] * 384],  # wrong count
+        ):
+            n = store.upsert_curated_snippets(items, progress_callback=cb)
+    assert n == 0
+    assert len(progress_calls) >= 1
+
+
+def test_upsert_curated_upsert_exception(tmp_path: Path) -> None:
+    """upsert_curated_snippets skips item when _upsert_long raises."""
+    store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+    items = [
+        {"title": "A", "code_snippet": "x"},
+        {"title": "B", "code_snippet": "y"},
+    ]
+    call_count = 0
+
+    def upsert_raise_second(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise RuntimeError("fail")
+        return None
+
+    with patch("onec_help.embedding.is_embedding_available", return_value=True):
+        with patch(
+            "onec_help.embedding.get_embedding_batch",
+            return_value=[[0.1] * 384, [0.1] * 384],
+        ):
+            with patch.object(store, "_upsert_long", side_effect=upsert_raise_second):
+                n = store.upsert_curated_snippets(items)
+                assert n == 1
+
+
+def test_search_long_fallback_search(tmp_path: Path) -> None:
+    """search_long uses client.search when query_points is not available."""
+    with patch("onec_help.embedding.get_embedding", return_value=[0.1] * 384):
+        with patch("qdrant_client.QdrantClient") as mock_qc:
+            mock_client = MagicMock()
+            mock_client.collection_exists.return_value = True
+            del mock_client.query_points
+            mock_client.search.return_value = [
+                MagicMock(payload={"topic_path": "a.md"}, score=0.8),
+            ]
+            mock_qc.return_value = mock_client
+            store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+            results = store.search_long("query", limit=3)
+            assert len(results) == 1
+            assert results[0]["payload"]["topic_path"] == "a.md"
+
+
+def test_search_long_exception(tmp_path: Path) -> None:
+    """search_long returns [] on exception."""
+    with patch("onec_help.embedding.get_embedding", return_value=[0.1] * 384):
+        with patch("qdrant_client.QdrantClient", side_effect=RuntimeError("connection refused")):
+            store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+            assert store.search_long("query") == []

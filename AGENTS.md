@@ -8,23 +8,34 @@
 
 ## Команды и сценарии
 
-- **Локально:** `python -m onec_help unpack/build-docs/build-index/ingest/load-snippets/load-standards/parse-fastcode/watchdog/serve/mcp <args>`
+- **Локально:** `python -m onec_help unpack/build-docs/build-index/ingest/load-snippets/load-standards/parse-fastcode/parse-helpf/watchdog/serve/mcp <args>`
+- **init** — стартовая загрузка: ingest (справка) + load-snippets + load-standards. Использует env (HELP_SOURCE_BASE, SNIPPETS_DIR, STANDARDS_REPOS). Не стирает данные.
+- **reinit** — выполняет init. Если индекс уже существует с данными — без стирания (init). **reinit --force** — стирает коллекции и cache, затем init.
 - **Docker:** `docker-compose up` (сервисы `qdrant` + `mcp` + `bsl-bridge`). В mcp смонтирован `/opt/1cv8`, cron раз в сутки в 3:00 запускает ingest; при `WATCHDOG_ENABLED=1` — watchdog в фоне. bsl-bridge — BSL LS для проекта (volume `.:/projects`, код в `src` или в корне).
 - **По умолчанию split:** `docker compose up -d` — mcp только API (MCP_MODE=api), ingest-worker — batch (ingest, cron, load-snippets, watchdog). Индексация: `make ingest` (exec ingest-worker).
 - **Full (один контейнер):** `docker compose -f docker-compose.full.yml up -d` — mcp выполняет всё. Индексация: `make ingest-full`.
 - **Индекс вручную:** `make ingest` (split) или `make ingest-full` (full). Каталог версий — `HELP_SOURCE_BASE`, подпапки = версии 1С, поиск .hbk рекурсивно, в т.ч. в `bin/` на Windows.
-- **Сниппеты:** `docs/snippets/` — примеры (не загружаются). Реальные — из тома `./snippets:/data/snippets`, при старте `load-snippets`. `load-snippets --from-project src` — из проекта 1С. `make parse-fastcode`, `make load-snippets`, `make snippets`.
+- **Сниппеты:** `docs/snippets/` — примеры (не загружаются). Реальные — из тома `./snippets:/data/snippets`, при старте `load-snippets`. `load-snippets --from-project src` — из проекта 1С. `make parse-fastcode`, `make parse-helpf`, `make load-snippets`, `make snippets`.
 - **Стандарты:** `make load-standards` — по умолчанию STANDARDS_REPOS загружает совместно 1C-Company/v8-code-style и zeegin/v8std (v8std.ru).
+
+## Ingest: переиндексация при перезапуске
+
+Если файлы переиндексируются при каждом перезапуске:
+
+1. **INGEST_CACHE_FILE** — должен указывать на persistent volume. В Docker: `/app/var/ingest_cache/ingest_cache.db` (volume `./data/ingest_cache`). Не меняйте путь в production без привязки к постоянному каталогу.
+2. **Ошибка чтения кэша** — при `[ingest] WARN: ingest cache read failed` проверьте права, существование файла, место на диске. В логе будет подсказка.
+3. **Watchdog** — state хранится в каталоге INGEST_CACHE (watchdog_hbk_cache.json); при рестарте контейнера ingest вызывается, но неизменённые .hbk пропускаются по кэшу.
+4. **reinit --force** — стирает коллекции и кэш; полная переиндексация ожидаема.
 
 ## Embedding и индексация
 
-- **Точки интеграции:** indexer (справка), memory.upsert_curated_snippets (snippets, standards), memory.process_pending, memory._write_long_or_pending (real-time). Все batch-операции используют `get_embedding_batch`; только real-time события — `get_embedding`.
+- **Точки интеграции:** indexer (справка), memory.upsert_curated_snippets (snippets, community_help, standards), memory.process_pending, memory._write_long_or_pending (real-time). Все batch-операции используют `get_embedding_batch`; только real-time события — `get_embedding`.
 - **Единая логика:** sanitize, truncation 2000 символов, retry при len(vectors)!=len(items), 429+Retry-After, EMBEDDING_MAX_CONCURRENT (семафор), retry с меньшим батчем перед fallback. См. `docs/embedding.md`.
 - **Бэкенды:** local, openai_api, deterministic (384 dim без модели), none (плейсхолдер).
 
 ## Структура кода
 
-- `src/onec_help/`: пакет (unpack, categories, html2md, tree, web, indexer, memory, parse_fastcode, standards_loader, watchdog, mcp_server, cli).
+- `src/onec_help/`: пакет (unpack, categories, html2md, tree, web, indexer, memory, parse_fastcode, parse_helpf, snippet_classifier, standards_loader, watchdog, mcp_server, cli).
 - `unpack` — 7z, zipfile, ZIP from offset, unzip, scan local headers (schemui/mapui FileStorage); `unpack-diag` — диагностика при ошибке; `categories` — парсинг `__categories__` и дерево TOC; `html2md` — HTML → Markdown; `tree` — дерево для веба; `web` — Flask; `indexer` — Qdrant; `memory` — тройная память (short/medium/long); `watchdog` — мониторинг .hbk и pending embeddings; `mcp_server` — FastMCP, инструменты search_1c_help, search_1c_help_with_content, get_1c_code_answer, get_1c_help_topic, get_1c_function_info, save_1c_snippet, get_form_metadata, get_module_info, get_1c_help_related, compare_1c_help, trigger_reindex.
 - Тесты в `tests/`, покрытие ≥90% (pytest-cov, `--cov-fail-under=90`).
 - Фикстуры — минимальный срез справки в `tests/fixtures/help_sample/`.

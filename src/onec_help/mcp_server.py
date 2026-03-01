@@ -275,7 +275,12 @@ def run_mcp(
         for m in memory_results:
             payload = m.get("payload", {})
             title = payload.get("title", "") or payload.get("summary", "")[:80]
-            src = " [пример]" if payload.get("domain") == "snippets" else " [memory]"
+            d = payload.get("domain", "")
+            src = (
+                " [пример]"
+                if d == "snippets"
+                else (" [инструкция]" if d == "community_help" else " [memory]")
+            )
             lines.append(f"{idx}. **{title}**{src}")
             lines.append(f"   {str(payload)[:SNIPPET_MAX_CHARS]}...")
             idx += 1
@@ -373,7 +378,12 @@ def run_mcp(
                     code = payload.get("code_snippet", "")
                     desc = payload.get("description", "") or payload.get("summary", "")[:200]
                     title = payload.get("title", "") or desc[:60]
-                    src = " [пример]" if payload.get("domain") == "snippets" else ""
+                    d = payload.get("domain", "")
+                    src = (
+                        " [пример]"
+                        if d == "snippets"
+                        else (" [инструкция]" if d == "community_help" else "")
+                    )
                     block = (
                         f"### {title}{src}\n\n{desc}\n\n```bsl\n{code}\n```"
                         if code
@@ -505,7 +515,8 @@ def run_mcp(
     @mcp.tool()
     def get_form_metadata(xml_content: str) -> str:
         """Parse Form.xml content and return attributes and commands.
-        xml_content: raw XML of Form.xml (read the file and pass its content)."""
+        xml_content: raw XML of Form.xml — must be complete with all xmlns declarations
+        (v8, cfg, xs, etc.). Truncated XML without namespaces causes Parse error."""
         err = _check_rate_limit()
         if err:
             return err
@@ -605,8 +616,9 @@ def run_mcp(
         include_diff: bool = False,
     ) -> str:
         """Compare a help topic between two platform versions.
-        topic_path_or_query: path (e.g. 'Format971.md') or search query to find topic.
-        version_left, version_right: version labels (e.g. '8.3.27.1859', '8.3.27.1719').
+        Prefer topic_path (e.g. 'objects/.../CryptoManager.md') from search results —
+        using a query can return a different topic due to semantic search.
+        topic_path_or_query: path or search query. version_left, version_right: e.g. '8.3.27.1859'.
         include_diff: if True, append unified diff of the two versions."""
         from .indexer import compare_1c_help as _compare
 
@@ -725,11 +737,15 @@ def run_mcp(
                 if failed:
                     lines.append(f"Failed: {len(failed)}")
                     for ft in failed[:5]:
-                        lines.append(f"  - {ft.get('path', '?')}: {(ft.get('error', '') or '')[:80]}")
+                        lines.append(
+                            f"  - {ft.get('path', '?')}: {(ft.get('error', '') or '')[:80]}"
+                        )
             else:
                 total_sec = ingest.get("total_elapsed_sec")
                 total_pts = ingest.get("total_points", 0)
-                failed_count = ingest.get("failed_count", 0) or len(ingest.get("failed_tasks") or [])
+                failed_count = ingest.get("failed_count", 0) or len(
+                    ingest.get("failed_tasks") or []
+                )
                 lines.append("")
                 lines.append("**Last ingest**")
                 if total_sec is not None:
@@ -757,10 +773,9 @@ def run_mcp(
         path: str | None = None,
         choose_index: int | None = None,
     ) -> str:
-        """Get description, syntax, parameters, return value, and examples for a 1C function/method by name.
-        When several matches (e.g. Формат, ФорматКартинки), use choose_index to pick the right one.
-        name: function or method name (e.g. 'Формат', 'DataProcessor.Имя').
-        path: optional - when given, fetch only this topic path (e.g. 'Format971.md'). choose_index: 1-based index when multiple matches."""
+        """Get description, syntax, parameters, return value for a 1C function/method.
+        name: e.g. 'Формат', 'МенеджерКриптографии.Подписать'. path: optional exact topic path.
+        When ambiguous (e.g. Формат → function vs format topic), use choose_index=1,2,... or search_1c_help_keyword for exact API."""
         name_clean = name.strip()
         if not name_clean:
             return "Provide a function or method name."
@@ -781,24 +796,33 @@ def run_mcp(
         if best_priority == 3:
             lines = [
                 f"No exact match for «{name_clean}».",
-                "Try search_1c_help_keyword with a related term, e.g. ПроцессорВыводаРезультатаКомпоновкиДанныхВКоллекциюЗначений.",
+                "Use search_1c_help_keyword with exact API name (e.g. Формат for function, Тип.Метод for method).",
                 "",
                 "Keyword suggestions (from index):",
             ]
-            for r in relevant[:5]:
-                lines.append(f"- {r[0].get('path', '')}: {r[0].get('title', '')}")
+            for i, r in enumerate(relevant[:8], 1):
+                lines.append(f"{i}. {r[0].get('title', '')} — `{r[0].get('path', '')}`")
+            lines.append("")
+            lines.append(
+                "Call with path=<exact_path> or get_1c_function_info(name=..., choose_index=N) if one matches."
+            )
             return "\n".join(lines)
         if len(best) > 1:
             idx = choose_index
             if idx is not None and 1 <= idx <= len(best):
                 content = _get_topic(best[idx - 1]["path"])
                 return content or "Topic not found."
-            lines = ["Найдено несколько совпадений:"]
-            for r in best[:10]:
-                lines.append(f"- {r.get('path', '')}: {r.get('title', '')}")
+            lines = [
+                f"Several matches for «{name_clean}». Use choose_index (1–{len(best)}) to select:",
+                "",
+            ]
+            for i, r in enumerate(best[:10], 1):
+                lines.append(f"  {i}. {r.get('title', '')} — `{r.get('path', '')}`")
+            lines.append("")
+            lines.append("Example: get_1c_function_info(name=..., choose_index=2)")
             content = _get_topic(best[0]["path"])
             if content:
-                lines.append("\n---\nКонтент первого совпадения:\n\n" + content)
+                lines.append("\n---\nContent of first match:\n\n" + content)
             return "\n".join(lines)
         if best:
             content = _get_topic(best[0]["path"])

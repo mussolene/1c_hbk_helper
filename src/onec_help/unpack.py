@@ -3,8 +3,8 @@
 import os
 import struct
 import subprocess
-import zlib
 import zipfile
+import zlib
 from io import BytesIO
 from pathlib import Path
 
@@ -212,13 +212,16 @@ def unpack_diag(archive_path: str | Path, output_dir: str | Path) -> None:
                 cmd.insert(2, f"-t{fmt}")
             r = subprocess.run(cmd, capture_output=True, text=True)
             ok = r.returncode == 0 or any(out.iterdir())
-            print(f"7z {'-t' + fmt if fmt else '(default)'}: returncode={r.returncode}, extracted={ok}")
+            print(
+                f"7z {'-t' + fmt if fmt else '(default)'}: returncode={r.returncode}, extracted={ok}"
+            )
             if r.stderr:
                 print(f"  stderr: {(r.stderr or '')[:300]}")
             if r.stdout and "Error" in r.stdout:
                 print(f"  stdout: {(r.stdout or '')[:300]}")
             if ok:
                 import shutil
+
                 shutil.rmtree(out)
                 out.mkdir(parents=True, exist_ok=True)
             print()
@@ -231,6 +234,7 @@ def unpack_diag(archive_path: str | Path, output_dir: str | Path) -> None:
         print(f"zipfile (Python): {ok}")
         if ok:
             import shutil
+
             shutil.rmtree(out)
             out.mkdir(parents=True, exist_ok=True)
     except Exception as e:
@@ -243,6 +247,7 @@ def unpack_diag(archive_path: str | Path, output_dir: str | Path) -> None:
         print(f"unzip (cmd): {ok}")
         if ok:
             import shutil
+
             shutil.rmtree(out)
             out.mkdir(parents=True, exist_ok=True)
     except Exception as e:
@@ -255,6 +260,7 @@ def unpack_diag(archive_path: str | Path, output_dir: str | Path) -> None:
         print(f"scan local headers: {ok}")
         if ok:
             import shutil
+
             shutil.rmtree(out)
             out.mkdir(parents=True, exist_ok=True)
     except Exception as e:

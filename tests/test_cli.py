@@ -1,5 +1,6 @@
 """Tests for CLI."""
 
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +17,8 @@ from onec_help.cli import (
     cmd_load_snippets,
     cmd_load_standards,
     cmd_mcp,
+    cmd_parse_fastcode,
+    cmd_parse_helpf,
     cmd_unpack,
     cmd_unpack_dir,
     cmd_watchdog,
@@ -375,7 +378,12 @@ def test_cmd_index_status_shows_failed_task_details(
     """index-status shows failed task error details when failed_tasks in ingest status."""
     mock_status.return_value = {"exists": True, "collection": "onec_help", "points_count": 100}
     mock_collections.return_value = [
-        {"name": "onec_help", "points_count": 100, "indexed_vectors_count": 100, "segments_count": 1},
+        {
+            "name": "onec_help",
+            "points_count": 100,
+            "indexed_vectors_count": 100,
+            "segments_count": 1,
+        },
     ]
     mock_ingest.return_value = {
         "status": "completed",
@@ -383,12 +391,17 @@ def test_cmd_index_status_shows_failed_task_details(
             {"version": "8.3", "language": "ru", "err_count": 1, "hbk_count": 2},
         ],
         "failed_tasks": [
-            {"version": "8.3", "language": "ru", "path": "shcntx_ru.hbk", "error": "7z failed: invalid archive"},
+            {
+                "version": "8.3",
+                "language": "ru",
+                "path": "shcntx_ru.hbk",
+                "error": "7z failed: invalid archive",
+            },
         ],
     }
     assert cmd_index_status(make_args()) == 0
     out = capsys.readouterr().out
-    assert "Failed: 1" in out
+    assert "1 failed" in out or "Failed: 1" in out
     assert "shcntx_ru" in out
 
 
@@ -406,7 +419,12 @@ def test_cmd_index_status_shows_last_run_when_no_active_ingest(
     """index-status shows Last run from ingest_runs when no active ingest."""
     mock_status.return_value = {"exists": True, "collection": "onec_help", "points_count": 5000}
     mock_collections.return_value = [
-        {"name": "onec_help", "points_count": 5000, "indexed_vectors_count": 5000, "segments_count": 2},
+        {
+            "name": "onec_help",
+            "points_count": 5000,
+            "indexed_vectors_count": 5000,
+            "segments_count": 2,
+        },
     ]
     mock_ingest.return_value = None
     mock_last_run.return_value = {
@@ -748,13 +766,105 @@ def test_cmd_load_snippets_from_folder(mock_get_store, tmp_path: Path) -> None:
     assert titles == {"example", "other", "FromJSON"}
 
 
+@patch("onec_help.memory.get_memory_store")
+def test_cmd_load_snippets_type_split(mock_get_store, tmp_path: Path) -> None:
+    """cmd_load_snippets splits items by type into snippets and community_help domains."""
+    mixed = tmp_path / "mixed.json"
+    mixed.write_text(
+        json.dumps(
+            [
+                {
+                    "title": "Snippet1",
+                    "code_snippet": "Процедура Х()\nКонецПроцедуры",
+                    "type": "snippet",
+                },
+                {
+                    "title": "Ref1",
+                    "description": "Long text " * 50,
+                    "code_snippet": "x",
+                    "type": "reference",
+                },
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    mock_store = MagicMock()
+    mock_store.upsert_curated_snippets.return_value = 1
+    mock_get_store.return_value = mock_store
+    args = make_args(snippets_file=str(mixed))
+    assert cmd_load_snippets(args) == 0
+    assert mock_store.upsert_curated_snippets.call_count == 2
+    calls = mock_store.upsert_curated_snippets.call_args_list
+    domains = [c[1]["domain"] for c in calls]
+    assert "snippets" in domains
+    assert "community_help" in domains
+
+
+@patch("onec_help.parse_fastcode.run_parse")
+def test_cmd_parse_fastcode(mock_run, tmp_path: Path) -> None:
+    """cmd_parse_fastcode delegates to run_parse with correct args."""
+    mock_run.return_value = 0
+    args = SimpleNamespace(
+        out=str(tmp_path / "out.json"), pages="1-3", delay=0.5, no_fetch_detail=False
+    )
+    assert cmd_parse_fastcode(args) == 0
+    mock_run.assert_called_once()
+    call_kw = mock_run.call_args[1]
+    assert list(call_kw["out"].parts)[-1] == "out.json"
+    assert call_kw["pages"] == [1, 2, 3]
+    assert call_kw["fetch_detail"] is True
+
+
+@patch("onec_help.parse_fastcode.run_parse")
+def test_cmd_parse_fastcode_auto_pages(mock_run, tmp_path: Path) -> None:
+    """cmd_parse_fastcode with pages=auto passes None."""
+    mock_run.return_value = 0
+    args = SimpleNamespace(
+        out=str(tmp_path / "out.json"), pages="auto", delay=1.0, no_fetch_detail=True
+    )
+    assert cmd_parse_fastcode(args) == 0
+    mock_run.assert_called_once()
+    assert mock_run.call_args[1]["pages"] is None
+
+
+@patch("onec_help.parse_helpf.run_parse")
+def test_cmd_parse_helpf(mock_run, tmp_path: Path) -> None:
+    """cmd_parse_helpf delegates to run_parse."""
+    mock_run.return_value = 0
+    args = SimpleNamespace(
+        out=str(tmp_path / "helpf.json"),
+        pages="1",
+        source="faq",
+        max_items=10,
+        delay=1.0,
+        no_fetch_detail=True,
+    )
+    assert cmd_parse_helpf(args) == 0
+    mock_run.assert_called_once()
+    call_kw = mock_run.call_args[1]
+    assert call_kw["source"] == "faq"
+    assert call_kw["max_items"] == 10
+
+
 def test_cmd_load_standards_no_source(capsys) -> None:
-    """cmd_load_standards returns 0 when no path, no STANDARDS_DIR, no STANDARDS_REPO."""
+    """cmd_load_standards returns 0 when no path and no STANDARDS_* (default disabled)."""
+    import onec_help.cli as cli_mod
+
     args = make_args(standards_path=None)
-    with patch.dict("os.environ", {"STANDARDS_DIR": "", "STANDARDS_REPO": ""}):
+    with (
+        patch.dict(
+            "os.environ",
+            {"STANDARDS_DIR": "", "STANDARDS_REPO": "", "STANDARDS_REPOS": ""},
+            clear=False,
+        ),
+        patch.object(cli_mod, "_DEFAULT_STANDARDS_REPOS", ""),
+    ):
         assert cmd_load_standards(args) == 0
     err = capsys.readouterr().err
-    assert "No source" in err and ("STANDARDS_REPO" in err or "STANDARDS_DIR" in err)
+    assert "No source" in err and (
+        "STANDARDS_REPO" in err or "STANDARDS_REPOS" in err or "STANDARDS_DIR" in err
+    )
 
 
 @patch("onec_help.memory.get_memory_store")
@@ -830,3 +940,28 @@ def test_main_index_status(mock_status) -> None:
 
         assert main() == 0
     mock_status.assert_called_once()
+
+
+@patch("onec_help.parse_fastcode.run_parse")
+def test_main_parse_fastcode(mock_run, tmp_path: Path) -> None:
+    """main() with parse-fastcode invokes run_parse."""
+    mock_run.return_value = 0
+    out = tmp_path / "fc.json"
+    with patch("sys.argv", ["onec_help", "parse-fastcode", "--out", str(out), "--pages", "1"]):
+        assert main() == 0
+    mock_run.assert_called_once()
+    assert mock_run.call_args[1]["out"] == out
+
+
+@patch("onec_help.parse_helpf.run_parse")
+def test_main_parse_helpf(mock_run, tmp_path: Path) -> None:
+    """main() with parse-helpf invokes run_parse."""
+    mock_run.return_value = 0
+    out = tmp_path / "helpf.json"
+    with patch(
+        "sys.argv",
+        ["onec_help", "parse-helpf", "--out", str(out), "--source", "faq", "--pages", "1"],
+    ):
+        assert main() == 0
+    mock_run.assert_called_once()
+    assert mock_run.call_args[1]["source"] == "faq"

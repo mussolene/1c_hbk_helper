@@ -69,6 +69,13 @@ def test_collect_from_folder_md_empty_code_block_skipped(tmp_path: Path) -> None
     assert len(items) == 0
 
 
+def test_collect_from_folder_bsl_whitespace_only_skipped(tmp_path: Path) -> None:
+    """*.bsl with only whitespace is skipped (line 65-66)."""
+    (tmp_path / "empty.bsl").write_text("   \n\t  \n", encoding="utf-8")
+    items = collect_from_folder(tmp_path)
+    assert len(items) == 0
+
+
 def test_collect_from_folder_bsl_read_error_skipped(tmp_path: Path) -> None:
     """OSError/UnicodeDecodeError on read is skipped."""
     (tmp_path / "good.bsl").write_text("X;", encoding="utf-8")
@@ -79,6 +86,18 @@ def test_collect_from_folder_bsl_read_error_skipped(tmp_path: Path) -> None:
     items = collect_from_folder(tmp_path)
     assert len(items) == 1
     assert items[0]["title"] == "good"
+
+
+def test_collect_from_folder_md_read_error_skipped(tmp_path: Path) -> None:
+    """OSError when reading .md file is skipped."""
+    (tmp_path / "ok.md").write_text("---\ntitle: X\n---\n\n```bsl\nx\n```", encoding="utf-8")
+    bad = tmp_path / "bad.md"
+    bad.write_text("x", encoding="utf-8")
+    with open(bad, "wb") as f:
+        f.write(b"\xff\xfe")
+    items = collect_from_folder(tmp_path)
+    assert len(items) == 1
+    assert items[0]["title"] == "X"
 
 
 def test_collect_from_folder_per_function(tmp_path: Path) -> None:

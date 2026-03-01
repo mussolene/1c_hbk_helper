@@ -809,7 +809,8 @@ def get_1c_help_related(
     version: str | None = None,
     language: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Return list of related topics for a given path: [{path, title}] from outgoing_links."""
+    """Return list of related topics for a given path: [{path, title}] from outgoing_links.
+    Aggregates links from all points with this path (multiple versions/chunks)."""
     if QdrantClient is None or Filter is None or FieldCondition is None or MatchValue is None:
         return []
     host = qdrant_host or os.environ.get("QDRANT_HOST", "localhost")
@@ -820,6 +821,8 @@ def get_1c_help_related(
         path_variants.append(topic_path + ".md")
         path_variants.append(topic_path + ".html")
     client = QdrantClient(host=host, port=port, check_compatibility=False)
+    seen_paths: set[str] = set()
+    result: list[dict[str, Any]] = []
     for pv in path_variants:
         try:
             must_cond = [FieldCondition(key="path", match=MatchValue(value=pv))]
@@ -827,27 +830,40 @@ def get_1c_help_related(
                 must_cond.append(FieldCondition(key="version", match=MatchValue(value=version)))
             if language:
                 must_cond.append(FieldCondition(key="language", match=MatchValue(value=language)))
-            res, _ = client.scroll(
-                collection_name=collection,
-                scroll_filter=Filter(must=must_cond),
-                limit=1,
-                with_payload=True,
-                with_vectors=False,
-            )
-            if res and len(res) > 0:
-                payload = getattr(res[0], "payload", None) or {}
-                links = payload.get("outgoing_links") or []
-                return [
-                    {
-                        "path": lnk.get("resolved_path", ""),
-                        "title": lnk.get("target_title") or lnk.get("link_text", ""),
-                    }
-                    for lnk in links
-                    if lnk.get("resolved_path")
-                ]
+            next_offset = None
+            scroll_limit = 50
+            while True:
+                res, next_offset = client.scroll(
+                    collection_name=collection,
+                    scroll_filter=Filter(must=must_cond),
+                    limit=scroll_limit,
+                    offset=next_offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                if not res:
+                    break
+                for point in res:
+                    payload = getattr(point, "payload", None) or {}
+                    links = payload.get("outgoing_links") or []
+                    for lnk in links:
+                        rpath = lnk.get("resolved_path", "")
+                        if not rpath or rpath in seen_paths:
+                            continue
+                        seen_paths.add(rpath)
+                        result.append(
+                            {
+                                "path": rpath,
+                                "title": lnk.get("target_title") or lnk.get("link_text", ""),
+                            }
+                        )
+                if next_offset is None:
+                    break
+            if result:
+                return result
         except Exception:
             continue
-    return []
+    return result
 
 
 def compare_1c_help(

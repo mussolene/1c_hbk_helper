@@ -9,9 +9,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from onec_help.unpack import (
-    _try_zipfile_scan_local_headers,
     _try_unzip,
     _try_zipfile_from_offset,
+    _try_zipfile_scan_local_headers,
     ensure_dir,
     unpack_hbk,
 )
@@ -254,21 +254,18 @@ def _make_embedded_zip_local_entry(filename: str, content: bytes) -> bytes:
     compressed = zlib.compress(content, 9)[2:-4]  # raw deflate
     fn = filename.encode("utf-8")
     # Local header: ver(H) flags(H) comp(H) modtime(H) moddate(H) crc(I) comp_sz(I) uncomp_sz(I) fn_len(H) extra_len(H)
-    hdr = (
-        b"PK\x03\x04"
-        + struct.pack(
-            "<HHHHHIIIHH",
-            20,
-            0,
-            8,
-            0,
-            0,
-            0,
-            len(compressed),
-            len(content),
-            len(fn),
-            0,
-        )
+    hdr = b"PK\x03\x04" + struct.pack(
+        "<HHHHHIIIHH",
+        20,
+        0,
+        8,
+        0,
+        0,
+        0,
+        len(compressed),
+        len(content),
+        len(fn),
+        0,
     )
     return hdr + fn + compressed
 

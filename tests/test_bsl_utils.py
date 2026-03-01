@@ -65,6 +65,22 @@ def test_extract_procedures_and_functions() -> None:
         assert "Процедура" in item["code"] or "Функция" in item["code"]
 
 
+def test_extract_procedures_and_functions_skips_nameless_block() -> None:
+    """Block with Procedure but no name is skipped (line 42: if name)."""
+    code = """
+Процедура ()
+    Сообщить(1);
+КонецПроцедуры
+
+Функция Нормальная()
+    Возврат 1;
+КонецФункции
+"""
+    items = extract_procedures_and_functions(code)
+    assert len(items) == 1
+    assert items[0]["name"] == "Нормальная"
+
+
 def test_extract_procedures_and_functions_skips_whitespace_blocks() -> None:
     """Whitespace-only blocks between markers are skipped (continue branch)."""
     code = """

@@ -16,6 +16,18 @@ from typing import Any
 from ._utils import progress_done, progress_line
 
 _DETAIL_LINK_RE = re.compile(r"/Templates/(\d+)/")
+_PAGE_RE = re.compile(r"[?&]Page=(\d+)")
+
+
+def _detect_total_pages(opener: urllib.request.OpenerDirector) -> list[int]:
+    """Fetch first page, parse pagination links, return 1..max_page."""
+    html = _fetch_page(1, opener)
+    pages: set[int] = {1}
+    for m in _PAGE_RE.finditer(html):
+        pages.add(int(m.group(1)))
+    if not pages:
+        return [1]
+    return list(range(1, max(pages) + 1))
 
 
 def _create_opener() -> urllib.request.OpenerDirector:
@@ -143,12 +155,21 @@ def parse_page(html: str) -> list[dict[str, Any]]:
 
 def run_parse(
     out: Path,
-    pages: list[int],
+    pages: list[int] | None = None,
     delay: float = 1.0,
     fetch_detail: bool = True,
 ) -> int:
-    """Fetch listing pages, optionally fetch detail pages for full code. Returns 0 on success."""
+    """Fetch listing pages, optionally fetch detail pages for full code.
+    pages: explicit list or None to auto-detect from first page. Returns 0 on success."""
     opener = _create_opener()
+    if pages is None or not pages:
+        progress_line("parse-fastcode │ Detecting total pages...")
+        try:
+            pages = _detect_total_pages(opener)
+        except Exception:
+            pages = [1]
+        progress_done(f"parse-fastcode │ detected {len(pages)} pages")
+        time.sleep(delay)
     all_items: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
     list_err = 0
@@ -205,10 +226,23 @@ def run_parse(
     for it in all_items:
         it.pop("detail_url", None)
 
+    from .snippet_classifier import classify_snippet_vs_reference
+
+    snippets_n = 0
+    for it in all_items:
+        it["type"] = classify_snippet_vs_reference(
+            it.get("title", ""),
+            it.get("description", ""),
+            it.get("code_snippet", ""),
+        )
+        if it["type"] == "snippet":
+            snippets_n += 1
+
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(all_items, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    summary = f"parse-fastcode │ ✓ {len(all_items)} snippets → {out.name}"
+    ref_n = len(all_items) - snippets_n
+    summary = f"parse-fastcode │ ✓ {len(all_items)} items ({snippets_n} snippets, {ref_n} ref) → {out.name}"
     if list_err or detail_err:
         summary += f" │ {list_err} list err, {detail_err} detail err"
     progress_done(summary)
