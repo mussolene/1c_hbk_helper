@@ -150,7 +150,7 @@ def _short_error(err: str, max_len: int = 40) -> str:
 
 
 def _render_index_status_compact(
-    s, collections, ingest, spinner, format_duration
+    s, collections, ingest, snippets, spinner, format_duration
 ) -> tuple[str, int]:
     """Single-line compact output (for piping/scripts)."""
     prefix = f"{spinner} index-status".strip() if spinner else "index-status"
@@ -250,11 +250,28 @@ def _render_index_status_compact(
                 short = (ft.get("path") or "").replace(".hbk", "") or ft.get("error", "")[:20]
                 err += f" {short}:{_short_error(ft.get('error', ''))}"
             parts.append(err)
+    if snippets:
+        fp = snippets.get("files_processed", 0)
+        fs = snippets.get("files_skipped", 0)
+        il = snippets.get("items_loaded", 0)
+        elapsed = snippets.get("total_elapsed_sec")
+        snip_str = f"Snippets ✓ {fp} files, {il} items"
+        if fs > 0:
+            snip_str += f" ({fs} cached)"
+            if fp == 0 and il == 0:
+                from .snippets_cache import get_cached_items_total
+
+                cached_total = get_cached_items_total()
+                if cached_total > 0:
+                    snip_str += f" {cached_total} in index"
+        if elapsed is not None and elapsed > 0:
+            snip_str += f" {format_duration(elapsed)}"
+        parts.append(snip_str)
     return f"{prefix} │ {' │ '.join(parts)}\n", 0
 
 
 def _render_index_status_rich(
-    s, collections, ingest, spinner, format_duration, host, port
+    s, collections, ingest, snippets, spinner, format_duration, host, port
 ) -> tuple[str, int]:
     """Rich multi-line status: collections, operations, current files, elapsed, ETA, errors."""
     lines: list[str] = []
@@ -493,6 +510,25 @@ def _render_index_status_rich(
     else:
         line(f"│ No ingest in progress {''.rjust(w - 24)}│")
 
+    if snippets:
+        line(f"├{sep}┤")
+        fp = snippets.get("files_processed", 0)
+        fs = snippets.get("files_skipped", 0)
+        il = snippets.get("items_loaded", 0)
+        elapsed = snippets.get("total_elapsed_sec")
+        snip_line = f"Snippets: {fp} files loaded, {il} items"
+        if fs > 0:
+            snip_line += f" ({fs} cached)"
+            if fp == 0 and il == 0:
+                from .snippets_cache import get_cached_items_total
+
+                cached_total = get_cached_items_total()
+                if cached_total > 0:
+                    snip_line += f" — {cached_total} in index"
+        if elapsed is not None and elapsed > 0:
+            snip_line += f" in {format_duration(elapsed)}"
+        line(f"│ {snip_line}".ljust(w - 1) + "│")
+
     line(f"└{sep}┘")
     return "\n".join(lines) + "\n", 0
 
@@ -503,6 +539,7 @@ def _render_index_status(*, spinner: str = "", compact: bool = False) -> tuple[s
     from ._utils import format_duration
     from .indexer import get_all_collections_status, get_index_status
     from .ingest import read_ingest_status, read_last_ingest_run
+    from .snippets_cache import read_last_snippets_run
 
     host = os.environ.get("QDRANT_HOST", "localhost")
     port = int(os.environ.get("QDRANT_PORT", "6333"))
@@ -559,12 +596,18 @@ def _render_index_status(*, spinner: str = "", compact: bool = False) -> tuple[s
     if not collections and not ingest:
         return "Index does not exist. Run: python -m onec_help ingest\n", 0
 
+    snippets = read_last_snippets_run()
+
     # --- Compact (single line) ---
     if compact:
-        return _render_index_status_compact(s, collections, ingest, spinner, format_duration)
+        return _render_index_status_compact(
+            s, collections, ingest, snippets, spinner, format_duration
+        )
 
     # --- Rich multi-line ---
-    return _render_index_status_rich(s, collections, ingest, spinner, format_duration, host, port)
+    return _render_index_status_rich(
+        s, collections, ingest, snippets, spinner, format_duration, host, port
+    )
 
 
 def cmd_index_status(args: argparse.Namespace) -> int:
@@ -751,71 +794,129 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         return 1
 
 
-def cmd_load_snippets(args: argparse.Namespace) -> int:
-    """Load curated snippets from JSON and/or folder into onec_help_memory (domain=snippets).
-    Sources: explicit path arg, or SNIPPETS_DIR env."""
+def _build_snippets_sources(args: argparse.Namespace) -> list[tuple[Path, str]]:
+    """Build list of (path, type) for snippets sources. type: 'json' | 'folder'."""
     path_arg = getattr(args, "snippets_file", None) or os.environ.get("SNIPPETS_JSON_PATH", "")
     snippets_dir = os.environ.get("SNIPPETS_DIR", "")
-
-    items: list[dict] = []
-
-    def _load_json(p: Path) -> None:
-        raw = p.read_text(encoding="utf-8")
-        data = json.loads(raw)
-        if not isinstance(data, list):
-            raise ValueError("JSON must be an array of {title, description, code_snippet}")
-        items.extend(data)
-
-    def _load_folder(d: Path, per_func: bool = False) -> None:
-        from .snippets_loader import collect_from_folder
-
-        items.extend(collect_from_folder(d, per_function=per_func))
-
     from_project = getattr(args, "from_project", None)
+    sources: list[tuple[Path, str]] = []
+
+    if from_project:
+        d = Path(from_project.strip()).resolve()
+        if d.exists() and d.is_dir():
+            sources.append((d, "folder"))
+    elif path_arg and path_arg.strip():
+        p = Path(path_arg.strip()).resolve()
+        if not p.exists():
+            return []
+        if p.is_dir():
+            for j in sorted(p.glob("*.json")):
+                sources.append((j, "json"))
+            sources.append((p, "folder"))
+        else:
+            sources.append((p, "json"))
+    elif snippets_dir:
+        d = Path(snippets_dir).resolve()
+        if d.exists():
+            for j in sorted(d.glob("*.json")):
+                sources.append((j, "json"))
+            sources.append((d, "folder"))
+    return sources
+
+
+def _load_json_items(p: Path) -> list[dict]:
+    raw = p.read_text(encoding="utf-8")
+    data = json.loads(raw)
+    if not isinstance(data, list):
+        raise ValueError("JSON must be an array of {title, description, code_snippet}")
+    return data
+
+
+def _load_folder_items(d: Path, per_func: bool = False) -> list[dict]:
+    from .snippets_loader import collect_from_folder
+
+    return collect_from_folder(d, per_function=per_func)
+
+
+def cmd_load_snippets(args: argparse.Namespace) -> int:
+    """Load curated snippets from JSON and/or folder into onec_help_memory (domain=snippets).
+    Uses cache: only loads sources that changed. --no-cache or SNIPPETS_SKIP_CACHE=1 to force reload."""
+    import time
+
+    from ._utils import progress_done, progress_line
+    from .memory import get_memory_store
+    from .snippets_cache import (
+        _file_signature,
+        _folder_signature,
+        get_snippets_sources_to_load,
+        record_snippets_run,
+        update_snippets_cache,
+    )
+
+    skip_cache = (
+        getattr(args, "no_cache", False)
+        or (os.environ.get("SNIPPETS_SKIP_CACHE") or "").strip().lower() in ("1", "true", "yes")
+    )
 
     try:
-        if from_project:
-            d = Path(from_project.strip())
-            if not d.exists() or not d.is_dir():
+        sources = _build_snippets_sources(args)
+        if not sources:
+            path_arg = getattr(args, "snippets_file", None) or os.environ.get("SNIPPETS_JSON_PATH", "")
+            if path_arg:
+                p = Path(path_arg.strip())
+                if not p.exists():
+                    print(f"Error: path not found: {p}", file=sys.stderr)
+                    return 1
+            elif not os.environ.get("SNIPPETS_DIR") and not getattr(args, "from_project", None):
                 print(
-                    f"Error: --from-project path not found or not a directory: {d}", file=sys.stderr
+                    "No source: set SNIPPETS_DIR, pass path, or use --from-project.",
+                    file=sys.stderr,
                 )
-                return 1
-            _load_folder(d, per_func=getattr(args, "per_function", False))
-        elif path_arg and path_arg.strip():
-            p = Path(path_arg.strip())
-            if not p.exists():
-                print(f"Error: path not found: {p}", file=sys.stderr)
-                return 1
-            if p.is_dir():
-                for j in sorted(p.glob("*.json")):
-                    _load_json(j)
-                _load_folder(p, per_func=getattr(args, "per_function", False))
-            else:
-                _load_json(p)
-        elif snippets_dir:
-            d = Path(snippets_dir)
-            if not d.exists():
-                print(f"SNIPPETS_DIR not found: {d}", file=sys.stderr)
                 return 0
-            for j in sorted(d.glob("*.json")):
-                _load_json(j)
-            _load_folder(d, per_func=getattr(args, "per_function", False))
-        else:
+            print("SNIPPETS_DIR not found or empty.", file=sys.stderr)
+            return 0
+
+        to_load = sources if skip_cache else get_snippets_sources_to_load(sources)[0]
+        files_skipped = len(sources) - len(to_load)
+
+        started_at = time.time()
+
+        if not to_load:
             print(
-                "No source: set SNIPPETS_DIR, pass path, or use --from-project.",
+                f"load-snippets │ All {len(sources)} source(s) unchanged (cache); nothing to do.",
                 file=sys.stderr,
             )
+            record_snippets_run(0, len(sources), 0, started_at)
             return 0
+
+        if files_skipped > 0:
+            print(
+                f"load-snippets │ Cache hit: skip {files_skipped} unchanged; loading {len(to_load)}",
+                file=sys.stderr,
+            )
+
+        items: list[dict] = []
+        folder_ext = frozenset({".bsl", ".1c", ".md"})
+        per_func = getattr(args, "per_function", False)
+
+        for path, stype in to_load:
+            path = Path(path).resolve()
+            src_items = (
+                _load_json_items(path)
+                if stype == "json"
+                else _load_folder_items(path, per_func=per_func)
+            )
+            items.extend(src_items)
+            # Update cache per source
+            key = str(path)
+            sig = _file_signature(path) if stype == "json" else _folder_signature(path, folder_ext)
+            if sig:
+                update_snippets_cache(key, sig, len(src_items))
 
         if not items:
             print("No snippets to load.", file=sys.stderr)
             return 0
 
-        from ._utils import progress_done, progress_line
-        from .memory import get_memory_store
-
-        # Split by type: snippet→snippets, reference→community_help (parse-helpf, parse-fastcode)
         by_domain: dict[str, list[dict]] = {"snippets": [], "community_help": []}
         for it in items:
             t = (it.get("type") or "snippet").lower()
@@ -838,6 +939,8 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
             )
             total_loaded += n
             domain_counts.append(f"{domain}={n}")
+
+        record_snippets_run(len(to_load), files_skipped, total_loaded, started_at)
         progress_done(
             f"load-snippets │ ✓ {total_loaded} loaded ({', '.join(domain_counts)}) → onec_help_memory"
         )
@@ -1428,6 +1531,12 @@ def main() -> int:
         default=None,
         metavar="PATH",
         help="Load snippets from 1C project path (e.g. src). Uses collect_from_folder on **/*.bsl.",
+    )
+    p_load_snippets.add_argument(
+        "--no-cache",
+        action="store_true",
+        dest="no_cache",
+        help="Ignore cache; re-embed all sources (env SNIPPETS_SKIP_CACHE=1)",
     )
     p_load_snippets.set_defaults(func=cmd_load_snippets)
 
