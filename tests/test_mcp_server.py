@@ -33,10 +33,85 @@ def test_hybrid_search_handles_score_none(mock_search, mock_search_keyword) -> N
     """_hybrid_search must not fail when keyword results have score=None."""
     mock_search.return_value = [{"path": "a.md", "title": "A", "text": "x", "score": 0.9}]
     mock_search_keyword.return_value = [{"path": "b.md", "title": "B", "text": "y", "score": None}]
-    results = mcp_server._hybrid_search("test", limit=5)
+    results, _ = mcp_server._hybrid_search("test", limit=5)
     paths = [r.get("path") for r in results]
     assert "a.md" in paths
     assert "b.md" in paths
+
+
+def test_extract_keyword_tokens_type_method() -> None:
+    """_extract_keyword_tokens extracts Type.Method as whole string."""
+    tokens = mcp_server._extract_keyword_tokens("HTTPСоединение.Получить пример")
+    assert "HTTPСоединение.Получить" in tokens
+    tokens2 = mcp_server._extract_keyword_tokens("Запрос.ВыполнитьПакет")
+    assert "Запрос.ВыполнитьПакет" in tokens2
+
+
+def test_extract_keyword_tokens_edge_cases() -> None:
+    """_extract_keyword_tokens: empty, short tokens excluded, limit 8, multiple Type.Method."""
+    assert mcp_server._extract_keyword_tokens("") == []
+    assert mcp_server._extract_keyword_tokens("ab") == []  # < 3 chars
+    # Only identifiers >= 3 chars
+    tokens = mcp_server._extract_keyword_tokens("СКД вывод Формат")
+    assert "СКД" in tokens
+    assert "вывод" in tokens
+    assert "Формат" in tokens
+    # Limit 8
+    long_query = " ".join([f"Токен{i}" for i in range(15)])
+    tokens_long = mcp_server._extract_keyword_tokens(long_query)
+    assert len(tokens_long) <= 8
+    # Multiple Type.Method
+    tokens_multi = mcp_server._extract_keyword_tokens(
+        "HTTPСоединение.Получить и Запрос.ВыполнитьПакет"
+    )
+    assert "HTTPСоединение.Получить" in tokens_multi
+    assert "Запрос.ВыполнитьПакет" in tokens_multi
+
+
+def test_hybrid_search_returns_meta() -> None:
+    """_hybrid_search returns (results, meta) with has_keyword_hits and top_semantic_score."""
+    with patch.object(mcp_server, "_search") as mock_search, patch.object(
+        mcp_server, "_search_keyword"
+    ) as mock_kw:
+        mock_search.return_value = [
+            {"path": "a.md", "title": "A", "text": "x", "score": 0.35},
+        ]
+        mock_kw.return_value = []
+        results, meta = mcp_server._hybrid_search("тест", limit=5)
+        assert meta["has_keyword_hits"] is False
+        assert meta["top_semantic_score"] == 0.35
+        assert len(results) == 1
+
+        mock_search.return_value = [{"path": "b.md", "title": "B", "text": "y", "score": 0.9}]
+        mock_kw.return_value = [{"path": "c.md", "title": "C", "text": "z", "score": None}]
+        results2, meta2 = mcp_server._hybrid_search("HTTPСоединение.Получить", limit=5)
+        assert meta2["has_keyword_hits"] is True
+        assert meta2["top_semantic_score"] == 0.9
+        paths = [r.get("path") for r in results2]
+        assert "c.md" in paths
+        assert "b.md" in paths
+
+
+def test_should_show_low_score_hint() -> None:
+    """_should_show_low_score_hint: True when no keyword hits, low score, has results."""
+    assert mcp_server._should_show_low_score_hint(
+        [{"path": "a.md"}], [], {"has_keyword_hits": False, "top_semantic_score": 0.3}
+    ) is True
+    assert mcp_server._should_show_low_score_hint(
+        [], ["mem"], {"has_keyword_hits": False, "top_semantic_score": 0.4}
+    ) is True
+    # No hint when keyword hits
+    assert mcp_server._should_show_low_score_hint(
+        [{"path": "a.md"}], [], {"has_keyword_hits": True, "top_semantic_score": 0.3}
+    ) is False
+    # No hint when score above threshold
+    assert mcp_server._should_show_low_score_hint(
+        [{"path": "a.md"}], [], {"has_keyword_hits": False, "top_semantic_score": 0.6}
+    ) is False
+    # No hint when no results
+    assert mcp_server._should_show_low_score_hint(
+        [], [], {"has_keyword_hits": False, "top_semantic_score": 0.3}
+    ) is False
 
 
 def test_extract_code_blocks() -> None:

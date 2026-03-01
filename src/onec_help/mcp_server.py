@@ -183,10 +183,48 @@ def _extract_code_blocks(md_text: str) -> list[str]:
     return blocks
 
 
+# Паттерн Тип.Метод для сохранения полной строки при извлечении токенов
+_TYPE_METHOD_RE = re.compile(r"[А-Яа-яA-Za-z][А-Яа-яA-Za-z0-9]*\.[А-Яа-яA-Za-z][А-Яа-яA-Za-z0-9]*")
+
+
 def _extract_keyword_tokens(query: str) -> list[str]:
-    """Extract CamelCase and Cyrillic identifiers from query for keyword search."""
-    tokens = re.findall(r"[А-Яа-яA-Za-z][А-Яа-яA-Za-z0-9]*", query)
-    return [t for t in tokens if len(t) >= 3][:5]
+    """Extract CamelCase/Cyrillic identifiers and Type.Method patterns for keyword search."""
+    tokens: list[str] = []
+    seen: set[str] = set()
+
+    # 1. Type.Method целиком (HTTPСоединение.Получить, Запрос.ВыполнитьПакет)
+    for m in _TYPE_METHOD_RE.finditer(query):
+        s = m.group(0)
+        if s not in seen and len(s) >= 5:
+            tokens.append(s)
+            seen.add(s.lower())
+
+    # 2. Обычные CamelCase/кириллические идентификаторы (≥3 символа)
+    for m in re.finditer(r"[А-Яа-яA-Za-z][А-Яа-яA-Za-z0-9]*", query):
+        s = m.group(0)
+        sl = s.lower()
+        if len(s) >= 3 and sl not in seen:
+            tokens.append(s)
+            seen.add(sl)
+
+    return tokens[:8]
+
+
+# Порог score семантики: ниже — добавлять подсказку про keyword-поиск
+_SEMANTIC_LOW_SCORE_THRESHOLD = 0.48
+
+
+def _should_show_low_score_hint(
+    results: list[dict[str, Any]],
+    memory_parts: list[str],
+    meta: dict[str, Any],
+) -> bool:
+    """True if we should suggest keyword search (low semantic relevance, no keyword hits)."""
+    return (
+        not meta.get("has_keyword_hits", False)
+        and (meta.get("top_semantic_score") or 0) < _SEMANTIC_LOW_SCORE_THRESHOLD
+        and bool(results or memory_parts)
+    )
 
 
 def _hybrid_search(
@@ -194,28 +232,41 @@ def _hybrid_search(
     limit: int = 10,
     version: str | None = None,
     language: str | None = None,
-) -> list[dict[str, Any]]:
-    """Semantic + keyword search, merged and deduplicated. Keyword matches ranked higher."""
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Semantic + keyword search, merged and deduplicated. Keyword matches ranked higher.
+    Returns (results, metadata) where metadata has: has_keyword_hits, top_semantic_score."""
     seen: dict[str, tuple[dict[str, Any], bool]] = {}
+    top_semantic_score: float = 0.0
 
     for r in _search(query, limit=limit * 2, version=version, language=language):
         path = r.get("path", "")
+        sc = r.get("score")
+        if sc is not None and isinstance(sc, (int, float)):
+            top_semantic_score = max(top_semantic_score, float(sc))
         if path and path not in seen:
             seen[path] = (r, False)
 
+    has_keyword_hits = False
     for token in _extract_keyword_tokens(query):
         for r in _search_keyword(token, limit=5, version=version, language=language):
             path = r.get("path", "")
             if path and path not in seen:
                 seen[path] = (r, True)
+                has_keyword_hits = True
             elif path and seen[path][1] is False:
                 seen[path] = (r, True)
+                has_keyword_hits = True
 
     keyword_first = sorted(
         seen.items(),
         key=lambda x: (0 if x[1][1] else 1, -(x[1][0].get("score") or 0)),
     )
-    return [item[1][0] for item in keyword_first[:limit]]
+    results = [item[1][0] for item in keyword_first[:limit]]
+    meta = {
+        "has_keyword_hits": has_keyword_hits,
+        "top_semantic_score": top_semantic_score,
+    }
+    return (results, meta)
 
 
 def run_mcp(
@@ -336,7 +387,7 @@ def run_mcp(
         q, err = _truncate_if_needed(query or "", MAX_QUERY_CHARS, "query")
         if err:
             return err
-        results = _hybrid_search(q, limit=limit, version=version, language=language)
+        results, _ = _hybrid_search(q, limit=limit, version=version, language=language)
         if not results:
             return "No results found. Ensure build-index was run and Qdrant is available."
         parts = []
@@ -368,7 +419,7 @@ def run_mcp(
         q, err = _truncate_if_needed(query or "", MAX_QUERY_CHARS, "query")
         if err:
             return err
-        results = _hybrid_search(q, limit=limit, version=version, language=language)
+        results, meta = _hybrid_search(q, limit=limit, version=version, language=language)
         memory_parts: list[str] = []
         if include_memory:
             try:
@@ -417,6 +468,10 @@ def run_mcp(
                 "Try search_1c_help_keyword with exact API name (e.g. ПроцессорВыводаРезультатаКомпоновкиДанныхВКоллекциюЗначений)."
             )
         parts: list[str] = [f"## Запрос: {q}"]
+        if _should_show_low_score_hint(results, memory_parts, meta):
+            parts.append(
+                "*При нерелевантных результатах попробуйте search_1c_help_keyword с точным именем API (напр. Тип.Метод).*"
+            )
         if memory_parts:
             parts.append("\n### Из памяти\n\n" + "\n\n".join(memory_parts))
         if results:

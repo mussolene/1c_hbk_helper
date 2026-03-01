@@ -422,6 +422,26 @@ def html_to_md_content(html_path) -> str:
                 lines.append("## Примечание\n\n")
                 lines.append(note_text + "\n\n")
 
+    # Использование в версии — в справке 1С контент в p.V8SH_versionInfo (следующие за заголовком)
+    version_heading = None
+    for p in soup.find_all("p", class_="V8SH_chapter"):
+        raw = p.get_text(separator=" ", strip=True) or ""
+        if raw.startswith("Использование в версии"):
+            version_heading = p
+            break
+    if version_heading:
+        parts = []
+        for sib in version_heading.find_next_siblings():
+            if sib.name == "p" and "V8SH_versionInfo" in (sib.get("class") or []):
+                t = sib.get_text(separator=" ", strip=True)
+                if t:
+                    parts.append(t)
+            elif sib.name == "p" and "V8SH_chapter" in (sib.get("class") or []):
+                break
+        if parts:
+            lines.append("## Использование в версии\n\n")
+            lines.append("\n\n".join(parts) + "\n\n")
+
     # Доступность
     avail_heading = soup.find(
         "p",

@@ -297,6 +297,48 @@ def test_extract_outgoing_links(tmp_path: Path) -> None:
     assert anchor.get("resolved_path") is None
 
 
+def test_html_to_md_usage_in_version_v8sh_versioninfo(tmp_path: Path) -> None:
+    """Использование в версии: структура справки 1С — p.V8SH_versionInfo."""
+    f = tmp_path / "version_v8sh.html"
+    f.write_text(
+        """
+<html><body>
+<h1 class="V8SH_pagetitle">Test</h1>
+<p class="V8SH_chapter">Использование в версии:</p>
+<p class="V8SH_versionInfo">Доступен, начиная с версии 8.3.13.</p>
+<p class="V8SH_chapter">Доступность:</p>
+<p>Толстый клиент.</p>
+</body></html>
+""",
+        encoding="utf-8",
+    )
+    md = html_to_md_content(f)
+    assert "## Использование в версии" in md
+    assert "8.3.13" in md
+
+
+def test_html_to_md_usage_in_version_multiple(tmp_path: Path) -> None:
+    """Использование в версии: несколько p.V8SH_versionInfo подряд (как в ctor153)."""
+    f = tmp_path / "version_multi.html"
+    f.write_text(
+        """
+<html><body>
+<h1 class="V8SH_pagetitle">Test</h1>
+<p class="V8SH_chapter">Использование в версии:</p>
+<p class="V8SH_versionInfo">Доступен, начиная с версии 8.2.</p>
+<p class="V8SH_versionInfo">Описание изменено в версии 8.3.24.</p>
+<p class="V8SH_chapter">Доступность:</p>
+<p>Толстый клиент.</p>
+</body></html>
+""",
+        encoding="utf-8",
+    )
+    md = html_to_md_content(f)
+    assert "## Использование в версии" in md
+    assert "8.2" in md
+    assert "8.3.24" in md
+
+
 def test_extract_links_from_markdown(tmp_path: Path) -> None:
     """extract_links_from_markdown parses [text](url) and resolves to base_dir."""
     (tmp_path / "sub").mkdir()
