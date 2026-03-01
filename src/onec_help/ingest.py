@@ -124,6 +124,7 @@ def _status_writer_loop(
             total_points = state["total_points"]
             folders = copy.deepcopy(state["folders"])
             current = list(state["current_work"].values())
+            failed_tasks = list(state.get("failed", []))
         _write_ingest_status(
             status_file,
             started_at=state["started_at"],
@@ -134,6 +135,7 @@ def _status_writer_loop(
             folders=folders,
             status="in_progress",
             current=current,
+            failed_tasks=failed_tasks,
         )
 
 
@@ -153,8 +155,11 @@ def _write_ingest_status(
     status: str = "in_progress",
     finished_at: float | None = None,
     current: list[dict[str, Any]] | None = None,
+    failed_tasks: list[dict[str, Any]] | None = None,
 ) -> None:
-    """Write ingest status JSON for index-status command. current = list of {path, version, language, stage} per active thread."""
+    """Write ingest status JSON for index-status command.
+    current = list of {path, version, language, stage} per active thread.
+    failed_tasks = list of {path, version, language, error} for failed .hbk tasks."""
     elapsed = time.time() - started_at
     payload: dict[str, Any] = {
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started_at)),
@@ -170,6 +175,8 @@ def _write_ingest_status(
         payload["current"] = []
     elif current:
         payload["current"] = current
+    if failed_tasks:
+        payload["failed_tasks"] = failed_tasks[-50:]
     if elapsed > 0 and total_points > 0:
         payload["embedding_speed_pts_per_sec"] = round(total_points / elapsed, 2)
     if done_tasks > 0 and total_tasks > done_tasks and total_points > 0 and elapsed > 0:
@@ -196,6 +203,35 @@ def read_ingest_status(status_file: str | None = None) -> dict[str, Any] | None:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def read_ingest_failed_log(limit: int = 30) -> list[dict[str, str]]:
+    """Read INGEST_FAILED_LOG if set and exists. Returns list of {version, language, path, error}."""
+    path = os.environ.get("INGEST_FAILED_LOG", "").strip()
+    if not path:
+        return []
+    result: list[dict[str, str]] = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if len(result) >= limit:
+                    break
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("\t", 3)
+                if len(parts) >= 4:
+                    result.append(
+                        {
+                            "version": parts[0],
+                            "language": parts[1],
+                            "path": parts[2].split("/")[-1] if "/" in parts[2] else parts[2],
+                            "error": parts[3][:150],
+                        }
+                    )
+    except OSError:
+        pass
+    return result
 
 
 # Language: filename pattern like 1cv8_ru.hbk, shcntx_en.hbk
@@ -436,11 +472,13 @@ def run_ingest(
 
     state_lock = threading.Lock()
     current_work: dict[int, dict[str, Any]] = {}
+    failed_tasks_list: list[dict[str, Any]] = []
     state: dict[str, Any] = {
         "done_tasks": 0,
         "total_points": 0,
         "folders": folders,
         "current_work": current_work,
+        "failed": failed_tasks_list,
         "started_at": started_at,
         "embedding_backend": embedding_backend,
         "total_tasks": len(tasks),
@@ -497,6 +535,15 @@ def run_ingest(
             if md_dir is None or not md_dir.exists():
                 reason = (err_msg or "unknown").split("\n")[0].strip()[:200]
                 failed.append((path_hbk, version, language, err_msg or "unknown"))
+                with state_lock:
+                    failed_tasks_list.append(
+                        {
+                            "path": path_hbk.name,
+                            "version": version,
+                            "language": language,
+                            "error": (err_msg or "unknown").split("\n")[0].strip()[:200],
+                        }
+                    )
                 for fo in folders:
                     if fo["version"] == version and fo["language"] == language:
                         fo["err_count"] = fo.get("err_count", 0) + 1
@@ -516,6 +563,7 @@ def run_ingest(
                     total_points=total_indexed,
                     folders=folders,
                     status="in_progress",
+                    failed_tasks=failed_tasks_list,
                 )
                 if verbose:
                     _log(
@@ -580,6 +628,7 @@ def run_ingest(
                         folders=folders,
                         status="in_progress",
                         current=current_snapshot,
+                        failed_tasks=failed_tasks_list,
                     )
                     if verbose:
                         _log(
@@ -611,6 +660,7 @@ def run_ingest(
         status="completed",
         finished_at=finished_at,
         current=[],
+        failed_tasks=failed_tasks_list,
     )
     try:
         shutil.rmtree(base)

@@ -276,18 +276,27 @@ def test_cmd_index_status_exists(mock_status) -> None:
         assert cmd_index_status(make_args()) == 0
 
 
+@patch("onec_help.indexer.get_all_collections_status")
 @patch("onec_help.ingest.read_ingest_status")
 @patch("onec_help.indexer.get_index_status")
 def test_cmd_index_status_shows_embeddings_and_db_size(
-    mock_status, mock_ingest, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    mock_status, mock_ingest, mock_collections, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """index-status shows Topics indexed, Embeddings (same as points), and DB size when QDRANT_STORAGE_PATH is set."""
+    """index-status shows Collections (points, vectors, segments), total points, DB size."""
     mock_ingest.return_value = None
     mock_status.return_value = {
         "exists": True,
         "collection": "onec_help",
         "points_count": 100,
     }
+    mock_collections.return_value = [
+        {
+            "name": "onec_help",
+            "points_count": 100,
+            "indexed_vectors_count": 100,
+            "segments_count": 1,
+        },
+    ]
     (tmp_path / "some_file").write_bytes(b"x" * 500)  # ~0.5 KB
 
     with patch.dict(
@@ -296,8 +305,10 @@ def test_cmd_index_status_shows_embeddings_and_db_size(
     ):
         assert cmd_index_status(make_args()) == 0
     out = capsys.readouterr().out
-    assert "Topics indexed: 100" in out
-    assert "Embeddings: 100" in out
+    assert "Collections:" in out
+    assert "onec_help" in out
+    assert "points=100" in out
+    assert "Total points: 100" in out
     assert "DB size:" in out
     assert "MB" in out
 
@@ -353,6 +364,33 @@ def test_cmd_index_status_with_ingest(
     assert cmd_index_status(make_args()) == 0
     out = capsys.readouterr().out
     assert "Current (per thread):" not in out  # completed => no worker list
+
+
+@patch("onec_help.indexer.get_all_collections_status")
+@patch("onec_help.ingest.read_ingest_status")
+@patch("onec_help.indexer.get_index_status")
+def test_cmd_index_status_shows_failed_task_details(
+    mock_status, mock_ingest, mock_collections, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """index-status shows failed task error details when failed_tasks in ingest status."""
+    mock_status.return_value = {"exists": True, "collection": "onec_help", "points_count": 100}
+    mock_collections.return_value = [
+        {"name": "onec_help", "points_count": 100, "indexed_vectors_count": 100, "segments_count": 1},
+    ]
+    mock_ingest.return_value = {
+        "status": "completed",
+        "folders": [
+            {"version": "8.3", "language": "ru", "err_count": 1, "hbk_count": 2},
+        ],
+        "failed_tasks": [
+            {"version": "8.3", "language": "ru", "path": "shcntx_ru.hbk", "error": "7z failed: invalid archive"},
+        ],
+    }
+    assert cmd_index_status(make_args()) == 0
+    out = capsys.readouterr().out
+    assert "Failed tasks: 1" in out
+    assert "Error details:" in out
+    assert "7z failed" in out
 
 
 @patch("onec_help.ingest.run_ingest")
@@ -717,7 +755,11 @@ def test_cmd_load_standards_from_repo(mock_fetch, mock_get_store, tmp_path: Path
     args = make_args(standards_path=None)
     with patch.dict(
         "os.environ",
-        {"STANDARDS_DIR": "", "STANDARDS_REPOS": "", "STANDARDS_REPO": "https://github.com/1C-Company/v8-code-style"},
+        {
+            "STANDARDS_DIR": "",
+            "STANDARDS_REPOS": "",
+            "STANDARDS_REPO": "https://github.com/1C-Company/v8-code-style",
+        },
     ):
         assert cmd_load_standards(args) == 0
     mock_fetch.assert_called_once()

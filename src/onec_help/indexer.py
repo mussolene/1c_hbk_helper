@@ -332,6 +332,60 @@ def get_index_status(
     return out
 
 
+def get_all_collections_status(
+    qdrant_host: str | None = None,
+    qdrant_port: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return status for all Qdrant collections: name, points_count, indexed_vectors_count, segments_count."""
+    if QdrantClient is None:
+        return []
+    host = qdrant_host or os.environ.get("QDRANT_HOST", "localhost")
+    port = qdrant_port or int(os.environ.get("QDRANT_PORT", "6333"))
+    try:
+        client = QdrantClient(host=host, port=port, check_compatibility=False)
+    except Exception:
+        return []
+    result: list[dict[str, Any]] = []
+    try:
+        resp = client.get_collections()
+        collections = getattr(resp, "collections", None) or []
+        for c in collections:
+            name = getattr(c, "name", None) or str(c)
+            if not name:
+                continue
+            try:
+                info = client.get_collection(name)
+                pts = getattr(info, "points_count", None) or getattr(info, "pointsCount", 0) or 0
+                vecs = (
+                    getattr(info, "indexed_vectors_count", None)
+                    or getattr(info, "indexedVectorsCount", None)
+                    or pts
+                )
+                segs = (
+                    getattr(info, "segments_count", None) or getattr(info, "segmentsCount", 0) or 0
+                )
+                result.append(
+                    {
+                        "name": name,
+                        "points_count": pts,
+                        "indexed_vectors_count": vecs,
+                        "segments_count": segs,
+                    }
+                )
+            except Exception:
+                result.append(
+                    {
+                        "name": name,
+                        "points_count": None,
+                        "indexed_vectors_count": None,
+                        "segments_count": None,
+                    }
+                )
+    except Exception:
+        pass
+    return result
+
+
 def search_index(
     query,
     qdrant_host=None,

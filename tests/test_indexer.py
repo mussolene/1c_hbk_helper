@@ -11,6 +11,7 @@ from onec_help.indexer import (
     _path_to_point_id,
     build_index,
     get_1c_help_related,
+    get_all_collections_status,
     get_embedding_dimension,
     get_index_status,
     get_topic_by_path,
@@ -201,6 +202,44 @@ def test_get_index_status_get_collection_raises(mock_client: MagicMock) -> None:
     assert s["exists"] is True
     assert "error" in s
     assert s.get("points_count") is None
+
+
+@patch("onec_help.indexer.QdrantClient")
+def test_get_all_collections_status(mock_client: MagicMock) -> None:
+    """get_all_collections_status returns list of collection stats from get_collections."""
+    from types import SimpleNamespace
+
+    mock_instance = MagicMock()
+    mock_client.return_value = mock_instance
+    mock_instance.get_collections.return_value = MagicMock(
+        collections=[
+            SimpleNamespace(name="onec_help"),
+            SimpleNamespace(name="onec_help_memory"),
+        ]
+    )
+    mock_instance.get_collection.side_effect = [
+        MagicMock(points_count=100, indexed_vectors_count=100, segments_count=2),
+        MagicMock(points_count=50, indexed_vectors_count=50, segments_count=1),
+    ]
+    result = get_all_collections_status(qdrant_host="localhost", qdrant_port=6333)
+    assert len(result) == 2
+    assert result[0]["name"] == "onec_help"
+    assert result[0]["points_count"] == 100
+    assert result[0]["indexed_vectors_count"] == 100
+    assert result[0]["segments_count"] == 2
+    assert result[1]["name"] == "onec_help_memory"
+    assert result[1]["points_count"] == 50
+
+
+@patch("onec_help.indexer.QdrantClient", None)
+def test_get_all_collections_status_no_client() -> None:
+    assert get_all_collections_status(qdrant_host="localhost", qdrant_port=6333) == []
+
+
+@patch("onec_help.indexer.QdrantClient")
+def test_get_all_collections_status_connection_error(mock_client: MagicMock) -> None:
+    mock_client.side_effect = RuntimeError("connection refused")
+    assert get_all_collections_status(qdrant_host="localhost", qdrant_port=6333) == []
 
 
 @patch("onec_help.indexer.QdrantClient")

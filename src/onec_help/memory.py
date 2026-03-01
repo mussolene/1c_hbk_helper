@@ -258,9 +258,7 @@ class MemoryStore:
             processed = 0
             for (item, _, full_payload), vec in zip(to_process, vectors, strict=True):
                 try:
-                    self._upsert_long(
-                        item.get("id", str(uuid.uuid4())), vec, full_payload
-                    )
+                    self._upsert_long(item.get("id", str(uuid.uuid4())), vec, full_payload)
                     processed += 1
                 except Exception:
                     remaining.append(item)

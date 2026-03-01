@@ -15,6 +15,7 @@ from onec_help.ingest import (
     discover_version_dirs,
     parse_languages_env,
     parse_source_dirs_env,
+    read_ingest_failed_log,
     read_ingest_status,
     run_ingest,
     run_unpack_only,
@@ -191,6 +192,33 @@ def test_read_ingest_status_exists(tmp_path: Path) -> None:
     assert out["status"] == "completed"
     assert out["embedding_backend"] == "local"
     assert out["total_points"] == 10
+
+
+def test_read_ingest_failed_log(tmp_path: Path) -> None:
+    """read_ingest_failed_log parses INGEST_FAILED_LOG format."""
+    log_file = tmp_path / "failed.log"
+    log_file.write_text(
+        "# Ingest failed .hbk (2)\n"
+        "8.3\tru\t/path/to/shcntx_ru.hbk\t7z failed: invalid archive\n"
+        "8.2\ten\t/path/to/1cv8_en.hbk\tBuildError: parse failed\n",
+        encoding="utf-8",
+    )
+    with patch.dict("os.environ", {"INGEST_FAILED_LOG": str(log_file)}):
+        out = read_ingest_failed_log(limit=10)
+    assert len(out) == 2
+    assert out[0]["version"] == "8.3"
+    assert out[0]["language"] == "ru"
+    assert "shcntx_ru" in out[0]["path"]
+    assert "invalid archive" in out[0]["error"]
+    assert out[1]["version"] == "8.2"
+    assert out[1]["error"] == "BuildError: parse failed"
+
+
+def test_read_ingest_failed_log_empty_env() -> None:
+    """read_ingest_failed_log returns [] when INGEST_FAILED_LOG not set."""
+    with patch.dict("os.environ", {"INGEST_FAILED_LOG": ""}, clear=False):
+        out = read_ingest_failed_log()
+    assert out == []
 
 
 def test_parse_source_dirs_env_empty() -> None:

@@ -14,8 +14,11 @@ COMPOSE_SPLIT = docker compose -f docker-compose.split.yml
 
 .PHONY: build build-split parse-fastcode load-snippets load-snippets-from-project load-standards snippets
 .PHONY: up down up-split down-split bsl-start bsl-stop
-.PHONY: ingest ingest-split build-index build-index-split index-status index-status-split
+.PHONY: ingest ingest-split build-index build-index-split index-status index-status-split watch-index-status watch-index-status-split
 .PHONY: unpack-help help
+
+# Interval (seconds) for watch-index-status
+WATCH_INTERVAL ?= 2
 
 # Rebuild mcp image (required after adding new commands like parse-fastcode)
 build:
@@ -70,6 +73,14 @@ index-status:
 index-status-split:
 	$(COMPOSE_SPLIT) exec mcp python -m onec_help index-status
 
+# Watch index status: refresh in-place every WATCH_INTERVAL seconds (default 2). Ctrl+C to stop.
+# -it allocates TTY (ANSI codes work) and keeps STDIN open (Ctrl+C).
+watch-index-status:
+	$(COMPOSE) exec -it mcp python -m onec_help index-status --watch --interval $(WATCH_INTERVAL)
+
+watch-index-status-split:
+	$(COMPOSE_SPLIT) exec -it mcp python -m onec_help index-status --watch --interval $(WATCH_INTERVAL)
+
 # Выгрузка справки в папку: распаковка .hbk без индексации.
 # HELP_SOURCE_PATH — каталог с версиями 1С (/opt/1cv8); UNPACK_OUTPUT — куда положить (data/unpacked)
 unpack-help:
@@ -120,6 +131,7 @@ help:
 	@echo "  make build-index      Индексация из папки с .md (ARGS=путь)"
 	@echo "  make index-status     Статус индекса (топики, embeddings, размер БД)"
 	@echo "  make index-status-split  Статус индекса (split mode)"
+	@echo "  make watch-index-status  Статус в реальном времени (обновление каждые $(WATCH_INTERVAL) с)"
 	@echo "  make up               Start qdrant + mcp + bsl-bridge"
 	@echo "  make up-split         Start split mode (mcp api-only + ingest-worker)"
 	@echo "  make up-split-serve   Start split + serve (нужен unpack-help)"

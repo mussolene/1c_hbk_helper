@@ -99,9 +99,9 @@ def cmd_build_index(args: argparse.Namespace) -> int:
         return 1
 
 
-def cmd_index_status(args: argparse.Namespace) -> int:
-    """Print index status: points count, versions, languages; ingest progress (embedding speed, per-folder, ETA)."""
-    from .indexer import get_index_status
+def _render_index_status() -> tuple[str, int]:
+    """Build index status output. Returns (output_string, exit_code)."""
+    from .indexer import get_all_collections_status, get_index_status
     from .ingest import read_ingest_status
 
     host = os.environ.get("QDRANT_HOST", "localhost")
@@ -109,17 +109,40 @@ def cmd_index_status(args: argparse.Namespace) -> int:
     collection = os.environ.get("QDRANT_COLLECTION", "onec_help")
     s = get_index_status(qdrant_host=host, qdrant_port=port, collection=collection)
     if s.get("error"):
-        print(f"Error: {s['error']}", file=sys.stderr)
-        return 1
+        return f"Error: {s['error']}\n", 1
     ingest = read_ingest_status()
-    if not s.get("exists") and not ingest:
-        print("Index does not exist. Run: python -m onec_help ingest")
-        return 0
-    if s.get("exists"):
-        pts = s.get("points_count", 0)
-        print(f"Collection: {s.get('collection', 'onec_help')}")
-        print(f"Topics indexed: {pts}")
-        print(f"Embeddings: {pts}")
+    collections = get_all_collections_status(qdrant_host=host, qdrant_port=port)
+    if not collections and s.get("exists"):
+        collections = [
+            {
+                "name": s.get("collection", collection),
+                "points_count": s.get("points_count"),
+                "indexed_vectors_count": s.get("points_count"),
+                "segments_count": None,
+            }
+        ]
+    if not collections and not ingest:
+        return "Index does not exist. Run: python -m onec_help ingest\n", 0
+
+    lines: list[str] = []
+    if collections:
+        total_pts = sum(
+            p
+            for c in collections
+            if (p := c.get("points_count")) is not None and isinstance(p, int)
+        )
+        lines.append("Collections:")
+        for c in collections:
+            name = c.get("name", "?")
+            pts = c.get("points_count")
+            vecs = c.get("indexed_vectors_count")
+            segs = c.get("segments_count")
+            pts_s = str(pts) if pts is not None else "—"
+            vecs_s = str(vecs) if vecs is not None else "—"
+            segs_s = str(segs) if segs is not None else "—"
+            lines.append(f"  {name}:  points={pts_s}  vectors={vecs_s}  segments={segs_s}")
+        if total_pts > 0:
+            lines.append(f"Total points: {total_pts}")
         storage_path = os.environ.get("QDRANT_STORAGE_PATH")
         if storage_path and os.path.isdir(storage_path):
             try:
@@ -132,52 +155,61 @@ def cmd_index_status(args: argparse.Namespace) -> int:
                         except OSError:
                             pass
                 size_mb = total / (1024 * 1024)
-                print(f"DB size: {size_mb:.1f} MB")
+                lines.append(f"DB size: {size_mb:.1f} MB")
             except OSError:
-                print("DB size: —")
+                lines.append("DB size: —")
         elif storage_path:
-            print("DB size: — (path not found)")
-        if s.get("versions"):
-            print(f"Versions (sample): {', '.join(s['versions'])}")
-        if s.get("languages"):
-            print(f"Languages (sample): {', '.join(s['languages'])}")
+            lines.append("DB size: — (path not found)")
+        if s.get("exists") and s.get("versions"):
+            lines.append(f"Versions (onec_help sample): {', '.join(s['versions'])}")
+        if s.get("exists") and s.get("languages"):
+            lines.append(f"Languages (onec_help sample): {', '.join(s['languages'])}")
     if ingest:
+        procs: list[str] = []
+        status = ingest.get("status", "")
+        if status == "completed":
+            procs.append("ingest (completed)")
+        elif status:
+            procs.append("ingest (indexing)")
+        if procs:
+            lines.append(f"Active procedures: {', '.join(procs)}")
         backend = ingest.get("embedding_backend") or "none"
-        print(f"Embedding: {backend}")
+        lines.append(f"Embedding: {backend}")
         if backend == "none":
-            print("Embedding speed: none")
+            lines.append("Embedding speed: none")
         else:
             speed = ingest.get("embedding_speed_pts_per_sec")
             if speed is not None:
-                print(f"Embedding speed: {speed} pts/sec")
+                lines.append(f"Embedding speed: {speed} pts/sec")
             else:
-                print("Embedding speed: —")
+                lines.append("Embedding speed: —")
         elapsed = ingest.get("elapsed_sec")
         if elapsed is not None:
-            print(f"Elapsed: {elapsed} s")
+            lines.append(f"Elapsed: {elapsed} s")
         status = ingest.get("status", "")
         if status == "completed":
             total_sec = ingest.get("total_elapsed_sec")
             if total_sec is not None:
-                print(f"Indexing finished. Total time: {total_sec} s")
-            print("Indexing: completed")
+                lines.append(f"Indexing finished. Total time: {total_sec} s")
+            lines.append("Indexing: completed")
         else:
-            print("Indexing: in progress")
+            lines.append("Indexing: in progress")
             eta = ingest.get("eta_sec")
             if eta is not None:
-                print(f"ETA: ~{int(eta)} s")
+                lines.append(f"ETA: ~{int(eta)} s")
         current = ingest.get("current") or []
         if current:
-            print("Current (per thread):")
+            lines.append("Current (per thread):")
             for c in current:
                 path = c.get("path", "")
                 ver = c.get("version", "")
                 lang = c.get("language", "")
                 stage = c.get("stage", "")
-                print(f"  {ver}/{lang}  {path}  — {stage}")
+                lines.append(f"  {ver}/{lang}  {path}  — {stage}")
         folders = ingest.get("folders") or []
         if folders:
-            print("Per folder (version/lang): hbk → html, md, err, pts")
+            total_err = sum(fo.get("err_count", 0) for fo in folders)
+            lines.append("Per folder (version/lang): hbk → html, md, err, pts")
             for fo in folders:
                 v = fo.get("version", "")
                 lang = fo.get("language", "")
@@ -187,9 +219,65 @@ def cmd_index_status(args: argparse.Namespace) -> int:
                 err = fo.get("err_count", 0)
                 pts = fo.get("points", 0)
                 st = fo.get("status", "pending")
-                # One line: 8.3/ru  hbk:2  html:150  md:120  err:0  pts:120  done
-                print(f"  {v}/{lang}  hbk:{hbk}  html:{html}  md:{md}  err:{err}  pts:{pts}  {st}")
-    return 0
+                lines.append(f"  {v}/{lang}  hbk:{hbk}  html:{html}  md:{md}  err:{err}  pts:{pts}  {st}")
+            if total_err > 0:
+                failed_tasks = ingest.get("failed_tasks") or []
+                if not failed_tasks:
+                    from .ingest import read_ingest_failed_log
+
+                    failed_tasks = read_ingest_failed_log(limit=20)
+                lines.append(f"Failed tasks: {total_err}")
+                if failed_tasks:
+                    lines.append("Error details:")
+                    for ft in failed_tasks[:15]:
+                        ver = ft.get("version", "")
+                        lang = ft.get("language", "")
+                        path = ft.get("path", "")
+                        err = (ft.get("error") or "").strip()
+                        if "All unpack methods failed" in err:
+                            err = "unpack failed (7z/zipfile/unzip)"
+                        elif "No such file or directory" in err and "unzip" in err:
+                            err = "unzip not found"
+                        elif len(err) > 70:
+                            err = err[:67] + "..."
+                        lines.append(f"  {ver}/{lang}  {path}: {err}")
+                    if len(failed_tasks) > 15:
+                        lines.append(f"  ... and {len(failed_tasks) - 15} more")
+                elif not os.environ.get("INGEST_FAILED_LOG"):
+                    lines.append("  (set INGEST_FAILED_LOG to capture details next run)")
+    return "\n".join(lines) + "\n", 0
+
+
+def cmd_index_status(args: argparse.Namespace) -> int:
+    """Print index status: all collections, points/vectors/segments; ingest progress."""
+    import time
+
+    watch = getattr(args, "watch", False)
+    interval = float(getattr(args, "interval", 2))
+
+    def _print_update() -> int:
+        out, code = _render_index_status()
+        if code != 0:
+            print(out, file=sys.stderr)
+            return code
+        # Cursor home + clear to end of screen, then print (reduces flicker)
+        if watch and sys.stdout.isatty():
+            sys.stdout.write("\033[H\033[J")
+        print(out, end="")
+        if watch and sys.stdout.isatty():
+            sys.stdout.write(f"\n[Refreshing every {int(interval)}s — Ctrl+C to stop]")
+        sys.stdout.flush()
+        return 0
+
+    if not watch:
+        return _print_update()
+
+    try:
+        while True:
+            _print_update()
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        return 0
 
 
 def cmd_unpack_dir(args: argparse.Namespace) -> int:
@@ -432,9 +520,7 @@ def cmd_load_standards(args: argparse.Namespace) -> int:
     standards_repos = (os.environ.get("STANDARDS_REPOS") or "").strip()
     standards_repo = (os.environ.get("STANDARDS_REPO") or "").strip()
     standards_subpath = os.environ.get("STANDARDS_SUBPATH", "docs").strip() or "docs"
-    default_branch = (
-        os.environ.get("STANDARDS_BRANCH", "master").strip() or "master"
-    )
+    default_branch = os.environ.get("STANDARDS_BRANCH", "master").strip() or "master"
     # Fallback: when no source is set, use default repos (both v8-code-style and v8std)
     if not path_arg and not standards_repos and not standards_repo:
         standards_repos = _DEFAULT_STANDARDS_REPOS
@@ -457,9 +543,7 @@ def cmd_load_standards(args: argparse.Namespace) -> int:
             try:
                 from .standards_loader import fetch_repo_archive
 
-                d, tmp = fetch_repo_archive(
-                    repo_url, subpath=standards_subpath, branch=branch
-                )
+                d, tmp = fetch_repo_archive(repo_url, subpath=standards_subpath, branch=branch)
                 dirs_to_load.append(d)
                 temp_dirs.append(tmp)
             except Exception as e:
@@ -832,6 +916,20 @@ def main() -> int:
     p_status = sub.add_parser(
         "index-status",
         help="Show index status (topics, versions, languages; ingest: embedding speed, per-folder, ETA)",
+    )
+    p_status.add_argument(
+        "--watch",
+        "-w",
+        action="store_true",
+        help="Refresh in-place every N seconds (progress-like display)",
+    )
+    p_status.add_argument(
+        "--interval",
+        "-n",
+        type=float,
+        default=2,
+        metavar="SEC",
+        help="Refresh interval for --watch (default: 2)",
     )
     p_status.set_defaults(func=cmd_index_status)
 
