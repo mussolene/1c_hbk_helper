@@ -402,7 +402,7 @@ def run_ingest(
 
     status_file = os.environ.get("INDEX_STATUS_FILE", DEFAULT_INDEX_STATUS_FILE)
     embedding_backend = (os.environ.get("EMBEDDING_BACKEND") or "local").strip().lower()
-    if embedding_backend not in ("local", "openai_api"):
+    if embedding_backend not in ("local", "openai_api", "deterministic"):
         embedding_backend = "none"
     started_at = time.time()
     # One entry per folder (version/language): hbk_count, html/md/err/points aggregated
