@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from onec_help.parse_fastcode import _detect_total_pages
 
 
@@ -28,8 +26,9 @@ def test_detect_total_pages_sliding_window() -> None:
         fetch_calls.append(p)
         return fake_html(p)
 
-    with patch("onec_help.parse_fastcode._fetch_page", side_effect=mock_fetch), patch(
-        "onec_help.parse_fastcode.time.sleep"
+    with (
+        patch("onec_help.parse_fastcode._fetch_page", side_effect=mock_fetch),
+        patch("onec_help.parse_fastcode.time.sleep"),
     ):
         opener = MagicMock()
         pages = _detect_total_pages(opener)

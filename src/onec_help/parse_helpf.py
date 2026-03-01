@@ -88,7 +88,7 @@ def _create_opener() -> urllib.request.OpenerDirector:
 
 def _create_opener_unverified() -> urllib.request.OpenerDirector:
     """Fallback when default SSL verification fails (e.g. Mac, missing CA bundle)."""
-    ctx = ssl._create_unverified_context()
+    ctx = ssl._create_unverified_context()  # noqa: S323
     return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
 
 

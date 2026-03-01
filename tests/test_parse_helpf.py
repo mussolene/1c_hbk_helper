@@ -31,7 +31,7 @@ def test_extract_file_links() -> None:
 def test_extract_faq_links_regex_fallback() -> None:
     """When BeautifulSoup finds no <a> with matching href, regex fallback extracts URLs."""
     # HTML without proper <a> structure (e.g. JS-rendered or bot-blocked)
-    html = '''<div>Some text and hidden link: "/faq/view/9999.html"</div>'''
+    html = """<div>Some text and hidden link: "/faq/view/9999.html"</div>"""
     items = _extract_faq_links(html)
     assert len(items) == 1
     assert items[0][1] == "https://helpf.pro/faq/view/9999.html"

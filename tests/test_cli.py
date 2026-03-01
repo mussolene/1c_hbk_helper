@@ -459,7 +459,12 @@ def test_cmd_index_status_shows_failed_placeholder_when_no_details(
     """index-status shows placeholder when failed_count > 0 but DB/log have no details."""
     mock_status.return_value = {"exists": True, "collection": "onec_help", "points_count": 100}
     mock_collections.return_value = [
-        {"name": "onec_help", "points_count": 100, "indexed_vectors_count": 100, "segments_count": 1},
+        {
+            "name": "onec_help",
+            "points_count": 100,
+            "indexed_vectors_count": 100,
+            "segments_count": 1,
+        },
     ]
     mock_ingest.return_value = None
     mock_last_run.return_value = {
@@ -864,8 +869,6 @@ def test_cmd_parse_fastcode_auto_pages(mock_run, tmp_path: Path) -> None:
     assert cmd_parse_fastcode(args) == 0
     mock_run.assert_called_once()
     assert mock_run.call_args[1]["pages"] is None
-
-
 
 
 @patch("onec_help.parse_helpf.run_parse")

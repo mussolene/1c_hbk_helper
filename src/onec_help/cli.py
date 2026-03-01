@@ -518,7 +518,11 @@ def _render_index_status(*, spinner: str = "", compact: bool = False) -> tuple[s
     if not ingest:
         last_run = read_last_ingest_run()
         if last_run:
-            from .ingest import read_ingest_cache_entries, read_ingest_failed_log, read_last_ingest_failed
+            from .ingest import (
+                read_ingest_cache_entries,
+                read_ingest_failed_log,
+                read_last_ingest_failed,
+            )
 
             failed_count = last_run.get("failed_count", 0)
             failed_tasks = (
