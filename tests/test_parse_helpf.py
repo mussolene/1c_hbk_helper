@@ -114,6 +114,23 @@ def test_parse_faq_detail_skips_razmestil() -> None:
     assert "Реальный контент" in desc
 
 
+def test_parse_faq_detail_includes_h1_and_skips_pohozhie() -> None:
+    """parse_faq_detail always includes h1, skips 'Похожие FAQ' footer."""
+    html = """
+    <html><body>
+    <h1>Программная проверка счета на групповой</h1>
+    <span class="break-word">Краткое описание проверки проводок.</span>
+    <p>Основной текст инструкции для разработчика 1С.</p>
+    <p>Похожие FAQ: другие темы на эту же тему.</p>
+    </body></html>
+    """
+    desc, code = parse_faq_detail(html, "Другой заголовок")
+    assert "Программная проверка счета" in desc
+    assert "Краткое описание" in desc
+    assert "Основной текст инструкции" in desc
+    assert "Похожие FAQ" not in desc
+
+
 def test_parse_file_detail() -> None:
     """parse_file_detail extracts from File page."""
     html = """

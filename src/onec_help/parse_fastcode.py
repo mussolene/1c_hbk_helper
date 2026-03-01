@@ -145,21 +145,32 @@ def _is_safe_fastcode_detail_url(href: str) -> str | None:
     return None
 
 
-def _extract_detail_links(soup: Any) -> dict[str, str]:
-    """Build title -> detail_url mapping from links with /Templates/ID/slug."""
-    mapping: dict[str, str] = {}
-    for a in soup.find_all("a", href=True):
-        href = a.get("href", "")
+def _extract_detail_link_for_h3(h3: Any) -> str | None:
+    """Find first /Templates/ID/slug link in block from this h3 until next h3."""
+    for tag in h3.find_all_next():
+        if tag.name == "h3" and tag != h3:
+            break
+        if tag.name != "a" or not tag.get("href"):
+            continue
+        href = tag["href"]
         if not _DETAIL_LINK_RE.search(href):
             continue
         full = _is_safe_fastcode_detail_url(href)
-        if not full:
+        if full:
+            return full
+    return None
+
+
+def _extract_detail_links(soup: Any) -> dict[str, str]:
+    """Build title -> detail_url mapping: for each h3, find link in its block."""
+    mapping: dict[str, str] = {}
+    for h3 in soup.find_all("h3"):
+        title = h3.get_text(strip=True)
+        if not title or title in mapping:
             continue
-        h3 = a.find_previous("h3")
-        if h3:
-            title = h3.get_text(strip=True)
-            if title and title not in mapping:
-                mapping[title] = full
+        url = _extract_detail_link_for_h3(h3)
+        if url:
+            mapping[title] = url
     return mapping
 
 
@@ -185,17 +196,17 @@ def parse_detail_page(html: str, title: str = "") -> tuple[str, str]:
             desc_parts.append(t)
             break
 
-    # параграфы до первого pre — основная документация (без div — слишком объёмно)
+    # параграфы и пояснения (в т.ч. между блоками кода) — вся документация
+    skip = ("Разместил:", "Подробнее", "Копировать", "Копировано")
     for tag in soup.find_all(["p", "pre"]):
         if tag.name == "pre":
-            break
+            continue  # не прерываем цикл — собираем p между pre-блоками
         t = tag.get_text(strip=True)
         if t and len(t) > 40 and t not in desc_parts:
-            skip = ("Разместил:", "Подробнее", "Копировать", "Копировано")
             if not any(s in t for s in skip):
                 desc_parts.append(t)
 
-    desc = " ".join(desc_parts)[:8000].strip()  # как в HelpF
+    desc = " ".join(desc_parts).strip()
     if not desc and h1:
         desc = h1.get_text(strip=True)
 
@@ -214,6 +225,12 @@ def parse_detail_page(html: str, title: str = "") -> tuple[str, str]:
         code = pre.get_text().strip()
         if code and len(code) > 20:
             blocks.append(code)
+    # code в <code> — иногда дополнительный сниппет
+    for code_tag in soup.find_all("code"):
+        t = code_tag.get_text().strip()
+        if t and len(t) > 40 and t not in blocks:
+            if any(kw in t for kw in ("Процедура", "Функция", "Новый ", "Запрос")):
+                blocks.append(t)
     code = "\n\n".join(blocks) if blocks else ""
     return (desc, code)
 

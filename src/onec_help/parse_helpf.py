@@ -284,8 +284,35 @@ def _is_title_plus_noise(desc: str, title: str) -> bool:
     return bool(rest and len(rest) < 50)  # короткий хвост — вероятно теги
 
 
+# Фразы, после которых контент не считается основной инструкцией (подвал, сайдбар, спам)
+_HELPF_SKIP_PATTERNS = (
+    "Разместил:",
+    "Подробнее",
+    "Слова упорядочены по частоте",
+    "Только текст:",
+    "Возможно, вас также заинтересует",
+    "Похожие FAQ",
+    "Ключевые слова",
+    "Комментарии",
+    "Еще в этой же категории",
+    "FAQ1855",
+    "Forum19350",
+    "Freelance15",
+    "Добавить FAQ",
+    "Задать Вопрос",
+    "Добавить Проект",
+    "О портале",
+    "Портал в лицах",
+    "Реклама на портале",
+    "Ваши предложения",
+    "Мы ищем хорошие сайты",
+    "рассматриваю его к приобретению",
+)
+
+
 def parse_faq_detail(html: str, title: str) -> tuple[str, str]:
-    """Extract description and code from FAQ detail page. Returns (desc, code)."""
+    """Extract description and code from FAQ detail page. Returns (desc, code).
+    Максимум инструкции: h1, span.break-word, параграфы, списки — для quality MCP ответов."""
     from bs4 import BeautifulSoup
 
     soup = BeautifulSoup(html, "html.parser")
@@ -293,20 +320,40 @@ def parse_faq_detail(html: str, title: str) -> tuple[str, str]:
     h1 = soup.find("h1")
     if h1:
         h1_text = h1.get_text(strip=True)
-        if h1_text and h1_text != title:
+        if h1_text:
             desc_parts.append(h1_text)
+
+    # span.break-word — краткое описание (как в FastCode)
+    for span in soup.find_all("span", class_=lambda c: c and "break-word" in str(c)):
+        t = span.get_text(strip=True)
+        if t and len(t) > 20 and t not in desc_parts:
+            desc_parts.append(t)
+            break
+
+    # h2/h3 — заголовки секций (Код 1C v 8.3, Подготовка и т.д.)
+    for tag in soup.find_all(["h2", "h3"]):
+        t = tag.get_text(strip=True)
+        if t and len(t) > 5 and t not in desc_parts:
+            if not any(s in t for s in _HELPF_SKIP_PATTERNS):
+                desc_parts.append(t)
 
     for p in soup.find_all("p"):
         t = p.get_text(strip=True)
         if not t or len(t) <= 20:
             continue
-        skip = ("Разместил:", "Подробнее", "Слова упорядочены по частоте", "Только текст:")
-        if any(s in t for s in skip):
+        if any(s in t for s in _HELPF_SKIP_PATTERNS):
             continue
         desc_parts.append(t)
 
-    # Full text for references (instruction); 8000 chars covers typical FAQ
-    desc = " ".join(desc_parts)[:8000].strip() or title
+    # Списки (ul/ol) — пошаговые инструкции; len>30 отсекает навигацию
+    for li in soup.find_all("li"):
+        t = li.get_text(strip=True)
+        if t and len(t) > 30 and t not in desc_parts:
+            if not any(s in t for s in _HELPF_SKIP_PATTERNS):
+                desc_parts.append(t)
+
+    # Full text for references (instruction) — без обрезки, сохраняем весь контекст
+    desc = " ".join(desc_parts).strip() or title
     if _is_title_plus_noise(desc, title):
         desc = title  # оставляем только заголовок, детали — по ссылке
 
@@ -316,6 +363,12 @@ def parse_faq_detail(html: str, title: str) -> tuple[str, str]:
         if code and len(code) > 15:
             code = re.sub(r"<br\s*/?>", "\n", code, flags=re.I)
             blocks.append(code)
+    # code в <code> — иногда доп. сниппет
+    for code_tag in soup.find_all("code"):
+        t = code_tag.get_text().strip()
+        if t and len(t) > 40 and t not in blocks:
+            if any(kw in t for kw in ("Процедура", "Функция", "Новый ", "Запрос")):
+                blocks.append(t)
     code = "\n\n".join(blocks) if blocks else ""
     return (desc, code)
 
@@ -325,12 +378,23 @@ def parse_file_detail(html: str, title: str) -> tuple[str, str]:
     from bs4 import BeautifulSoup
 
     soup = BeautifulSoup(html, "html.parser")
-    desc_parts: list[str] = [title]
+    desc_parts: list[str] = []
+    h1 = soup.find("h1")
+    if h1:
+        t = h1.get_text(strip=True)
+        if t:
+            desc_parts.append(t)
+    if not desc_parts:
+        desc_parts.append(title)
     for p in soup.find_all("p"):
         t = p.get_text(strip=True)
-        if t and len(t) > 20:
+        if t and len(t) > 20 and not any(s in t for s in _HELPF_SKIP_PATTERNS):
             desc_parts.append(t)
-    desc = " ".join(desc_parts)[:8000].strip()
+    for li in soup.find_all("li"):
+        t = li.get_text(strip=True)
+        if t and len(t) > 30 and not any(s in t for s in _HELPF_SKIP_PATTERNS):
+            desc_parts.append(t)
+    desc = " ".join(desc_parts).strip()
     if _is_title_plus_noise(desc, title):
         desc = title
     blocks: list[str] = []
@@ -338,6 +402,11 @@ def parse_file_detail(html: str, title: str) -> tuple[str, str]:
         code = pre.get_text().strip()
         if code and len(code) > 15:
             blocks.append(code)
+    for code_tag in soup.find_all("code"):
+        t = code_tag.get_text().strip()
+        if t and len(t) > 40 and t not in blocks:
+            if any(kw in t for kw in ("Процедура", "Функция", "Новый ", "Запрос")):
+                blocks.append(t)
     code = "\n\n".join(blocks) if blocks else ""
     return (desc, code)
 
