@@ -127,7 +127,7 @@ def _extract_desc_from_code(code: str) -> str:
             parts.append(s.lstrip("/").strip())
         elif parts:
             break
-    return " ".join(parts)[:500].strip()
+    return " ".join(parts).strip()
 
 
 def _is_safe_fastcode_detail_url(href: str) -> str | None:
@@ -262,7 +262,7 @@ def parse_page(html: str) -> list[dict[str, Any]]:
 
         item: dict[str, Any] = {
             "title": title,
-            "description": desc[:500] if desc else "",
+            "description": desc or "",
             "code_snippet": code,
         }
         if title in detail_links:
@@ -335,7 +335,7 @@ def run_parse(
                 if code:
                     all_items[idx]["code_snippet"] = code
                 if desc:
-                    all_items[idx]["description"] = desc[:500]
+                    all_items[idx]["description"] = desc
                     all_items[idx]["instruction"] = (
                         desc  # полный текст локально для сниппета и reference
                     )

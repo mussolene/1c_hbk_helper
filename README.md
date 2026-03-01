@@ -243,7 +243,7 @@ PYTHONPATH=src python -m pytest tests -v --cov=src/onec_help --cov-report=term-m
 ruff check src tests && ruff format --check src tests
 ```
 
-Покрытие не менее 70% (в расчёт не входят `__main__.py` и `mcp_server.py`).
+Покрытие не менее 70% (исключены из расчёта: `__main__.py`, `tests/`).
 
 ## CI (GitHub Actions)
 

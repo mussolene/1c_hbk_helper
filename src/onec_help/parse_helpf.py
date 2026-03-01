@@ -165,7 +165,7 @@ def _extract_links_regex_fallback(
         # Try to find title: text between > and </a> before this match
         id_part = m.group(1) if m.lastindex else ""
         title = f"HelpF #{id_part}" if id_part else "HelpF"
-        result.append((title[:300], full_url))
+        result.append((title, full_url))
     return result
 
 
@@ -189,7 +189,7 @@ def _extract_faq_links(html: str) -> list[tuple[str, str]]:
         title = a.get_text(strip=True)
         if not title or len(title) < 3:
             continue
-        result.append((title[:300], full_url))
+        result.append((title, full_url))
     if not result:
         result = _extract_links_regex_fallback(html, _FAQ_VIEW_RE, _BASE_URL)
     return result
@@ -216,7 +216,7 @@ def _extract_file_links(html: str) -> list[tuple[str, str]]:
         title = a.get_text(strip=True)
         if not title or len(title) < 3 or title in ("Подробнее", "s"):
             continue
-        result.append((title[:300], full_url))
+        result.append((title, full_url))
     if not result:
         result = _extract_links_regex_fallback(html, _FILE_VIEW_RE, _BASE_URL)
     return result
@@ -242,7 +242,7 @@ def _extract_help_links(html: str) -> list[tuple[str, str]]:
         title = a.get_text(strip=True)
         if not title or len(title) < 3 or title in ("Подробнее", "s"):
             continue
-        result.append((title[:300], full_url))
+        result.append((title, full_url))
     if not result:
         result = _extract_links_regex_fallback(html, _HELP_VIEW_RE, _BASE_URL)
     return result
@@ -268,7 +268,7 @@ def _extract_freelance_links(html: str) -> list[tuple[str, str]]:
         title = a.get_text(strip=True)
         if not title or len(title) < 3 or title in ("Подробнее", "s"):
             continue
-        result.append((title[:300], full_url))
+        result.append((title, full_url))
     if not result:
         result = _extract_links_regex_fallback(html, _FREELANCE_VIEW_RE, _BASE_URL)
     return result
@@ -490,7 +490,7 @@ def run_parse(
                 detail_html = _fetch_url(url, opener)
                 desc, code = parse_fn(detail_html, it.get("title", ""))
                 if desc:
-                    all_items[idx]["description"] = desc[:500]
+                    all_items[idx]["description"] = desc
                     # Full text for references (instruction); snippets keep code_snippet
                     all_items[idx]["instruction"] = desc
                 if code:
@@ -508,7 +508,7 @@ def run_parse(
         it["source_site"] = "helpf.pro"
         # source (faq/file/help/freelance) оставляем для атрибуции
         if not it.get("code_snippet") and not it.get("description"):
-            it["description"] = (it.get("title", "") or "")[:500]
+            it["description"] = it.get("title", "") or ""
         # instruction — полный текст локально; без detail fetch — хотя бы description
         if not it.get("instruction") and (it.get("description") or "").strip():
             it["instruction"] = it["description"]
