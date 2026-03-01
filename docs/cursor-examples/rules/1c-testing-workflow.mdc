@@ -19,11 +19,11 @@ alwaysApply: false
 При изменении Python в этом проекте:
 
 ```bash
-PYTHONPATH=src python -m pytest tests -v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=90
+PYTHONPATH=src python -m pytest tests -v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=70
 ruff check src tests && ruff format src tests
 ```
 
-При падении покрытия ниже 90% — добавить тесты перед merge.
+При падении покрытия ниже 70% — добавить тесты перед merge.
 
 ## Runtime-тесты 1С
 

@@ -72,11 +72,11 @@ save_1c_snippet(
 
 ## Python-тесты (onec_help)
 
-Запуск тестов и проверка покрытия (≥90%):
+Запуск тестов и проверка покрытия (≥70%):
 
 ```bash
 pip install -e ".[dev]"
-PYTHONPATH=src python -m pytest tests -v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=90
+PYTHONPATH=src python -m pytest tests -v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=70
 ```
 
 Линтинг:

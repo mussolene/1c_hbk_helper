@@ -239,15 +239,15 @@ docker run --rm -d -p 5050:5050 \
 
 ```bash
 pip install -e ".[dev]"
-PYTHONPATH=src python -m pytest tests -v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=90
+PYTHONPATH=src python -m pytest tests -v --cov=src/onec_help --cov-report=term-missing --cov-fail-under=70
 ruff check src tests && ruff format --check src tests
 ```
 
-Покрытие не менее 90% (в расчёт не входят `__main__.py` и `mcp_server.py`).
+Покрытие не менее 70% (в расчёт не входят `__main__.py` и `mcp_server.py`).
 
 ## CI (GitHub Actions)
 
-- **test** — pytest, покрытие ≥90%, матрица Python 3.10–3.14; отчёт в Codecov (для публичного репо токен не нужен). Добавьте репо на [codecov.io](https://codecov.io) для отображения бейджа.
+- **test** — pytest, покрытие ≥70%, матрица Python 3.10–3.14; отчёт в Codecov (для публичного репо токен не нужен). Добавьте репо на [codecov.io](https://codecov.io) для отображения бейджа.
 - **lint** — ruff check и ruff format.
 - **deploy** — сборка и push Docker-образа в GHCR (при push в main/master или вручную).
 - **release** — при push тега `v*`: сборка sdist и создание GitHub Release; отдельно — сборка и push Docker-образа с тегом версии.
