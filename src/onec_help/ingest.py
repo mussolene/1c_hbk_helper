@@ -179,12 +179,17 @@ def _write_ingest_status(
         payload["failed_tasks"] = failed_tasks[-50:]
     if elapsed > 0 and total_points > 0:
         payload["embedding_speed_pts_per_sec"] = round(total_points / elapsed, 2)
-    if done_tasks > 0 and total_tasks > done_tasks and total_points > 0 and elapsed > 0:
-        avg_pts = total_points / done_tasks
+    failed_count = len(failed_tasks) if failed_tasks else 0
+    done_successful = max(0, done_tasks - failed_count)
+    if done_successful > 0 and total_tasks > done_tasks and total_points > 0 and elapsed > 0:
+        avg_pts = total_points / done_successful
         remaining_tasks = total_tasks - done_tasks
         eta_points = avg_pts * remaining_tasks
         rate = total_points / elapsed
-        payload["eta_sec"] = round(eta_points / rate, 0) if rate > 0 else None
+        eta_sec = eta_points / rate if rate > 0 else None
+        if eta_sec is not None and eta_sec >= 0:
+            payload["eta_sec"] = round(eta_sec, 1)
+            payload["eta_finish_at"] = round(time.time() + eta_sec, 0)
     if finished_at is not None:
         payload["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(finished_at))
         payload["total_elapsed_sec"] = round(finished_at - started_at, 1)

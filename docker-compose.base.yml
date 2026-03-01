@@ -1,0 +1,103 @@
+# Base: Qdrant + mcp + bsl-bridge. Include from docker-compose.yml (split) or docker-compose.full.yml.
+# compose-spec: https://docs.docker.com/compose/compose-file/
+# База Qdrant: ./data/qdrant (в проекте, в .gitignore) — при перезапуске не теряется.
+# Переменные окружения: .env в корне проекта (скопируйте env.example в .env).
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.0
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333 && echo -e 'GET /readyz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q 'HTTP/1.1 200' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  mcp:
+    build:
+      context: .
+      args:
+        EMBEDDING_BACKEND: "${EMBEDDING_BACKEND:-openai_api}"
+    ports:
+      - "${MCP_PORT:-5050}:5050"
+    environment:
+      MCP_MODE: ${MCP_MODE:-full}
+      QDRANT_HOST: ${QDRANT_HOST:-qdrant}
+      QDRANT_PORT: ${QDRANT_PORT:-6333}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-onec_help}
+      QDRANT_STORAGE_PATH: /qdrant_storage
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
+      MCP_HOST: ${MCP_HOST:-0.0.0.0}
+      MCP_PORT: "5050"
+      MCP_PATH: ${MCP_PATH:-/mcp}
+      HELP_SOURCE_BASE: ${HELP_SOURCE_BASE:-/opt/1cv8}
+      HELP_LANGUAGES: ${HELP_LANGUAGES:-ru}
+      HELP_INGEST_TEMP: ${HELP_INGEST_TEMP:-/tmp/help_ingest}
+      INGEST_CACHE_FILE: ${INGEST_CACHE_FILE:-/app/var/ingest_cache/ingest_cache.db}
+      INDEX_STATUS_FILE: ${INDEX_STATUS_FILE:-/app/var/ingest_cache/ingest_status.json}
+      INGEST_FAILED_LOG: ${INGEST_FAILED_LOG:-/var/log/ingest_failed.log}
+      EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-openai_api}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-text-embedding-mxbai-embed-large-v1}
+      EMBEDDING_API_URL: ${EMBEDDING_API_URL:-http://host.docker.internal:1234/v1}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-64}
+      EMBEDDING_WORKERS: ${EMBEDDING_WORKERS:-4}
+      EMBEDDING_FORCE_BATCH: ${EMBEDDING_FORCE_BATCH:-0}
+      EMBEDDING_TIMEOUT: ${EMBEDDING_TIMEOUT:-60}
+      WATCHDOG_ENABLED: ${WATCHDOG_ENABLED:-0}
+      WATCHDOG_POLL_INTERVAL: ${WATCHDOG_POLL_INTERVAL:-600}
+      WATCHDOG_PENDING_INTERVAL: ${WATCHDOG_PENDING_INTERVAL:-600}
+      SNIPPETS_DIR: ${SNIPPETS_DIR:-/data/snippets}
+      STANDARDS_REPOS: ${STANDARDS_REPOS:-1C-Company/v8-code-style:master,zeegin/v8std:main}
+      STANDARDS_SUBPATH: ${STANDARDS_SUBPATH:-docs}
+      STANDARDS_DIR: ${STANDARDS_DIR:-}
+    volumes:
+      - /opt/1cv8:/opt/1cv8:ro
+      - ./data/qdrant:/qdrant_storage:ro
+      - ./data/ingest_cache:/app/var/ingest_cache
+      - ${SNIPPETS_HOST_PATH:-./snippets}:/data/snippets
+      - ${STANDARDS_HOST_PATH:-./standards}:/data/standards
+    command: ["python", "-m", "onec_help", "mcp", "/data", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "5050"]
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', 5050)); s.close()\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  bsl-bridge:
+    build:
+      context: https://github.com/SteelMorgan/mcp-bsl-lsp-bridge.git#main
+      dockerfile: Dockerfile
+      args:
+        BSL_LS_VERSION: ${BSL_LS_VERSION:-latest}
+    container_name: mcp-lsp-1c-hbk-helper
+    restart: unless-stopped
+    mem_limit: ${BSL_CONTAINER_MEMORY:-4g}
+    cpus: ${BSL_CONTAINER_CPUS:-4}
+    environment:
+      HOST_PROJECTS_ROOT: ${BSL_HOST_PROJECTS_ROOT:-/projects}
+      PROJECTS_ROOT: /projects
+      WORKSPACE_ROOT: ${BSL_WORKSPACE_ROOT:-/projects}
+      BSL_LS_PORT: ${BSL_LS_PORT:-9999}
+      MCP_LSP_BSL_JAVA_XMX: ${MCP_LSP_BSL_JAVA_XMX:-2g}
+      MCP_LSP_BSL_JAVA_XMS: ${MCP_LSP_BSL_JAVA_XMS:-512m}
+      MCP_LSP_LOG_LEVEL: ${MCP_LSP_LOG_LEVEL:-info}
+      FILE_WATCHER_MODE: ${FILE_WATCHER_MODE:-polling}
+      FILE_WATCHER_INTERVAL: ${FILE_WATCHER_INTERVAL:-30s}
+    volumes:
+      - .:/projects:ro
+    healthcheck:
+      test: ["CMD", "sh", "-c", "nc -z localhost ${BSL_LS_PORT:-9999}"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 3

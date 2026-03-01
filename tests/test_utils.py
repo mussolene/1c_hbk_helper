@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from onec_help._utils import (
+    format_duration,
     mask_path_for_log,
     path_inside_base,
     progress_done,
@@ -54,6 +55,17 @@ def test_progress_done_writes_newline() -> None:
         stderr.write.assert_called_once()
         assert stderr.write.call_args[0][0].endswith("\n")
         assert "done" in stderr.write.call_args[0][0]
+
+
+def test_format_duration() -> None:
+    """format_duration returns human-readable strings."""
+    assert format_duration(0) == "0s"
+    assert format_duration(45) == "45s"
+    assert format_duration(90) == "1m 30s"
+    assert format_duration(125) == "2m 5s"
+    assert format_duration(3661) == "1h 1m"
+    assert format_duration(7200) == "2h"
+    assert format_duration(90061) == "1d 1h"
 
 
 def test_path_inside_base_valueerror_returns_false() -> None:

@@ -99,7 +99,7 @@ pip install -e ".[dev]"
 | `EMBEDDING_MAX_CONCURRENT` | Макс. одновременных запросов к API (при ingest с несколькими воркерами снижает перегрузку LM Studio) | — |
 | `EMBEDDING_TIMEOUT` | Таймаут HTTP-запроса к API (секунды). При ошибке — retry с backoff, затем плейсхолдер | `60` |
 | `EMBEDDING_BATCH_TIMEOUT` | Таймаут для batch-запроса (секунды). По умолчанию — формула от размера батча | — |
-| `MCP_MODE` | `api` — только MCP, без ingest/cron/watchdog (при split); `full` — всё в mcp (по умолчанию) | `full` |
+| `MCP_MODE` | `api` — только MCP (split, по умолчанию); `full` — всё в mcp (один контейнер) | `api` |
 | `WATCHDOG_ENABLED` | `1` — запустить watchdog в фоне: мониторинг .hbk и обработка pending memory | `0` |
 | `WATCHDOG_POLL_INTERVAL` | Интервал проверки новых .hbk (секунды) | `600` |
 | `WATCHDOG_PENDING_INTERVAL` | Интервал обработки pending embeddings (секунды) | `600` |
@@ -119,36 +119,34 @@ docker compose up -d
 # База Qdrant хранится в ./data/qdrant (в проекте, при перезапуске не теряется).
 # В docker-compose хранилище смонтировано в mcp как /qdrant_storage (QDRANT_STORAGE_PATH) — index-status показывает размер БД.
 # MCP: http://localhost:5050/mcp (подключить в Cursor через .cursor/mcp.json)
-# Индексация вручную: docker compose exec mcp python -m onec_help ingest
+# Индексация вручную: make ingest
 # Проверка индекса: docker compose exec mcp python -m onec_help index-status
-# По расписанию: в контейнере mcp запущен cron — раз в сутки в 3:00 переиндексация из /opt/1cv8
-# Watchdog (при WATCHDOG_ENABLED=1): мониторинг новых .hbk, инкрементальный ingest; обработка pending памяти
 ```
 
 ### Режимы развёртывания
 
-**Single (по умолчанию)** — один контейнер `mcp` выполняет всё: MCP API, ingest при старте, cron, load-snippets, watchdog. Подходит для локальной разработки и малой нагрузки.
+**Split (по умолчанию)** — `mcp` только MCP API (быстрый отклик), `ingest-worker` — batch (ingest, cron, load-snippets, watchdog). Рекомендуется для большинства сценариев.
 
 ```bash
 docker compose up -d
-```
-
-**Split** — разделение read и write: `mcp` только MCP API (быстрый отклик), `ingest-worker` — batch-операции (ingest, cron, load-snippets, watchdog). Рекомендуется при нескольких пользователях или тяжёлом ingest.
-
-```bash
-docker compose -f docker-compose.split.yml up -d
+make ingest   # индексация вручную
 ```
 
 **Split + serve** — дополнительно веб-просмотр справки (Flask, порт 5000). Требуется `./data/unpacked` с распакованной справкой.
 
 ```bash
-docker compose -f docker-compose.split.yml --profile serve up -d
+docker compose --profile serve up -d
 ```
 
-- Индексация вручную (split): `docker compose -f docker-compose.split.yml exec ingest-worker python -m onec_help ingest`
-- Статус: `docker compose exec mcp python -m onec_help index-status` (split: добавьте `-f docker-compose.split.yml`)
+**Full** — один контейнер `mcp` выполняет всё: MCP API, ingest, cron, watchdog. Подходит для локальной разработки или малой нагрузки.
 
-**Пересборка при изменениях:** пересобрать только один сервис — `docker compose up -d --build mcp` (split: `-f docker-compose.split.yml up -d --build mcp`). Подробнее — [docs/architecture.md](docs/architecture.md).
+```bash
+docker compose -f docker-compose.full.yml up -d
+# или: make up-full
+# Индексация: make ingest-full
+```
+
+**Пересборка при изменениях:** `make build && make up` (сборка образов, затем запуск). Full: `make build-full && make up-full`. Подробнее — [docs/architecture.md](docs/architecture.md).
 
 ### Только распаковка .hbk (выгрузка справки в папку)
 
@@ -183,28 +181,28 @@ python -m onec_help unpack-dir /opt/1cv8 -o ./unpacked -l ru
 
 **Из коробки** монтируется `/opt/1cv8` (только чтение). Ingest просматривает подпапки (`8.3.27.1859`, `8.3.27.1719`) и считает каждую версией 1С. Язык по имени файла (`*_ru.hbk` и т.д.): по умолчанию `HELP_LANGUAGES=ru`.
 
-- **При старте контейнера:** если смонтирован `/opt/1cv8`, ingest один раз запускается **в фоне** (логи: `docker compose exec mcp tail -f /app/var/log/ingest.log`).
-- **Вручную:** `docker compose exec mcp python -m onec_help ingest`
-- **По расписанию:** cron в контейнере mcp — раз в сутки в 3:00.
+- **При старте (full):** если смонтирован `/opt/1cv8`, ingest один раз запускается в фоне (логи: `docker compose -f docker-compose.full.yml exec mcp tail -f /app/var/log/ingest.log`).
+- **Вручную:** `make ingest` (split) или `make ingest-full` (full).
+- **По расписанию:** cron в full-режиме — раз в сутки в 3:00; в split — настраивается в ingest-worker.
 - **Watchdog** (при `WATCHDOG_ENABLED=1`): мониторинг новых .hbk в HELP_SOURCE_BASE; при появлении или изменении — полный ingest; каждые N минут — обработка pending memory (эмбеддинги, сохранённые при недоступном API). Логи: `tail -f /app/var/log/watchdog.log`.
 
 Дополнительно:
 
 ```bash
-docker compose exec mcp python -m onec_help ingest --workers 4
-docker compose exec mcp python -m onec_help ingest --dry-run   # сколько .hbk будет обработано
-docker compose exec mcp python -m onec_help ingest --max-tasks 1  # ограничить объём за один запуск
-docker compose exec mcp python -m onec_help ingest --recreate  # пересоздать коллекцию (после смены модели/размерности)
-docker compose exec mcp python -m onec_help ingest --no-cache  # полная переиндексация без кэша
+make ingest ARGS="--workers 4"
+make ingest ARGS="--dry-run"   # сколько .hbk будет обработано
+make ingest ARGS="--max-tasks 1"  # ограничить объём за один запуск
+make ingest ARGS="--recreate"  # пересоздать коллекцию (после смены модели/размерности)
+make ingest ARGS="--no-cache"  # полная переиндексация без кэша
 ```
 
 **Сколько топиков:** полная справка (один 1cv8_ru.hbk) — обычно 10–25 тыс. страниц. Проверка индексации: `docker compose exec mcp python -m onec_help index-status` или MCP **get_1c_help_index_status** (локально: `python -m onec_help index-status`).
 
-**Таймаут:** полная индексация может занимать 15–60 минут. Запуск в фоне:
+**Таймаут:** полная индексация может занимать 15–60 минут. Запуск в фоне (split: ingest-worker; full: mcp):
 
 ```bash
-docker compose exec -d mcp sh -c 'python -m onec_help ingest >> /app/var/log/ingest.log 2>&1'
-docker compose exec mcp tail -f /app/var/log/ingest.log
+docker compose exec -d ingest-worker sh -c 'python -m onec_help ingest >> /app/var/log/ingest.log 2>&1'
+docker compose exec ingest-worker tail -f /app/var/log/ingest.log
 ```
 
 ### Эмбеддинги: отключение, локальная модель, внешний сервис
@@ -221,7 +219,7 @@ EMBEDDING_MODEL=your-embedding-model
 EMBEDDING_DIMENSION=768
 ```
 
-Если сервис эмбеддингов в том же Compose, задайте `EMBEDDING_API_URL` по имени сервиса. Размерность вектора при openai_api определяется автоматически по первому ответу API; при смене модели пересоздайте коллекцию: `docker compose exec mcp python -m onec_help ingest --recreate`.
+Если сервис эмбеддингов в том же Compose, задайте `EMBEDDING_API_URL` по имени сервиса. Размерность вектора при openai_api определяется автоматически по первому ответу API; при смене модели пересоздайте коллекцию: `make ingest ARGS="--recreate"`.
 
 **Нужно ли ставить зависимости для эмбеддингов (sentence-transformers), если используется сторонний сервис, `none` или `deterministic`?** Нет. При `openai_api`, `none` или `deterministic` sentence-transformers не используются. При сборке образа зависимости для эмбеддингов ставятся **только если** `EMBEDDING_BACKEND=local` (значение передаётся как build-arg). Если в `.env` задано `EMBEDDING_BACKEND=none`, `openai_api` или `deterministic`, при `docker compose build` образ будет собран без sentence-transformers — меньше по размеру:
 
@@ -287,7 +285,7 @@ ruff check src tests && ruff format --check src tests
 
 ## Документация
 
-- `make help` — все команды Makefile (unpack-help, up-split, ingest-split и др.)
+- `make help` — все команды Makefile (unpack-help, up, ingest, up-full, ingest-full и др.)
 - [docs/architecture.md](docs/architecture.md) — сервисы, режимы развёртывания (single/split), ответственность.
 - [docs/embedding.md](docs/embedding.md) — embedding-пайплайн: бэкенды, batch/single, retry, 429, переменные окружения.
 - [docs/run.md](docs/run.md) — запуск локально и в Docker.

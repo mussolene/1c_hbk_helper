@@ -40,6 +40,33 @@ def progress_done(msg: str) -> None:
     sys.stderr.flush()
 
 
+def format_duration(sec: float) -> str:
+    """Human-readable duration: 5m 30s, 2h 15m, 1d 3h. Rounds to nearest unit."""
+    if sec < 0 or not (sec == sec):  # NaN
+        return "—"
+    s = int(round(sec))
+    if s < 60:
+        return f"{s}s"
+    m, s = divmod(s, 60)
+    if m < 60:
+        return f"{m}m {s}s" if s else f"{m}m"
+    h, m = divmod(m, 60)
+    if h < 24:
+        parts = [f"{h}h"]
+        if m:
+            parts.append(f"{m}m")
+        if s and not m:
+            parts.append(f"{s}s")
+        return " ".join(parts)
+    d, h = divmod(h, 24)
+    parts = [f"{d}d"]
+    if h:
+        parts.append(f"{h}h")
+    if m and not h:
+        parts.append(f"{m}m")
+    return " ".join(parts)
+
+
 def path_inside_base(path: Path, base: Path) -> bool:
     """Return True if path resolves to a location under base (prevents path traversal)."""
     try:

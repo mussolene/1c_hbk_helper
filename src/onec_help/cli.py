@@ -99,8 +99,262 @@ def cmd_build_index(args: argparse.Namespace) -> int:
         return 1
 
 
-def _render_index_status() -> tuple[str, int]:
-    """Build index status output. Returns (output_string, exit_code)."""
+def _categorize_error(err: str) -> str:
+    """Categorize error: unpack|embed|index|build|other."""
+    e = (err or "").lower()
+    if any(x in e for x in ["unpack", "7z", "unzip", "all unpack methods failed", "no such file"]):
+        return "unpack"
+    if any(x in e for x in ["embed", "api", "429", "timeout", "connection", "placeholder"]):
+        return "embed"
+    if any(x in e for x in ["qdrant", "upsert", "collection", "vector"]):
+        return "index"
+    if any(x in e for x in ["build", "html", "markdown", "parse"]):
+        return "build"
+    return "other"
+
+
+def _short_error(err: str, max_len: int = 40) -> str:
+    """Compact error message for display."""
+    e = (err or "").strip().split("\n")[0]
+    if "All unpack methods failed" in e:
+        return "unpack failed"
+    if "No such file" in e and "unzip" in e:
+        return "unzip not found"
+    if "7z" in e or "invalid archive" in e:
+        return "7z/invalid archive"
+    if "timeout" in e.lower():
+        return "timeout"
+    if "429" in e or "rate limit" in e.lower():
+        return "rate limit"
+    if len(e) > max_len:
+        return e[: max_len - 2] + "…"
+    return e
+
+
+def _render_index_status_compact(s, collections, ingest, spinner, format_duration) -> tuple[str, int]:
+    """Single-line compact output (for piping/scripts)."""
+    prefix = f"{spinner} index-status".strip() if spinner else "index-status"
+    parts: list[str] = []
+    if collections:
+        total_pts = sum(
+            p for c in collections
+            if (p := c.get("points_count")) is not None and isinstance(p, int)
+        )
+        col_strs = [f"{c.get('name', '?')}:{c.get('points_count', '—')} pts" for c in collections]
+        parts.extend(col_strs)
+        if total_pts > 0 and len(collections) > 1:
+            parts.append(f"total:{total_pts}")
+        storage_path = os.environ.get("QDRANT_STORAGE_PATH")
+        if storage_path and os.path.isdir(storage_path):
+            try:
+                total = sum(
+                    os.path.getsize(os.path.join(d, f))
+                    for d, _, fs in os.walk(storage_path)
+                    for f in fs
+                )
+                parts.append(f"DB:{total / (1024 * 1024):.1f}MB")
+            except OSError:
+                parts.append("DB:—")
+    if s.get("exists") and (s.get("versions") or s.get("languages")):
+        if s.get("versions"):
+            vv = s["versions"][:4]
+            parts.append(f"ver:{','.join(vv)}{'…' if len(s.get('versions', [])) > 4 else ''}")
+        if s.get("languages"):
+            parts.append(f"lang:{','.join(s['languages'])}")
+    if ingest:
+        backend = ingest.get("embedding_backend") or "none"
+        status = ingest.get("status", "")
+        elapsed = ingest.get("elapsed_sec")
+        if status == "completed":
+            total_sec = ingest.get("total_elapsed_sec")
+            parts.append(f"Ingest ✓ {format_duration(total_sec)}" if total_sec else "Ingest ✓ done")
+        else:
+            ing = ["Ingest ⟳ in progress"]
+            if elapsed is not None:
+                ing.append(f"elapsed {format_duration(elapsed)}")
+            eta = ingest.get("eta_sec")
+            eta_finish = ingest.get("eta_finish_at")
+            if eta is not None and eta >= 0:
+                ing.append(f"ETA {format_duration(eta)}")
+            if eta_finish is not None:
+                import time as _t
+                lt = _t.localtime(eta_finish)
+                ing.append(f"finish ~{_t.strftime('%H:%M', lt)}")
+            parts.append(" ".join(ing))
+        parts.append(f"embed: {backend}")
+        current = ingest.get("current") or []
+        if current:
+            c0 = current[0]
+            cur = f"{c0.get('version','')}/{c0.get('language','')} {c0.get('path','')} {c0.get('stage','')}"
+            if len(current) > 1:
+                cur += f" +{len(current)-1}"
+            parts.append(f"cur:{cur.strip()}")
+        folders = ingest.get("folders") or []
+        total_err = sum(fo.get("err_count", 0) for fo in folders)
+        if total_err > 0:
+            failed_tasks = ingest.get("failed_tasks") or []
+            if not failed_tasks:
+                from .ingest import read_ingest_failed_log
+                failed_tasks = read_ingest_failed_log(limit=3)
+            err = f"Failed: {total_err}"
+            if failed_tasks:
+                ft = failed_tasks[0]
+                short = (ft.get("path") or "").replace(".hbk", "") or ft.get("error", "")[:20]
+                err += f" {short}:{_short_error(ft.get('error',''))}"
+            parts.append(err)
+    return f"{prefix} │ {' │ '.join(parts)}\n", 0
+
+
+def _render_index_status_rich(s, collections, ingest, spinner, format_duration, host, port) -> tuple[str, int]:
+    """Rich multi-line status: collections, operations, current files, elapsed, ETA, errors."""
+    lines: list[str] = []
+    try:
+        cols = os.get_terminal_size().columns
+    except OSError:
+        cols = 80
+    w = min(cols - 4, 76)
+    bar_w = max(10, w - 30)
+    sep = "─" * (w - 2)
+
+    def line(txt: str) -> None:
+        lines.append(txt[: cols - 1] if len(txt) > cols else txt)
+
+    header = " index-status " if not spinner else f" {spinner} index-status "
+    line(f"┌{header.center(w - 2, '─')}┐")
+
+    # 1. Collections (all Qdrant)
+    line(f"│ Collections (Qdrant) {''.rjust(w - 24)}│")
+    if collections:
+        total_pts = sum(
+            p for c in collections
+            if (p := c.get("points_count")) is not None and isinstance(p, int)
+        )
+        for c in collections:
+            n = c.get("name", "?")
+            pts = c.get("points_count", "—")
+            vecs = c.get("indexed_vectors_count", pts)
+            segs = c.get("segments_count", "—")
+            line(f"│   {n}: {pts} pts, {vecs} vecs, {segs} segs".ljust(w - 1) + "│")
+        if total_pts > 0:
+            line(f"│   total: {total_pts} pts".ljust(w - 1) + "│")
+        storage_path = os.environ.get("QDRANT_STORAGE_PATH")
+        if storage_path:
+            if os.path.isdir(storage_path):
+                try:
+                    sz = sum(
+                        os.path.getsize(os.path.join(d, f))
+                        for d, _, fs in os.walk(storage_path)
+                        for f in fs
+                    )
+                    line(f"│   DB: {sz / (1024 * 1024):.1f} MB".ljust(w - 1) + "│")
+                except OSError:
+                    line(f"│   DB: —".ljust(w - 1) + "│")
+            else:
+                line(f"│   DB: —".ljust(w - 1) + "│")
+        if s.get("versions"):
+            vv = ", ".join(s["versions"][:5])
+            if len(s.get("versions", [])) > 5:
+                vv += "…"
+            line(f"│   versions: {vv}".ljust(w - 1) + "│")
+        if s.get("languages"):
+            line(f"│   lang: {', '.join(s['languages'])}".ljust(w - 1) + "│")
+    else:
+        line(f"│   (no collections)".ljust(w - 1) + "│")
+    line(f"├{sep}┤")
+
+    # 2. Operations + 3. Current files + 4. Elapsed + 5. ETA
+    if ingest:
+        backend = ingest.get("embedding_backend") or "none"
+        status = ingest.get("status", "")
+        done = ingest.get("done_tasks", 0)
+        total = ingest.get("total_tasks", 0)
+        pts = ingest.get("total_points", 0)
+        speed = ingest.get("embedding_speed_pts_per_sec")
+
+        line(f"│ Operations {''.rjust(w - 14)}│")
+        ops = []
+        if status == "completed":
+            ops.append("✓ done")
+        else:
+            ops.extend(["indexing", "embedding", "writing", "in progress"])
+        line(f"│   {', '.join(ops)} │ embed: {backend}".ljust(w - 1) + "│")
+
+        if total > 0:
+            pct = int(100 * done / total) if total else 0
+            filled = int(bar_w * done / total) if total else 0
+            bar = "█" * filled + "░" * (bar_w - filled)
+            line(f"│   [{bar}] {done}/{total} ({pct}%)".ljust(w - 1) + "│")
+        if pts > 0 and speed:
+            line(f"│   {pts} pts, {speed} pts/s".ljust(w - 1) + "│")
+
+        elapsed = ingest.get("elapsed_sec")
+        if elapsed is not None:
+            line(f"│   elapsed: {format_duration(elapsed)}".ljust(w - 1) + "│")
+        eta = ingest.get("eta_sec")
+        eta_finish = ingest.get("eta_finish_at")
+        if eta is not None and eta >= 0:
+            line(f"│   ETA: {format_duration(eta)}".ljust(w - 1) + "│")
+        if eta_finish is not None:
+            import time as _t
+            finish_str = _t.strftime("%H:%M", _t.localtime(eta_finish))
+            line(f"│   ≈ finish: ~{finish_str}".ljust(w - 1) + "│")
+
+        current = ingest.get("current") or []
+        if current:
+            line(f"├{sep}┤")
+            line(f"│ Current files {''.rjust(w - 16)}│")
+            for c in current[:5]:
+                v = c.get("version", "")
+                lang = c.get("language", "")
+                path = (c.get("path") or "").replace(".hbk", "")
+                stage = c.get("stage", "")
+                line(f"│   {v}/{lang} {path} [{stage}]".ljust(w - 1) + "│")
+            if len(current) > 5:
+                line(f"│   ... +{len(current) - 5} more".ljust(w - 1) + "│")
+
+        # 6. Errors (categorized)
+        folders = ingest.get("folders") or []
+        total_err = sum(fo.get("err_count", 0) for fo in folders)
+        failed_tasks = ingest.get("failed_tasks") or []
+        if not failed_tasks and total_err > 0:
+            from .ingest import read_ingest_failed_log
+            failed_tasks = read_ingest_failed_log(limit=20)
+        if failed_tasks:
+            line(f"├{sep}┤")
+            line(f"│ Errors — Failed: {total_err} {''.rjust(w - 22)}│")
+            by_cat: dict[str, list[tuple[str, str]]] = {}
+            for ft in failed_tasks:
+                path = (ft.get("path") or "?").replace(".hbk", "")
+                err = ft.get("error", "")
+                cat = _categorize_error(err)
+                short = _short_error(err)
+                by_cat.setdefault(cat, []).append((path, short))
+            max_err_lines = 15
+            shown = 0
+            done = False
+            for cat in ("unpack", "embed", "index", "build", "other"):
+                if done:
+                    break
+                if cat not in by_cat:
+                    continue
+                for path, short in by_cat[cat]:
+                    if shown >= max_err_lines:
+                        line(f"│   ... +{total_err - max_err_lines} more".ljust(w - 1) + "│")
+                        done = True
+                        break
+                    line(f"│   [{cat}] {path}: {short}".ljust(w - 1) + "│")
+                    shown += 1
+    else:
+        line(f"│ No ingest in progress {''.rjust(w - 24)}│")
+
+    line(f"└{sep}┘")
+    return "\n".join(lines) + "\n", 0
+
+
+def _render_index_status(*, spinner: str = "", compact: bool = False) -> tuple[str, int]:
+    """Build index status. compact=False: rich multi-line; compact=True: single line.
+    Returns (output_string, exit_code)."""
+    from ._utils import format_duration
     from .indexer import get_all_collections_status, get_index_status
     from .ingest import read_ingest_status
 
@@ -124,152 +378,56 @@ def _render_index_status() -> tuple[str, int]:
     if not collections and not ingest:
         return "Index does not exist. Run: python -m onec_help ingest\n", 0
 
-    lines: list[str] = []
-    if collections:
-        total_pts = sum(
-            p
-            for c in collections
-            if (p := c.get("points_count")) is not None and isinstance(p, int)
+    # --- Compact (single line) ---
+    if compact:
+        return _render_index_status_compact(
+            s, collections, ingest, spinner, format_duration
         )
-        lines.append("Collections:")
-        for c in collections:
-            name = c.get("name", "?")
-            pts = c.get("points_count")
-            vecs = c.get("indexed_vectors_count")
-            segs = c.get("segments_count")
-            pts_s = str(pts) if pts is not None else "—"
-            vecs_s = str(vecs) if vecs is not None else "—"
-            segs_s = str(segs) if segs is not None else "—"
-            lines.append(f"  {name}:  points={pts_s}  vectors={vecs_s}  segments={segs_s}")
-        if total_pts > 0:
-            lines.append(f"Total points: {total_pts}")
-        storage_path = os.environ.get("QDRANT_STORAGE_PATH")
-        if storage_path and os.path.isdir(storage_path):
-            try:
-                total = 0
-                for dirpath, _dirnames, filenames in os.walk(storage_path):
-                    for f in filenames:
-                        p = os.path.join(dirpath, f)
-                        try:
-                            total += os.path.getsize(p)
-                        except OSError:
-                            pass
-                size_mb = total / (1024 * 1024)
-                lines.append(f"DB size: {size_mb:.1f} MB")
-            except OSError:
-                lines.append("DB size: —")
-        elif storage_path:
-            lines.append("DB size: — (path not found)")
-        if s.get("exists") and s.get("versions"):
-            lines.append(f"Versions (onec_help sample): {', '.join(s['versions'])}")
-        if s.get("exists") and s.get("languages"):
-            lines.append(f"Languages (onec_help sample): {', '.join(s['languages'])}")
-    if ingest:
-        procs: list[str] = []
-        status = ingest.get("status", "")
-        if status == "completed":
-            procs.append("ingest (completed)")
-        elif status:
-            procs.append("ingest (indexing)")
-        if procs:
-            lines.append(f"Active procedures: {', '.join(procs)}")
-        backend = ingest.get("embedding_backend") or "none"
-        lines.append(f"Embedding: {backend}")
-        if backend == "none":
-            lines.append("Embedding speed: none")
-        else:
-            speed = ingest.get("embedding_speed_pts_per_sec")
-            if speed is not None:
-                lines.append(f"Embedding speed: {speed} pts/sec")
-            else:
-                lines.append("Embedding speed: —")
-        elapsed = ingest.get("elapsed_sec")
-        if elapsed is not None:
-            lines.append(f"Elapsed: {elapsed} s")
-        status = ingest.get("status", "")
-        if status == "completed":
-            total_sec = ingest.get("total_elapsed_sec")
-            if total_sec is not None:
-                lines.append(f"Indexing finished. Total time: {total_sec} s")
-            lines.append("Indexing: completed")
-        else:
-            lines.append("Indexing: in progress")
-            eta = ingest.get("eta_sec")
-            if eta is not None:
-                lines.append(f"ETA: ~{int(eta)} s")
-        current = ingest.get("current") or []
-        if current:
-            lines.append("Current (per thread):")
-            for c in current:
-                path = c.get("path", "")
-                ver = c.get("version", "")
-                lang = c.get("language", "")
-                stage = c.get("stage", "")
-                lines.append(f"  {ver}/{lang}  {path}  — {stage}")
-        folders = ingest.get("folders") or []
-        if folders:
-            total_err = sum(fo.get("err_count", 0) for fo in folders)
-            lines.append("Per folder (version/lang): hbk → html, md, err, pts")
-            for fo in folders:
-                v = fo.get("version", "")
-                lang = fo.get("language", "")
-                hbk = fo.get("hbk_count", 0)
-                html = fo.get("html_count", 0)
-                md = fo.get("md_count", 0)
-                err = fo.get("err_count", 0)
-                pts = fo.get("points", 0)
-                st = fo.get("status", "pending")
-                lines.append(f"  {v}/{lang}  hbk:{hbk}  html:{html}  md:{md}  err:{err}  pts:{pts}  {st}")
-            if total_err > 0:
-                failed_tasks = ingest.get("failed_tasks") or []
-                if not failed_tasks:
-                    from .ingest import read_ingest_failed_log
 
-                    failed_tasks = read_ingest_failed_log(limit=20)
-                lines.append(f"Failed tasks: {total_err}")
-                if failed_tasks:
-                    lines.append("Error details:")
-                    for ft in failed_tasks[:15]:
-                        ver = ft.get("version", "")
-                        lang = ft.get("language", "")
-                        path = ft.get("path", "")
-                        err = (ft.get("error") or "").strip()
-                        if "All unpack methods failed" in err:
-                            err = "unpack failed (7z/zipfile/unzip)"
-                        elif "No such file or directory" in err and "unzip" in err:
-                            err = "unzip not found"
-                        elif len(err) > 70:
-                            err = err[:67] + "..."
-                        lines.append(f"  {ver}/{lang}  {path}: {err}")
-                    if len(failed_tasks) > 15:
-                        lines.append(f"  ... and {len(failed_tasks) - 15} more")
-                elif not os.environ.get("INGEST_FAILED_LOG"):
-                    lines.append("  (set INGEST_FAILED_LOG to capture details next run)")
-    return "\n".join(lines) + "\n", 0
+    # --- Rich multi-line ---
+    return _render_index_status_rich(
+        s, collections, ingest, spinner, format_duration, host, port
+    )
 
 
 def cmd_index_status(args: argparse.Namespace) -> int:
-    """Print index status: all collections, points/vectors/segments; ingest progress."""
+    """Print index status: rich multi-line or compact. Watch mode: live refresh."""
     import time
+
+    from ._utils import progress_done, progress_line
 
     watch = getattr(args, "watch", False)
     interval = float(getattr(args, "interval", 2))
+    compact = getattr(args, "compact", False)
+    tick = [0]
 
     def _print_update() -> int:
-        out, code = _render_index_status()
+        spinner = ("◐", "◓", "◑", "◒")[tick[0] % 4] if watch else ""
+        out, code = _render_index_status(spinner=spinner, compact=compact)
         if code != 0:
             print(out, file=sys.stderr)
             return code
-        # Cursor home + clear to end of screen, then print (reduces flicker)
-        if watch and sys.stdout.isatty():
-            sys.stdout.write("\033[H\033[J")
-        print(out, end="")
-        if watch and sys.stdout.isatty():
-            sys.stdout.write(f"\n[Refreshing every {int(interval)}s — Ctrl+C to stop]")
-        sys.stdout.flush()
+        if compact:
+            line = out.rstrip("\n")
+            if watch:
+                progress_line(line)
+            else:
+                print(line)
+        else:
+            if watch:
+                sys.stdout.write("\033[H\033[J")  # clear screen, cursor home
+                try:
+                    intv = int(interval)
+                    sys.stdout.write(f"\033[1;1H\033[K⟳ refresh {intv}s  Ctrl+C to stop\n")
+                except (ValueError, OSError):
+                    pass
+            print(out, end="")
+            sys.stdout.flush()
+        tick[0] += 1
         return 0
 
     if not watch:
+        tick[0] = 0
         return _print_update()
 
     try:
@@ -277,6 +435,7 @@ def cmd_index_status(args: argparse.Namespace) -> int:
             _print_update()
             time.sleep(interval)
     except KeyboardInterrupt:
+        progress_done("")
         return 0
 
 
@@ -930,6 +1089,12 @@ def main() -> int:
         default=2,
         metavar="SEC",
         help="Refresh interval for --watch (default: 2)",
+    )
+    p_status.add_argument(
+        "--compact",
+        "-c",
+        action="store_true",
+        help="Single-line output (for piping/scripts)",
     )
     p_status.set_defaults(func=cmd_index_status)
 

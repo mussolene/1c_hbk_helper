@@ -157,7 +157,7 @@ def test_cmd_serve_production_disables_debug(mock_web_app, help_sample_dir: Path
 def test_cmd_index_status_ingest_backend_none(
     mock_status, mock_ingest, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """index-status with ingest backend 'none' prints 'Embedding speed: none'."""
+    """index-status with ingest backend 'none' prints embed: none."""
     mock_status.return_value = {"exists": True, "points_count": 10}
     mock_ingest.return_value = {
         "embedding_backend": "none",
@@ -166,7 +166,7 @@ def test_cmd_index_status_ingest_backend_none(
     with patch.dict("os.environ", {"QDRANT_HOST": "localhost", "QDRANT_PORT": "6333"}):
         assert cmd_index_status(make_args()) == 0
     out = capsys.readouterr().out
-    assert "Embedding speed: none" in out
+    assert "embed: none" in out
 
 
 @patch("onec_help.ingest.read_ingest_status")
@@ -174,7 +174,7 @@ def test_cmd_index_status_ingest_backend_none(
 def test_cmd_index_status_ingest_speed_none(
     mock_status, mock_ingest, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """index-status with ingest speed None prints 'Embedding speed: —'."""
+    """index-status with ingest in progress shows elapsed."""
     mock_status.return_value = {"exists": True, "points_count": 10}
     mock_ingest.return_value = {
         "embedding_backend": "openai_api",
@@ -184,7 +184,7 @@ def test_cmd_index_status_ingest_speed_none(
     with patch.dict("os.environ", {"QDRANT_HOST": "localhost", "QDRANT_PORT": "6333"}):
         assert cmd_index_status(make_args()) == 0
     out = capsys.readouterr().out
-    assert "Embedding speed: —" in out or "Embedding speed:" in out
+    assert "embed: openai_api" in out and "in progress" in out
 
 
 @patch("onec_help.ingest.read_ingest_status")
@@ -192,7 +192,7 @@ def test_cmd_index_status_ingest_speed_none(
 def test_cmd_index_status_storage_path_not_dir(
     mock_status, mock_ingest, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """When QDRANT_STORAGE_PATH exists but is not a directory, DB size shows dash."""
+    """When QDRANT_STORAGE_PATH exists but is not a directory, DB shows dash."""
     mock_ingest.return_value = None
     mock_status.return_value = {"exists": True, "points_count": 10}
     f = tmp_path / "file"
@@ -203,7 +203,7 @@ def test_cmd_index_status_storage_path_not_dir(
     ):
         assert cmd_index_status(make_args()) == 0
     out = capsys.readouterr().out
-    assert "DB size" in out
+    assert "DB:" in out
 
 
 @patch("onec_help.ingest.read_ingest_status")
@@ -212,7 +212,7 @@ def test_cmd_index_status_storage_path_not_dir(
 def test_cmd_index_status_storage_path_oserror(
     mock_walk, mock_status, mock_ingest, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """When os.walk raises OSError, DB size shows dash."""
+    """When os.walk raises OSError, DB shows dash."""
     mock_ingest.return_value = None
     mock_status.return_value = {"exists": True, "points_count": 10}
     mock_walk.side_effect = OSError("permission denied")
@@ -222,7 +222,7 @@ def test_cmd_index_status_storage_path_oserror(
     ):
         assert cmd_index_status(make_args()) == 0
     out = capsys.readouterr().out
-    assert "DB size" in out
+    assert "DB:" in out
 
 
 @patch("onec_help.ingest.read_ingest_status")
@@ -249,7 +249,7 @@ def test_cmd_index_status_ingest_with_eta(
 def test_cmd_index_status_ingest_with_current_workers(
     mock_status, mock_ingest, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """index-status with ingest current workers shows 'Current (per thread)'."""
+    """index-status with ingest current workers shows current file and stage."""
     mock_status.return_value = {"exists": True, "points_count": 10}
     mock_ingest.return_value = {
         "embedding_backend": "openai_api",
@@ -259,7 +259,7 @@ def test_cmd_index_status_ingest_with_current_workers(
     with patch.dict("os.environ", {"QDRANT_HOST": "localhost", "QDRANT_PORT": "6333"}):
         assert cmd_index_status(make_args()) == 0
     out = capsys.readouterr().out
-    assert "Current (per thread)" in out
+    assert "8.3/ru" in out and "embed" in out
 
 
 @patch("onec_help.indexer.get_index_status")
@@ -305,11 +305,11 @@ def test_cmd_index_status_shows_embeddings_and_db_size(
     ):
         assert cmd_index_status(make_args()) == 0
     out = capsys.readouterr().out
-    assert "Collections:" in out
+    assert "index-status" in out
     assert "onec_help" in out
-    assert "points=100" in out
-    assert "Total points: 100" in out
-    assert "DB size:" in out
+    assert "100" in out
+    assert "total:" in out or "pts" in out
+    assert "DB:" in out
     assert "MB" in out
 
 
@@ -388,9 +388,8 @@ def test_cmd_index_status_shows_failed_task_details(
     }
     assert cmd_index_status(make_args()) == 0
     out = capsys.readouterr().out
-    assert "Failed tasks: 1" in out
-    assert "Error details:" in out
-    assert "7z failed" in out
+    assert "Failed: 1" in out
+    assert "shcntx_ru" in out
 
 
 @patch("onec_help.ingest.run_ingest")

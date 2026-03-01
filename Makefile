@@ -1,148 +1,133 @@
 # 1C Help MCP — Docker commands
+# По умолчанию: split (mcp + ingest-worker). Для одного контейнера: make up-full, make ingest-full.
 # Usage: make parse-fastcode | make load-snippets | make snippets
 # Extra args: make parse-fastcode ARGS="--pages 1-5 --no-fetch-detail"
-# Split mode: make up-split | make ingest-split | make build-split
 
 ARGS ?=
-# Для unpack-help: исходники справки на хосте, выходная папка, языки
 HELP_SOURCE_PATH ?= /opt/1cv8
 UNPACK_OUTPUT ?= data/unpacked
 HELP_LANGS ?= ru
 
 COMPOSE = docker compose
-COMPOSE_SPLIT = docker compose -f docker-compose.split.yml
+COMPOSE_FULL = docker compose -f docker-compose.full.yml
 
-.PHONY: build build-split parse-fastcode load-snippets load-snippets-from-project load-standards snippets
-.PHONY: up down up-split down-split bsl-start bsl-stop
-.PHONY: ingest ingest-split build-index build-index-split index-status index-status-split watch-index-status watch-index-status-split
-.PHONY: unpack-help help
+# По умолчанию split; для full добавлять -full к таргету
+INGEST_SERVICE = ingest-worker
+INDEX_STATUS_SERVICE = mcp
 
-# Interval (seconds) for watch-index-status
+.PHONY: build build-full parse-fastcode load-snippets load-snippets-from-project load-standards snippets
+.PHONY: up down up-full down-full bsl-start bsl-stop
+.PHONY: ingest ingest-full build-index build-index-full index-status index-status-full
+.PHONY: watch-index-status watch-index-status-full unpack-help help
+
 WATCH_INTERVAL ?= 2
 
-# Rebuild mcp image (required after adding new commands like parse-fastcode)
+# Сборка образов (split). SERVICE=mcp|ingest-worker — только один сервис
 build:
-	$(COMPOSE) build mcp
+	$(COMPOSE) build $(if $(SERVICE),$(SERVICE),mcp ingest-worker)
 
-# Rebuild mcp/ingest-worker (split). SERVICE=mcp|ingest-worker — только один
-build-split:
-	$(COMPOSE_SPLIT) up -d --build $(if $(SERVICE),$(SERVICE),mcp ingest-worker)
+# Сборка образа (full, один контейнер mcp)
+build-full:
+	$(COMPOSE_FULL) build mcp
 
 # Parse FastCode.im templates → snippets/fastcode_snippets.json
 parse-fastcode:
 	$(COMPOSE) run --rm mcp python -m onec_help parse-fastcode $(ARGS)
 
-# Load snippets from SNIPPETS_DIR into onec_help_memory (embeddings)
+# Load snippets from SNIPPETS_DIR into onec_help_memory
 load-snippets:
 	$(COMPOSE) run --rm mcp python -m onec_help load-snippets $(ARGS)
 
-# Load snippets from 1C project (mounts project, then --from-project)
-# ARGS: extra args, e.g. ARGS="--per-function". PROJECT_PATH: host path (default: $(CURDIR))
+# Load snippets from 1C project
 load-snippets-from-project:
 	$(COMPOSE) run --rm -v "$${PROJECT_PATH:=$(CURDIR)}:/project:ro" mcp python -m onec_help load-snippets --from-project /project $(ARGS)
 
-# Load standards into onec_help_memory (domain=standards).
-# По умолчанию оба репо: v8-code-style и v8std. Либо STANDARDS_DIR, либо ARGS=path.
+# Load standards into onec_help_memory
 load-standards:
 	$(COMPOSE) run --rm mcp python -m onec_help load-standards $(ARGS)
 
-# Parse FastCode + load snippets (full pipeline)
+# Parse FastCode + load snippets
 snippets: parse-fastcode load-snippets
 
-# Ingest .hbk from HELP_SOURCE_BASE (/opt/1cv8): unpack, index, cleanup
+# Ingest .hbk (split, default) — в ingest-worker
 ingest:
-	$(COMPOSE) exec mcp python -m onec_help ingest $(ARGS)
+	$(COMPOSE) exec $(INGEST_SERVICE) python -m onec_help ingest $(ARGS)
 
-# Ingest (split mode) — выполняется в ingest-worker
-ingest-split:
-	$(COMPOSE_SPLIT) exec ingest-worker python -m onec_help ingest $(ARGS)
+# Ingest (full) — в mcp
+ingest-full:
+	$(COMPOSE_FULL) exec mcp python -m onec_help ingest $(ARGS)
 
-# Build index from directory with .md (path required: ARGS=/path/to/docs)
+# Build index from directory with .md
 build-index:
-	$(COMPOSE) exec mcp python -m onec_help build-index $(ARGS)
+	$(COMPOSE) exec $(INDEX_STATUS_SERVICE) python -m onec_help build-index $(ARGS)
 
-# Build index (split mode)
-build-index-split:
-	$(COMPOSE_SPLIT) exec mcp python -m onec_help build-index $(ARGS)
+build-index-full:
+	$(COMPOSE_FULL) exec mcp python -m onec_help build-index $(ARGS)
 
-# Show index status (topics, embeddings, DB size, ingest progress)
+# Index status
 index-status:
-	$(COMPOSE) exec mcp python -m onec_help index-status
+	$(COMPOSE) exec $(INDEX_STATUS_SERVICE) python -m onec_help index-status
 
-# Index status (split mode)
-index-status-split:
-	$(COMPOSE_SPLIT) exec mcp python -m onec_help index-status
+index-status-full:
+	$(COMPOSE_FULL) exec mcp python -m onec_help index-status
 
-# Watch index status: refresh in-place every WATCH_INTERVAL seconds (default 2). Ctrl+C to stop.
-# -it allocates TTY (ANSI codes work) and keeps STDIN open (Ctrl+C).
+# Watch index status
 watch-index-status:
-	$(COMPOSE) exec -it mcp python -m onec_help index-status --watch --interval $(WATCH_INTERVAL)
+	$(COMPOSE) exec -it $(INDEX_STATUS_SERVICE) python -m onec_help index-status --watch --interval $(WATCH_INTERVAL)
 
-watch-index-status-split:
-	$(COMPOSE_SPLIT) exec -it mcp python -m onec_help index-status --watch --interval $(WATCH_INTERVAL)
+watch-index-status-full:
+	$(COMPOSE_FULL) exec -it mcp python -m onec_help index-status --watch --interval $(WATCH_INTERVAL)
 
-# Выгрузка справки в папку: распаковка .hbk без индексации.
-# HELP_SOURCE_PATH — каталог с версиями 1С (/opt/1cv8); UNPACK_OUTPUT — куда положить (data/unpacked)
+# Unpack .hbk без индексации
 unpack-help:
 	mkdir -p "$(UNPACK_OUTPUT)"
 	$(COMPOSE) run --rm -v "$(HELP_SOURCE_PATH):/input:ro" -v "$(abspath $(UNPACK_OUTPUT)):/output" mcp python -m onec_help unpack-dir /input -o /output -l $(HELP_LANGS) $(ARGS)
 
-# Start services (qdrant + mcp + bsl-bridge)
+# Start (split: qdrant + mcp + ingest-worker + bsl-bridge)
 up:
 	BSL_HOST_PROJECTS_ROOT="$$(pwd)" $(COMPOSE) up -d
 
-# Start split mode (mcp api-only + ingest-worker)
-up-split:
-	BSL_HOST_PROJECTS_ROOT="$$(pwd)" $(COMPOSE_SPLIT) up -d
+# Start full (один контейнер mcp)
+up-full:
+	BSL_HOST_PROJECTS_ROOT="$$(pwd)" $(COMPOSE_FULL) up -d
 
-# Start split + serve (нужен unpack-help или ./data/unpacked)
-up-split-serve:
-	BSL_HOST_PROJECTS_ROOT="$$(pwd)" $(COMPOSE_SPLIT) --profile serve up -d
+# Start split + serve
+up-serve:
+	BSL_HOST_PROJECTS_ROOT="$$(pwd)" $(COMPOSE) --profile serve up -d
 
-# Stop services
+# Stop
 down:
 	$(COMPOSE) down
 
-# Stop split mode
-down-split:
-	$(COMPOSE_SPLIT) down
+down-full:
+	$(COMPOSE_FULL) down
 
-# Start only BSL LS bridge
+# BSL LS bridge only
 bsl-start:
 	BSL_HOST_PROJECTS_ROOT="$$(pwd)" $(COMPOSE) up -d bsl-bridge
 
-# Stop only BSL LS bridge
 bsl-stop:
 	$(COMPOSE) stop bsl-bridge
 
 help:
-	@echo "1C Help MCP — Docker targets"
+	@echo "1C Help MCP — Docker (по умолчанию split)"
 	@echo ""
-	@echo "  make build            Rebuild mcp image (after git pull / new commands)"
-	@echo "  make build-split      Rebuild mcp+ingest-worker (split). SERVICE=mcp|ingest-worker — один"
+	@echo "  make build            Сборка образов mcp+ingest-worker (split). SERVICE=mcp|ingest-worker"
+	@echo "  make build-full       Сборка образа mcp (full)"
 	@echo "  make parse-fastcode   Parse FastCode.im → fastcode_snippets.json"
 	@echo "  make load-snippets    Load snippets from SNIPPETS_DIR"
-	@echo "  make load-snippets-from-project  Load snippets from 1C project (mounts .)"
-	@echo "  make load-standards   Load standards (STANDARDS_REPOS — оба репо по умолчанию, или STANDARDS_DIR)"
+	@echo "  make load-snippets-from-project  Load from 1C project"
+	@echo "  make load-standards   Load standards (STANDARDS_REPOS)"
 	@echo "  make snippets         parse-fastcode + load-snippets"
-	@echo "  make unpack-help      Выгрузка справки в папку (распаковка .hbk без индексации)"
-	@echo "  make ingest           Индексация .hbk из HELP_SOURCE_BASE (/opt/1cv8)"
-	@echo "  make ingest-split     Индексация (split mode, в ingest-worker)"
-	@echo "  make build-index      Индексация из папки с .md (ARGS=путь)"
-	@echo "  make index-status     Статус индекса (топики, embeddings, размер БД)"
-	@echo "  make index-status-split  Статус индекса (split mode)"
-	@echo "  make watch-index-status  Статус в реальном времени (обновление каждые $(WATCH_INTERVAL) с)"
-	@echo "  make up               Start qdrant + mcp + bsl-bridge"
-	@echo "  make up-split         Start split mode (mcp api-only + ingest-worker)"
-	@echo "  make up-split-serve   Start split + serve (нужен unpack-help)"
-	@echo "  make down             Stop all services"
-	@echo "  make down-split       Stop split mode"
-	@echo "  make bsl-start        Start only BSL LS bridge"
-	@echo "  make bsl-stop         Stop only BSL LS bridge"
+	@echo "  make unpack-help      Распаковка .hbk без индексации"
+	@echo "  make ingest           Индексация .hbk (split, ingest-worker)"
+	@echo "  make ingest-full      Индексация (full, mcp)"
+	@echo "  make build-index      Индексация из папки (ARGS=путь)"
+	@echo "  make index-status     Статус индекса"
+	@echo "  make watch-index-status  Статус в реальном времени"
+	@echo "  make up               Start split (qdrant + mcp + ingest-worker)"
+	@echo "  make up-full          Start full (один контейнер mcp)"
+	@echo "  make up-serve         Start split + serve"
+	@echo "  make down             Stop"
 	@echo ""
-	@echo "Args:"
-	@echo "  make parse-fastcode ARGS='--pages 1-51'"
-	@echo "  make load-snippets-from-project PROJECT_PATH=/path/to/1c"
-	@echo "  make unpack-help HELP_SOURCE_PATH=/opt/1cv8 UNPACK_OUTPUT=data/unpacked HELP_LANGS=ru"
-	@echo "  make ingest ARGS='--dry-run'"
-	@echo "  make build-split SERVICE=mcp  # rebuild only mcp"
+	@echo "Args: ARGS=...  make ingest ARGS='--dry-run'"

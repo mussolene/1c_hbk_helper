@@ -1,0 +1,11 @@
+# Full mode: один контейнер mcp — API + ingest + cron + load-snippets + watchdog.
+# usage: docker compose -f docker-compose.full.yml up -d   или   make up-full
+#
+include:
+  - docker-compose.base.yml
+
+# full: mcp runs ingest, status file in shared /app/var/ingest_cache
+services:
+  mcp:
+    environment:
+      MCP_MODE: full

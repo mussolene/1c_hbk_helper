@@ -10,8 +10,9 @@
 
 - **Локально:** `python -m onec_help unpack/build-docs/build-index/ingest/load-snippets/load-standards/parse-fastcode/watchdog/serve/mcp <args>`
 - **Docker:** `docker-compose up` (сервисы `qdrant` + `mcp` + `bsl-bridge`). В mcp смонтирован `/opt/1cv8`, cron раз в сутки в 3:00 запускает ingest; при `WATCHDOG_ENABLED=1` — watchdog в фоне. bsl-bridge — BSL LS для проекта (volume `.:/projects`, код в `src` или в корне).
-- **Split mode:** `docker compose -f docker-compose.split.yml up -d` — mcp только API (MCP_MODE=api), ingest-worker — batch (ingest, cron, load-snippets, watchdog). Индексация вручную: `exec ingest-worker python -m onec_help ingest`.
-- **Индекс вручную:** `docker compose exec mcp python -m onec_help ingest` (single) или `docker compose -f docker-compose.split.yml exec ingest-worker python -m onec_help ingest` (split). (каталог версий — `HELP_SOURCE_BASE`, подпапки = версии 1С, поиск .hbk рекурсивно, в т.ч. в `bin/` на Windows).
+- **По умолчанию split:** `docker compose up -d` — mcp только API (MCP_MODE=api), ingest-worker — batch (ingest, cron, load-snippets, watchdog). Индексация: `make ingest` (exec ingest-worker).
+- **Full (один контейнер):** `docker compose -f docker-compose.full.yml up -d` — mcp выполняет всё. Индексация: `make ingest-full`.
+- **Индекс вручную:** `make ingest` (split) или `make ingest-full` (full). Каталог версий — `HELP_SOURCE_BASE`, подпапки = версии 1С, поиск .hbk рекурсивно, в т.ч. в `bin/` на Windows.
 - **Сниппеты:** `docs/snippets/` — примеры (не загружаются). Реальные — из тома `./snippets:/data/snippets`, при старте `load-snippets`. `load-snippets --from-project src` — из проекта 1С. `make parse-fastcode`, `make load-snippets`, `make snippets`.
 - **Стандарты:** `make load-standards` — по умолчанию STANDARDS_REPOS загружает совместно 1C-Company/v8-code-style и zeegin/v8std (v8std.ru).
 
