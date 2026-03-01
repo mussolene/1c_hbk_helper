@@ -88,7 +88,7 @@ pip install -e ".[dev]"
 | `PORT` | Порт веб-сервера (serve) | `5000` |
 | `SERVE_PORT` | Порт serve в Docker (split, профиль serve) | `5000` |
 | `HELP_SERVE_ALLOWED_DIRS` | Список путей через запятую (serve): разрешённые базовые каталоги для формы; если задан, ввод вне списка отклоняется | — |
-| `EMBEDDING_BACKEND` | Эмбеддинги: `local` (sentence-transformers), `openai_api` (внешний API) или `none` (отключены — плейсхолдер, только поиск по ключевым словам) | `openai_api` |
+| `EMBEDDING_BACKEND` | Эмбеддинги: `local` (sentence-transformers), `openai_api` (внешний API), `deterministic` (детерминированные векторы 384 dim без модели — только БД) или `none` (плейсхолдер, только поиск по ключевым словам) | `openai_api` |
 | `EMBEDDING_MODEL` | Имя модели. Для openai_api (LM Studio): если такой модели нет на сервере, берётся первая из списка или популярная (text-text-embedding-mxbai-embed-large-v1, nomic-embed-text, all-MiniLM-L6-v2); для local — all-MiniLM-L6-v2 | `text-text-embedding-mxbai-embed-large-v1` (openai_api) |
 | `EMBEDDING_API_URL` | Для openai_api: базовый URL (по умолчанию LM Studio: `http://localhost:1234/v1` локально, в контейнере — `http://host.docker.internal:1234/v1`). При недоступности/ошибках используются плейсхолдер-векторы и семантический поиск ограничен | LM Studio: 1234 |
 | `EMBEDDING_API_KEY` | Ключ API (если нужен для openai_api) | — |
@@ -96,7 +96,9 @@ pip install -e ".[dev]"
 | `EMBEDDING_BATCH_SIZE` | Размер батча для эмбеддингов (текстов за один вызов encode/API). По умолчанию 64 | `64` |
 | `EMBEDDING_WORKERS` | Число параллельных запросов к внешнему API (только openai_api). По умолчанию 4 | `4` |
 | `EMBEDDING_FORCE_BATCH` | Максимальная мощность: `1`/`true`/`yes` — батч 256 и 16 воркеров для любого типа embedding | — |
+| `EMBEDDING_MAX_CONCURRENT` | Макс. одновременных запросов к API (при ingest с несколькими воркерами снижает перегрузку LM Studio) | — |
 | `EMBEDDING_TIMEOUT` | Таймаут HTTP-запроса к API (секунды). При ошибке — retry с backoff, затем плейсхолдер | `60` |
+| `EMBEDDING_BATCH_TIMEOUT` | Таймаут для batch-запроса (секунды). По умолчанию — формула от размера батча | — |
 | `MCP_MODE` | `api` — только MCP, без ingest/cron/watchdog (при split); `full` — всё в mcp (по умолчанию) | `full` |
 | `WATCHDOG_ENABLED` | `1` — запустить watchdog в фоне: мониторинг .hbk и обработка pending memory | `0` |
 | `WATCHDOG_POLL_INTERVAL` | Интервал проверки новых .hbk (секунды) | `600` |
@@ -208,6 +210,7 @@ docker compose exec mcp tail -f /app/var/log/ingest.log
 ### Эмбеддинги: отключение, локальная модель, внешний сервис
 
 - **Отключение эмбеддингов** (`EMBEDDING_BACKEND=none`): семантический поиск отключён, в индекс пишутся плейсхолдер-векторы; поиск по смыслу не работает, но **search_1c_help_keyword** (по ключевым словам) и остальные инструменты MCP работают. Подходит для экономии ресурсов или когда нужен только поиск по строкам.
+- **Deterministic** (`deterministic`): детерминированные векторы 384 dim без внешней модели — хэш от токенов текста. Семантический поиск ограничен, но воспроизводим. Без зависимостей.
 - **Локальная модель** (`local`): sentence-transformers в контейнере. Нужна установка зависимостей для эмбеддингов (см. ниже).
 - **Внешний API** (`openai_api`): LM Studio, Ollama, llama.cpp server и т.п. Задайте в `.env`:
 
@@ -220,7 +223,7 @@ EMBEDDING_DIMENSION=768
 
 Если сервис эмбеддингов в том же Compose, задайте `EMBEDDING_API_URL` по имени сервиса. Размерность вектора при openai_api определяется автоматически по первому ответу API; при смене модели пересоздайте коллекцию: `docker compose exec mcp python -m onec_help ingest --recreate`.
 
-**Нужно ли ставить зависимости для эмбеддингов (sentence-transformers), если используется сторонний сервис или `none`?** Нет. При `openai_api` или `none` sentence-transformers не используются. При сборке образа зависимости для эмбеддингов ставятся **только если** `EMBEDDING_BACKEND=local` (значение передаётся как build-arg). Если в `.env` задано `EMBEDDING_BACKEND=none` или `openai_api`, при `docker compose build` образ будет собран без sentence-transformers — меньше по размеру:
+**Нужно ли ставить зависимости для эмбеддингов (sentence-transformers), если используется сторонний сервис, `none` или `deterministic`?** Нет. При `openai_api`, `none` или `deterministic` sentence-transformers не используются. При сборке образа зависимости для эмбеддингов ставятся **только если** `EMBEDDING_BACKEND=local` (значение передаётся как build-arg). Если в `.env` задано `EMBEDDING_BACKEND=none`, `openai_api` или `deterministic`, при `docker compose build` образ будет собран без sentence-transformers — меньше по размеру:
 
 ```bash
 # В .env: EMBEDDING_BACKEND=none  (или openai_api)

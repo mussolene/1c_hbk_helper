@@ -449,9 +449,7 @@ def _get_embedding_api_single(text: str) -> list[float]:
             _release_api_slot()
     global _resolved_api_model_id
     _resolved_api_model_id = None
-    _log_fallback(
-        f"embedding API error/timeout, using placeholder: {type(last_err).__name__}"
-    )
+    _log_fallback(f"embedding API error/timeout, using placeholder: {type(last_err).__name__}")
     return _get_embedding_placeholder(text, _embedding_fallback_dim())
 
 

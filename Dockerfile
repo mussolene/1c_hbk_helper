@@ -1,5 +1,5 @@
 # 1C Help: app container (Python + p7zip-full + cron для индексации по расписанию).
-# Зависимости для эмбеддингов ставятся только при EMBEDDING_BACKEND=local. Для openai_api или none:
+# Зависимости для эмбеддингов ставятся только при EMBEDDING_BACKEND=local. Для openai_api, none или deterministic:
 #   docker build --build-arg EMBEDDING_BACKEND=none -t onec-help .
 FROM python:3.14-slim
 

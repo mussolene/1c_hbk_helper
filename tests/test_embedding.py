@@ -210,7 +210,6 @@ def test_retry_after_delay() -> None:
     """_retry_after_delay returns delay for 429, None for other errors."""
     import email
     from io import StringIO
-
     from urllib.error import HTTPError
 
     # 429 with Retry-After: 30
