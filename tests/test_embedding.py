@@ -192,6 +192,30 @@ def test_embedding_force_batch() -> None:
     importlib.reload(embedding_mod)
 
 
+def test_retry_after_delay() -> None:
+    """_retry_after_delay returns delay for 429, None for other errors."""
+    import email
+    from io import StringIO
+
+    from urllib.error import HTTPError
+
+    # 429 with Retry-After: 30
+    hdrs = email.message_from_string("Retry-After: 30\n")
+    err = HTTPError("http://x", 429, "Rate limit", hdrs, StringIO(""))
+    assert embedding_mod._retry_after_delay(err) == 30
+
+    # 429 without Retry-After -> 60
+    err2 = HTTPError("http://x", 429, "Rate limit", email.message_from_string(""), StringIO(""))
+    assert embedding_mod._retry_after_delay(err2) == 60
+
+    # 500 -> None
+    err3 = HTTPError("http://x", 500, "Server error", email.message_from_string(""), StringIO(""))
+    assert embedding_mod._retry_after_delay(err3) is None
+
+    # OSError -> None
+    assert embedding_mod._retry_after_delay(OSError("timeout")) is None
+
+
 def test_embedding_max_concurrent() -> None:
     """EMBEDDING_MAX_CONCURRENT limits concurrent API requests; None when unset."""
     import importlib

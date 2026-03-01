@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import unicodedata
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -139,6 +140,19 @@ _cached_api_dimension: int | None = None
 _dimension_detecting: bool = False
 _embedding_api_available: bool | None = None
 _fallback_log_count = 0
+
+
+def _retry_after_delay(err: BaseException) -> float | None:
+    """For HTTP 429, return seconds to wait from Retry-After header, or None."""
+    if not isinstance(err, urllib.error.HTTPError) or err.code != 429:
+        return None
+    ra = err.headers.get("Retry-After") if err.headers else None
+    if not ra:
+        return 60.0  # default for 429 when no Retry-After
+    try:
+        return min(120, max(1, int(ra)))
+    except (ValueError, TypeError):
+        return 60.0
 
 
 def _mask_url_for_log(url: str) -> str:
@@ -418,13 +432,15 @@ def _get_embedding_api_single(text: str) -> list[float]:
         except Exception as e:
             last_err = e
             if attempt < RETRY_ATTEMPTS - 1:
-                delay = RETRY_BASE_DELAY * (2**attempt)
+                delay = _retry_after_delay(e) or RETRY_BASE_DELAY * (2**attempt)
                 time.sleep(delay)
         finally:
             _release_api_slot()
     global _resolved_api_model_id
     _resolved_api_model_id = None
-    _log_fallback(f"embedding API error/timeout, using placeholder: {type(last_err).__name__}")
+    _log_fallback(
+        f"embedding API error/timeout, using placeholder: {type(last_err).__name__}"
+    )
     return _get_embedding_placeholder(text, _embedding_fallback_dim())
 
 
@@ -475,7 +491,7 @@ def _get_embedding_api_batch(texts: list[str]) -> list[list[float]]:
         except Exception as e:
             last_err = e
             if attempt < RETRY_ATTEMPTS - 1:
-                delay = RETRY_BASE_DELAY * (2**attempt)
+                delay = _retry_after_delay(e) or RETRY_BASE_DELAY * (2**attempt)
                 time.sleep(delay)
         finally:
             _release_api_slot()
