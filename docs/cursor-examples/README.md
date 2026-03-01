@@ -33,5 +33,6 @@ docs/cursor-examples/
 
 ## Связь с проектом
 
-- См. [AGENTS.md](../AGENTS.md) — workflow разработки 1С с BSL LS.
+- См. [AGENTS.md](../AGENTS.md) — workflow разработки 1С с BSL LS, embedding и индексация.
+- См. [embedding.md](../embedding.md) — пайплайн embedding (batch/single, retry, 429), точки интеграции.
 - См. [bsl-ls-mcp-setup.md](../bsl-ls-mcp-setup.md) — подключение BSL LS как MCP.

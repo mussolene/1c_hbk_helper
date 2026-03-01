@@ -15,6 +15,12 @@
 - **Сниппеты:** `docs/snippets/` — примеры (не загружаются). Реальные — из тома `./snippets:/data/snippets`, при старте `load-snippets`. `load-snippets --from-project src` — из проекта 1С. `make parse-fastcode`, `make load-snippets`, `make snippets`.
 - **Стандарты:** `make load-standards` — по умолчанию STANDARDS_REPOS загружает совместно 1C-Company/v8-code-style и zeegin/v8std (v8std.ru).
 
+## Embedding и индексация
+
+- **Точки интеграции:** indexer (справка), memory.upsert_curated_snippets (snippets, standards), memory.process_pending, memory._write_long_or_pending (real-time). Все batch-операции используют `get_embedding_batch`; только real-time события — `get_embedding`.
+- **Единая логика:** sanitize, truncation 2000 символов, retry при len(vectors)!=len(items), 429+Retry-After, EMBEDDING_MAX_CONCURRENT (семафор), retry с меньшим батчем перед fallback. См. `docs/embedding.md`.
+- **Бэкенды:** local, openai_api, deterministic (384 dim без модели), none (плейсхолдер).
+
 ## Структура кода
 
 - `src/onec_help/`: пакет (unpack, categories, html2md, tree, web, indexer, memory, parse_fastcode, standards_loader, watchdog, mcp_server, cli).

@@ -15,6 +15,8 @@
 - **onec_help** — основной индекс справки 1С (пишет ingest/indexer)
 - **onec_help_memory** — snippets, standards, session events (пишут memory, load-snippets, load-standards)
 
+Подробнее об embedding, batch-пайплайне, retry и переменных — см. [docs/embedding.md](embedding.md).
+
 ## Режимы развёртывания
 
 ### Single (по умолчанию)

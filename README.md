@@ -289,6 +289,7 @@ ruff check src tests && ruff format --check src tests
 
 - `make help` — все команды Makefile (unpack-help, up-split, ingest-split и др.)
 - [docs/architecture.md](docs/architecture.md) — сервисы, режимы развёртывания (single/split), ответственность.
+- [docs/embedding.md](docs/embedding.md) — embedding-пайплайн: бэкенды, batch/single, retry, 429, переменные окружения.
 - [docs/run.md](docs/run.md) — запуск локально и в Docker.
 - [docs/search-and-mcp.md](docs/search-and-mcp.md) — поиск и рекомендации по MCP.
 - [docs/help_formats.md](docs/help_formats.md) — форматы справки (.hbk, HTML, Markdown).
