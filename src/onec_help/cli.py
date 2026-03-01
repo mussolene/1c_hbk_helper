@@ -430,7 +430,30 @@ def _render_index_status_rich(
             summary_parts.append(workers_str)
         line(f"│   Summary: {' │ '.join(summary_parts)}".ljust(w - 1) + "│")
 
-        if completed:
+        # Errors first when present (priority over file list)
+        folders = ingest.get("folders") or []
+        total_err = sum(fo.get("err_count", 0) for fo in folders)
+        failed_tasks = ingest.get("failed_tasks") or []
+        if not failed_tasks and total_err > 0:
+            from .ingest import read_ingest_failed_log, read_last_ingest_failed
+
+            failed_tasks = read_last_ingest_failed(limit=20) or read_ingest_failed_log(limit=20)
+        if failed_tasks:
+            total_err = total_err or len(failed_tasks)
+            line(f"├{sep}┤")
+            line(f"│ Failed ({total_err})  ver/lang = version/language".ljust(w - 1) + "│")
+            for ft in failed_tasks[:10]:
+                path = (ft.get("path") or "?").replace(".hbk", "")
+                err = (ft.get("error") or "").strip()
+                ver = ft.get("version", "") or "?"
+                lang = ft.get("language", "") or "?"
+                line(f"│   {ver}/{lang} {path}".ljust(w - 1) + "│")
+                if err:
+                    err_short = err[: (w - 8)] + ("…" if len(err) > w - 8 else "")
+                    line(f"│     → {err_short}".ljust(w - 1) + "│")
+            if len(failed_tasks) > 10:
+                line(f"│   ... +{len(failed_tasks) - 10} more".ljust(w - 1) + "│")
+        elif completed:
             line(f"├{sep}┤")
             line(f"│ Files (per file) {''.rjust(w - 18)}│")
             for f in completed[-12:]:
@@ -471,40 +494,6 @@ def _render_index_status_rich(
                 line(f"│   [W{i}] {v}/{lang} {path} [{stage}]{pts_info}".ljust(w - 1) + "│")
             if len(current) > 5:
                 line(f"│   ... +{len(current) - 5} more".ljust(w - 1) + "│")
-
-        # 6. Errors (categorized)
-        folders = ingest.get("folders") or []
-        total_err = sum(fo.get("err_count", 0) for fo in folders)
-        failed_tasks = ingest.get("failed_tasks") or []
-        if not failed_tasks and total_err > 0:
-            from .ingest import read_ingest_failed_log
-
-            failed_tasks = read_ingest_failed_log(limit=20)
-        if failed_tasks:
-            line(f"├{sep}┤")
-            line(f"│ Errors ({total_err}) {''.rjust(w - 16)}│")
-            by_cat: dict[str, list[tuple[str, str]]] = {}
-            for ft in failed_tasks:
-                path = (ft.get("path") or "?").replace(".hbk", "")
-                err = ft.get("error", "")
-                cat = _categorize_error(err)
-                short = _short_error(err)
-                by_cat.setdefault(cat, []).append((path, short))
-            max_err_lines = 15
-            shown = 0
-            done = False
-            for cat in ("unpack", "embed", "index", "build", "other"):
-                if done:
-                    break
-                if cat not in by_cat:
-                    continue
-                for path, short in by_cat[cat]:
-                    if shown >= max_err_lines:
-                        line(f"│   ... +{total_err - max_err_lines} more".ljust(w - 1) + "│")
-                        done = True
-                        break
-                    line(f"│   [{cat}] {path}: {short}".ljust(w - 1) + "│")
-                    shown += 1
     else:
         line(f"│ No ingest in progress {''.rjust(w - 24)}│")
 
@@ -529,8 +518,21 @@ def _render_index_status(*, spinner: str = "", compact: bool = False) -> tuple[s
     if not ingest:
         last_run = read_last_ingest_run()
         if last_run:
-            from .ingest import read_ingest_cache_entries
+            from .ingest import read_ingest_cache_entries, read_ingest_failed_log, read_last_ingest_failed
 
+            failed_count = last_run.get("failed_count", 0)
+            failed_tasks = (
+                read_last_ingest_failed(limit=20) or read_ingest_failed_log(limit=20)
+                if failed_count > 0
+                else []
+            )
+            if failed_count > 0 and not failed_tasks:
+                failed_tasks = [
+                    {
+                        "path": "?",
+                        "error": "Details not stored (re-run ingest to capture errors)",
+                    }
+                ]
             ingest = {
                 "status": "completed",
                 "embedding_backend": last_run.get("embedding_backend", "none"),
@@ -538,10 +540,10 @@ def _render_index_status(*, spinner: str = "", compact: bool = False) -> tuple[s
                 "done_tasks": last_run.get("done_tasks", 0),
                 "total_tasks": last_run.get("total_tasks", 0),
                 "total_elapsed_sec": last_run.get("total_elapsed_sec"),
-                "failed_count": last_run.get("failed_count", 0),
+                "failed_count": failed_count,
                 "current": [],
                 "folders": [],
-                "failed_tasks": [],
+                "failed_tasks": failed_tasks,
                 "completed_files": read_ingest_cache_entries(limit=50),
             }
     collections = get_all_collections_status(qdrant_host=host, qdrant_port=port)
@@ -751,7 +753,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
 def cmd_load_snippets(args: argparse.Namespace) -> int:
     """Load curated snippets from JSON and/or folder into onec_help_memory (domain=snippets).
-    Sources: explicit path arg, or SNIPPETS_DIR env. docs/snippets/ — только примеры, не загружаются."""
+    Sources: explicit path arg, or SNIPPETS_DIR env."""
     path_arg = getattr(args, "snippets_file", None) or os.environ.get("SNIPPETS_JSON_PATH", "")
     snippets_dir = os.environ.get("SNIPPETS_DIR", "")
 
@@ -801,7 +803,7 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
             _load_folder(d, per_func=getattr(args, "per_function", False))
         else:
             print(
-                "No source: set SNIPPETS_DIR, pass path, or use --from-project. docs/snippets/ — examples only.",
+                "No source: set SNIPPETS_DIR, pass path, or use --from-project.",
                 file=sys.stderr,
             )
             return 0
@@ -975,7 +977,7 @@ def cmd_parse_fastcode(args: argparse.Namespace) -> int:
         if snippets_dir:
             out_path = str(Path(snippets_dir) / "fastcode_snippets.json")
         else:
-            out_path = "snippets/fastcode_snippets.json"
+            out_path = "data/snippets/fastcode_snippets.json"
     out = Path(out_path)
     fetch_detail = not getattr(args, "no_fetch_detail", False)
     return run_parse(out=out, pages=pages, delay=args.delay, fetch_detail=fetch_detail)
@@ -999,7 +1001,7 @@ def cmd_parse_helpf(args: argparse.Namespace) -> int:
         if snippets_dir:
             out_path = str(Path(snippets_dir) / "helpf_snippets.json")
         else:
-            out_path = "snippets/helpf_snippets.json"
+            out_path = "data/snippets/helpf_snippets.json"
     out = Path(out_path)
     fetch_detail = not getattr(args, "no_fetch_detail", False)
     return run_parse(
@@ -1009,6 +1011,7 @@ def cmd_parse_helpf(args: argparse.Namespace) -> int:
         max_items=getattr(args, "max_items", 0),
         delay=args.delay,
         fetch_detail=fetch_detail,
+        skip_minimal=getattr(args, "skip_minimal", False),
     )
 
 
@@ -1399,7 +1402,7 @@ def main() -> int:
         type=str,
         nargs="?",
         default=None,
-        help="Path to snippets.json or folder (default: docs/snippets/ or SNIPPETS_JSON_PATH/SNIPPETS_DIR)",
+        help="Path to snippets.json or folder (default: SNIPPETS_DIR or SNIPPETS_JSON_PATH)",
     )
     p_load_snippets.add_argument(
         "--per-function",
@@ -1439,7 +1442,7 @@ def main() -> int:
         "--out",
         type=str,
         default=None,
-        help="Output path (default: SNIPPETS_DIR/fastcode_snippets.json or ./snippets/fastcode_snippets.json)",
+        help="Output path (default: SNIPPETS_DIR/fastcode_snippets.json or data/snippets/)",
     )
     p_parse_fastcode.add_argument(
         "--pages",
@@ -1470,14 +1473,14 @@ def main() -> int:
         "--out",
         type=str,
         default=None,
-        help="Output path (default: SNIPPETS_DIR/helpf_snippets.json or ./snippets/helpf_snippets.json)",
+        help="Output path (default: SNIPPETS_DIR/helpf_snippets.json or data/snippets/)",
     )
     p_parse_helpf.add_argument(
         "--source",
         type=str,
         default="faq",
-        choices=("faq", "file", "all"),
-        help="Source: faq, file, or all",
+        choices=("faq", "file", "help", "freelance", "all"),
+        help="Source: faq, file, help (forum), freelance, or all",
     )
     p_parse_helpf.add_argument(
         "--pages",
@@ -1502,6 +1505,12 @@ def main() -> int:
         action="store_true",
         dest="no_fetch_detail",
         help="Do not fetch detail pages (listing only, no full content)",
+    )
+    p_parse_helpf.add_argument(
+        "--skip-minimal",
+        action="store_true",
+        dest="skip_minimal",
+        help="Exclude items with no real content (title-only, no code)",
     )
     p_parse_helpf.set_defaults(func=cmd_parse_helpf)
 

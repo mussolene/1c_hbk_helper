@@ -78,7 +78,7 @@ pip install -e ".[dev]"
 | `HELP_LANGUAGES` | Языки справки (ingest) | `ru` |
 | `HELP_INGEST_TEMP` | Временный каталог для ingest (если не задан — `$TMPDIR/help_ingest` или `tempfile.gettempdir()`) | — |
 | `HELP_SERVE_HOST` | Хост для serve (127.0.0.1 — только localhost; 0.0.0.0 — для Docker) | `127.0.0.1` |
-| `INGEST_CACHE_FILE` | Путь к SQLite-кэшу: хэш .hbk, статус ingest (ingest_current, ingest_runs). Ingest и index-status читают/пишут в одну БД — статистика реальная. По умолчанию `data/ingest_cache/ingest_cache.db`; в Docker — `/app/var/ingest_cache/ingest_cache.db` (volume `./data/ingest_cache`) | `data/ingest_cache/ingest_cache.db` |
+| `INGEST_CACHE_FILE` | Путь к SQLite-кэшу: хэш .hbk, статус ingest. Ingest и index-status читают/пишут в одну БД. В Docker — `/app/var/ingest_cache/ingest_cache.db` (volume `ingest_cache`) | `data/ingest_cache/ingest_cache.db` |
 | `INGEST_SKIP_CACHE` | `1`/`true` — полная переиндексация без кэша (или `ingest --no-cache`) | — |
 | `INGEST_FAILED_LOG` | Файл для списка неудачных .hbk | — |
 | `MCP_TRANSPORT` | Транспорт MCP: `stdio`, `http` или `streamable-http` (для Docker/Cursor рекомендуется streamable-http) | `streamable-http` |
@@ -116,8 +116,7 @@ pip install -e ".[dev]"
 
 ```bash
 docker compose up -d
-# База Qdrant хранится в ./data/qdrant (в проекте, при перезапуске не теряется).
-# В docker-compose хранилище смонтировано в mcp как /qdrant_storage (QDRANT_STORAGE_PATH) — index-status показывает размер БД.
+# Данные в ./data/ (qdrant, ingest_cache, snippets, standards) — backup: копируйте папку data/.
 # MCP: http://localhost:5050/mcp (подключить в Cursor через .cursor/mcp.json)
 # Индексация вручную: make ingest
 # Проверка индекса: docker compose exec mcp python -m onec_help index-status
@@ -198,7 +197,7 @@ make ingest ARGS="--no-cache"  # полная переиндексация бе�
 
 **Сколько топиков:** полная справка (один 1cv8_ru.hbk) — обычно 10–25 тыс. страниц. Проверка индексации: `docker compose exec mcp python -m onec_help index-status` или MCP **get_1c_help_index_status** (локально: `python -m onec_help index-status`).
 
-**Troubleshooting: файлы переиндексируются при каждом перезапуске.** Проверьте: (1) `INGEST_CACHE_FILE` указывает на persistent volume (в Docker — `/app/var/ingest_cache/ingest_cache.db`, volume `./data/ingest_cache`); (2) при `[ingest] WARN: ingest cache read failed` — права, существование файла, место на диске; (3) `reinit --force` стирает кэш — полная переиндексация ожидаема. Подробнее — [AGENTS.md](AGENTS.md).
+**Troubleshooting: файлы переиндексируются при каждом перезапуске.** Проверьте: (1) в Docker используется volume `ingest_cache`; (2) при `[ingest] WARN: ingest cache read failed` — права, место на диске; (3) `reinit --force` стирает кэш. Подробнее — [AGENTS.md](AGENTS.md).
 
 **Таймаут:** полная индексация может занимать 15–60 минут. Запуск в фоне (split: ingest-worker; full: mcp):
 

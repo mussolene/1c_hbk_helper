@@ -30,11 +30,11 @@ build:
 build-full:
 	$(COMPOSE_FULL) build mcp
 
-# Parse FastCode.im templates → snippets/fastcode_snippets.json
+# Parse FastCode.im templates → data/snippets/fastcode_snippets.json (в контейнере: /data/snippets)
 parse-fastcode:
 	$(COMPOSE) run --rm mcp python -m onec_help parse-fastcode $(ARGS)
 
-# Parse HelpF.pro FAQ/Files → snippets/helpf_snippets.json
+# Parse HelpF.pro FAQ/Files → data/snippets/helpf_snippets.json (в контейнере: /data/snippets)
 parse-helpf:
 	$(COMPOSE) run --rm mcp python -m onec_help parse-helpf $(ARGS)
 
@@ -50,8 +50,8 @@ load-snippets-from-project:
 load-standards:
 	$(COMPOSE) run --rm mcp python -m onec_help load-standards $(ARGS)
 
-# Parse FastCode + load snippets
-snippets: parse-fastcode load-snippets
+# Parse FastCode + HelpF (FAQ only) + load snippets
+snippets: parse-fastcode parse-helpf load-snippets
 
 # init: ingest + load-snippets + load-standards (no erase)
 init:
@@ -102,11 +102,14 @@ unpack-help:
 	$(COMPOSE) run --rm -v "$(HELP_SOURCE_PATH):/input:ro" -v "$(abspath $(UNPACK_OUTPUT)):/output" mcp python -m onec_help unpack-dir /input -o /output -l $(HELP_LANGS) $(ARGS)
 
 # Start (split: qdrant + mcp + ingest-worker + bsl-bridge)
+# mkdir -p создаёт каталоги только если их нет — существующие данные не трогает
 up:
+	mkdir -p data/qdrant data/ingest_cache data/snippets data/standards
 	BSL_HOST_PROJECTS_ROOT="$$(pwd)" $(COMPOSE) up -d
 
 # Start full (один контейнер mcp)
 up-full:
+	mkdir -p data/qdrant data/ingest_cache data/snippets data/standards
 	BSL_HOST_PROJECTS_ROOT="$$(pwd)" $(COMPOSE_FULL) up -d
 
 # Start split + serve
@@ -137,7 +140,7 @@ help:
 	@echo "  make load-snippets    Load snippets from SNIPPETS_DIR"
 	@echo "  make load-snippets-from-project  Load from 1C project"
 	@echo "  make load-standards   Load standards (STANDARDS_REPOS)"
-	@echo "  make snippets         parse-fastcode + load-snippets"
+	@echo "  make snippets         parse-fastcode + parse-helpf (FAQ) + load-snippets"
 	@echo "  make init             ingest + load-snippets + load-standards (не стирает)"
 	@echo "  make reinit           init (если индекс есть — без стирания). reinit ARGS='--force' — стереть и init"
 	@echo "  make unpack-help      Распаковка .hbk без индексации"

@@ -6,6 +6,12 @@ from unittest.mock import patch
 
 import pytest
 
+# Pre-import submodules so patch("onec_help.<sub>.attr") works (CI Python 3.10 editable install)
+import onec_help.embedding  # noqa: F401
+import onec_help.standards_loader  # noqa: F401
+import onec_help.unpack  # noqa: F401
+import onec_help.watchdog  # noqa: F401
+
 
 @pytest.fixture
 def fixtures_dir() -> Path:

@@ -366,8 +366,27 @@ def test_format_long_summary_fallback(tmp_path: Path) -> None:
     assert "Сообщить" in result
 
 
+def test_upsert_curated_snippets_accepts_instruction(tmp_path: Path) -> None:
+    """upsert_curated_snippets accepts items with instruction (references, no code)."""
+    with patch("onec_help.embedding.is_embedding_available", return_value=True):
+        with patch(
+            "onec_help.embedding.get_embedding_batch",
+            return_value=[[0.1] * 384],
+        ):
+            with patch("qdrant_client.QdrantClient") as mock_qc:
+                mock_client = MagicMock()
+                mock_client.collection_exists.return_value = False
+                mock_qc.return_value = mock_client
+                store = MemoryStore(tmp_path, short_limit=5, medium_limit=100, medium_ttl_days=7)
+                items = [{"title": "Ref", "instruction": "Full reference text for community_help."}]
+                n = store.upsert_curated_snippets(items, domain="community_help")
+                assert n == 1
+                payload = mock_client.upsert.call_args.kwargs["points"][0].payload
+                assert payload.get("instruction") == "Full reference text for community_help."
+
+
 def test_upsert_curated_snippets_skips_invalid(tmp_path: Path) -> None:
-    """upsert_curated_snippets skips items without title and code_snippet."""
+    """upsert_curated_snippets skips items without title, code_snippet, or instruction."""
     with patch("onec_help.embedding.is_embedding_available", return_value=True):
         with patch(
             "onec_help.embedding.get_embedding_batch",

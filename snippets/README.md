@@ -1,13 +1,8 @@
-# Реальные сниппеты (загружаются в память MCP)
+# Сниппеты (загружаются в память MCP)
 
-Положите сюда файлы `*.bsl`, `*.1c`, `*.md` или `*.json` (массив `{title, description, code_snippet}`).
+В Docker: ./data/snippets → /data/snippets. parse-fastcode и parse-helpf пишут туда. HelpF по умолчанию — только FAQ. Локально: data/snippets/.
 
-Эта папка монтируется в контейнер, при старте выполняется `load-snippets`.
-
-При парсинге HelpF и FastCode контент автоматически делится на **сниппеты** (код) и **справочные инструкции** (текст). При загрузке: snippets → domain=snippets, reference → domain=community_help.
-
-Файлы:
-- `skd_composition_result.json` — варианты получения результата СКД программно (в таблицу, табдок, JSON, обход наборов, схема из XML и т.п.)
+Формат: `*.bsl`, `*.1c`, `*.md` или `*.json` (массив `{title, description, code_snippet?, instruction?}`). Snippets (с кодом) → domain=snippets. References (справочный материал) → domain=community_help с полем `instruction` (полный текст).
 
 Примеры форматов — в `docs/snippets/`.
 
@@ -24,8 +19,8 @@ make snippets                # оба шага
 ## HelpF.pro (через Docker)
 
 ```bash
-make parse-helpf             # парсинг FAQ/Files → helpf_snippets.json
+make parse-helpf             # парсинг HelpF FAQ (по умолчанию) → helpf_snippets.json
 make load-snippets           # загрузка в память
 ```
 
-По умолчанию — автоопределение страниц. Ограничить: `make parse-helpf ARGS='--source faq --pages 1-5 --max-items 50 --no-fetch-detail'`
+По умолчанию — FAQ, автоопределение страниц. HelpF полностью (file, forum, freelance): `--source all`. Ограничить: `make parse-helpf ARGS='--pages 1-5 --max-items 50 --no-fetch-detail'`.

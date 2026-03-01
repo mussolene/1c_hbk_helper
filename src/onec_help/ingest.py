@@ -36,6 +36,14 @@ _STATUS_TABLE_FAILED = "ingest_failed"
 _INGEST_RUNS_LIMIT = 20
 
 
+def _sqlite_timeout() -> float:
+    """Seconds to wait for SQLite lock (env SQLITE_BUSY_TIMEOUT). Helps on Docker Mac bind mounts."""
+    try:
+        return max(5.0, float(os.environ.get("SQLITE_BUSY_TIMEOUT", "15")))
+    except (TypeError, ValueError):
+        return 15.0
+
+
 def _default_workers() -> int:
     """Default workers = half of available CPUs, at least 1 (do not exceed half of resources)."""
     return max(1, (os.cpu_count() or 4) // 2)
@@ -94,7 +102,7 @@ def read_ingest_cache_entries(limit: int = 100) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     path = _ingest_cache_path()
     try:
-        conn = sqlite3.connect(path)
+        conn = sqlite3.connect(path, timeout=_sqlite_timeout())
         conn.execute(
             f"CREATE TABLE IF NOT EXISTS {_CACHE_TABLE} "
             "(key TEXT PRIMARY KEY, hash TEXT NOT NULL, indexed INTEGER NOT NULL, points INTEGER)"
@@ -128,7 +136,7 @@ def _load_ingest_cache() -> dict[str, dict[str, Any]]:
     path = _ingest_cache_path()
     entries: dict[str, dict[str, Any]] = {}
     try:
-        conn = sqlite3.connect(path)
+        conn = sqlite3.connect(path, timeout=_sqlite_timeout())
         conn.execute(
             f"CREATE TABLE IF NOT EXISTS {_CACHE_TABLE} "
             "(key TEXT PRIMARY KEY, hash TEXT NOT NULL, indexed INTEGER NOT NULL, points INTEGER)"
@@ -149,7 +157,7 @@ def _update_ingest_cache_entry(key: str, file_hash: str, points: int) -> None:
     """Persist one cache entry (SQLite INSERT OR REPLACE). No full rewrite."""
     path = _ingest_cache_path()
     try:
-        conn = sqlite3.connect(path)
+        conn = sqlite3.connect(path, timeout=_sqlite_timeout())
         conn.execute(
             f"CREATE TABLE IF NOT EXISTS {_CACHE_TABLE} "
             "(key TEXT PRIMARY KEY, hash TEXT NOT NULL, indexed INTEGER NOT NULL, points INTEGER)"
@@ -173,7 +181,7 @@ def _log_status_error(op: str, err: Exception) -> None:
         _log_status_error._warned.add(key)  # type: ignore[attr-defined]
         _log(
             f"[ingest] WARN: ingest status {op} failed: {safe_error_message(err)}. "
-            "Status will fall back to JSON file."
+            "index-status may show incomplete data."
         )
 
 
@@ -289,7 +297,7 @@ def _persist_ingest_status_sqlite(
         payload["total_elapsed_sec"] = round(finished_at - started_at, 1)
 
     try:
-        conn = sqlite3.connect(path)
+        conn = sqlite3.connect(path, timeout=_sqlite_timeout())
         _init_ingest_status_tables(conn)
         updated_at = time.time()
         payload_json = json.dumps(payload, ensure_ascii=False)
@@ -370,7 +378,7 @@ def _vacuum_cache_db() -> None:
     """VACUUM the ingest cache SQLite DB to reclaim space. Non-blocking; logs on error."""
     path = _ingest_cache_path()
     try:
-        conn = sqlite3.connect(path)
+        conn = sqlite3.connect(path, timeout=_sqlite_timeout())
         conn.execute("VACUUM")
         conn.close()
     except (OSError, sqlite3.Error) as e:
@@ -460,7 +468,7 @@ def read_ingest_status() -> dict[str, Any] | None:
     """Read ingest status from SQLite cache DB (ingest_current). Returns None if no active run."""
     db_path = _ingest_cache_path()
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=_sqlite_timeout())
         _init_ingest_status_tables(conn)
         row = conn.execute(
             f"SELECT payload_json, started_at FROM {_STATUS_TABLE_CURRENT} WHERE id = 1"
@@ -480,7 +488,7 @@ def read_last_ingest_run() -> dict[str, Any] | None:
     """Read last completed ingest run from SQLite ingest_runs. Returns None if none."""
     db_path = _ingest_cache_path()
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=_sqlite_timeout())
         _init_ingest_status_tables(conn)
         row = conn.execute(
             f"""SELECT started_at, finished_at, status, total_tasks, done_tasks, total_points,
@@ -506,6 +514,33 @@ def read_last_ingest_run() -> dict[str, Any] | None:
     except (OSError, sqlite3.Error):
         pass
     return None
+
+
+def read_last_ingest_failed(limit: int = 20) -> list[dict[str, str]]:
+    """Read failed tasks from ingest_failed table for the latest run. For index-status."""
+    db_path = _ingest_cache_path()
+    try:
+        conn = sqlite3.connect(db_path, timeout=_sqlite_timeout())
+        _init_ingest_status_tables(conn)
+        run_row = conn.execute(
+            f"SELECT id FROM {_STATUS_TABLE_RUNS} ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if not run_row:
+            conn.close()
+            return []
+        run_id = run_row[0]
+        rows = conn.execute(
+            f"""SELECT version, language, path, error FROM {_STATUS_TABLE_FAILED}
+                WHERE run_id = ? ORDER BY id LIMIT ?""",
+            (run_id, limit),
+        ).fetchall()
+        conn.close()
+        return [
+            {"version": r[0], "language": r[1], "path": r[2], "error": (r[3] or "")[:500]}
+            for r in rows
+        ]
+    except (OSError, sqlite3.Error):
+        return []
 
 
 def read_ingest_failed_log(limit: int = 30) -> list[dict[str, str]]:

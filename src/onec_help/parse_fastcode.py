@@ -20,14 +20,35 @@ _PAGE_RE = re.compile(r"[?&]Page=(\d+)")
 
 
 def _detect_total_pages(opener: urllib.request.OpenerDirector) -> list[int]:
-    """Fetch first page, parse pagination links, return 1..max_page."""
+    """Detect total pages by following pagination. FastCode shows ~6 links per page (sliding window)."""
     html = _fetch_page(1, opener)
-    pages: set[int] = {1}
+    seen: set[int] = {1}
     for m in _PAGE_RE.finditer(html):
-        pages.add(int(m.group(1)))
-    if not pages:
+        seen.add(int(m.group(1)))
+    if not seen:
         return [1]
-    return list(range(1, max(pages) + 1))
+    current = max(seen)
+    while True:
+        time.sleep(0.5)  # be polite when probing pages
+        html = _fetch_page(current, opener)
+        found: set[int] = set()
+        for m in _PAGE_RE.finditer(html):
+            found.add(int(m.group(1)))
+        if not found:
+            break
+        new_max = max(found)
+        seen.update(found)
+        # On last page, links don't include current (e.g. on p51 links are 46–50)
+        if new_max < current:
+            break
+        if new_max <= current:
+            break
+        current = new_max
+    total = max(seen)
+    # If we requested 'current' and got only lower numbers, total is 'current'
+    if current > total:
+        total = current
+    return list(range(1, total + 1))
 
 
 def _create_opener() -> urllib.request.OpenerDirector:
@@ -216,6 +237,8 @@ def run_parse(
                     all_items[idx]["code_snippet"] = code
                 if desc:
                     all_items[idx]["description"] = desc[:500]
+                    if not code:
+                        all_items[idx]["instruction"] = desc  # full text for references
             except Exception:
                 detail_err += 1
             progress_line(

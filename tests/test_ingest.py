@@ -19,6 +19,7 @@ from onec_help.ingest import (
     parse_source_dirs_env,
     read_ingest_failed_log,
     read_ingest_status,
+    read_last_ingest_failed,
     read_last_ingest_run,
     run_ingest,
     run_unpack_only,
@@ -249,6 +250,37 @@ def test_read_last_ingest_run(tmp_path: Path) -> None:
     assert out["total_points"] == 5000
     assert out["total_elapsed_sec"] == 100.0
     assert out["failed_count"] == 1
+
+
+def test_read_last_ingest_failed(tmp_path: Path) -> None:
+    """read_last_ingest_failed returns failed tasks from ingest_failed for latest run."""
+    cache_db = tmp_path / "cache.db"
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": str(cache_db)}, clear=False):
+        _persist_ingest_status_sqlite(
+            started_at=1000.0,
+            embedding_backend="local",
+            total_tasks=2,
+            done_tasks=2,
+            total_points=100,
+            folders=[],
+            status="completed",
+            finished_at=1100.0,
+            failed_tasks=[
+                {"path": "a.hbk", "version": "8.3", "language": "ru", "error": "unpack failed"},
+            ],
+        )
+        out = read_last_ingest_failed(limit=10)
+    assert len(out) == 1
+    assert out[0]["path"] == "a.hbk"
+    assert out[0]["error"] == "unpack failed"
+    assert out[0]["version"] == "8.3"
+
+
+def test_read_last_ingest_failed_empty(tmp_path: Path) -> None:
+    """read_last_ingest_failed returns [] when no runs or no failures."""
+    cache_db = tmp_path / "cache.db"
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": str(cache_db)}, clear=False):
+        assert read_last_ingest_failed() == []
 
 
 def test_read_last_ingest_run_empty(tmp_path: Path) -> None:

@@ -1,6 +1,6 @@
 # Base: Qdrant + mcp + bsl-bridge. Include from docker-compose.yml (split) or docker-compose.full.yml.
 # compose-spec: https://docs.docker.com/compose/compose-file/
-# База Qdrant: ./data/qdrant (в проекте, в .gitignore) — при перезапуске не теряется.
+# Данные в ./data/ (в .gitignore) — backup: копируйте папку data/.
 # Переменные окружения: .env в корне проекта (скопируйте env.example в .env).
 
 services:
@@ -59,8 +59,8 @@ services:
       - /opt/1cv8:/opt/1cv8:ro
       - ./data/qdrant:/qdrant_storage:ro
       - ./data/ingest_cache:/app/var/ingest_cache
-      - ${SNIPPETS_HOST_PATH:-./snippets}:/data/snippets
-      - ${STANDARDS_HOST_PATH:-./standards}:/data/standards
+      - ./data/snippets:/data/snippets
+      - ./data/standards:/data/standards
     command: ["python", "-m", "onec_help", "mcp", "/data", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "5050"]
     depends_on:
       qdrant:

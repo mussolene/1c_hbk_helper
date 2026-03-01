@@ -376,6 +376,7 @@ def run_mcp(
                 for m in get_memory_store().search_long(q, limit=min(5, limit)):
                     payload = m.get("payload", {}) or {}
                     code = payload.get("code_snippet", "")
+                    instruction = payload.get("instruction", "")
                     desc = payload.get("description", "") or payload.get("summary", "")[:200]
                     title = payload.get("title", "") or desc[:60]
                     d = payload.get("domain", "")
@@ -384,10 +385,11 @@ def run_mcp(
                         if d == "snippets"
                         else (" [инструкция]" if d == "community_help" else "")
                     )
+                    body = instruction if instruction else desc
                     block = (
-                        f"### {title}{src}\n\n{desc}\n\n```bsl\n{code}\n```"
+                        f"### {title}{src}\n\n{body}\n\n```bsl\n{code}\n```"
                         if code
-                        else f"### {title}\n\n{desc}"
+                        else f"### {title}{src}\n\n{body}"
                     )
                     memory_parts.append(block)
             except Exception:

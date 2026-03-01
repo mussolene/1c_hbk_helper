@@ -12,15 +12,21 @@ import time
 import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 from ._utils import progress_done, progress_line
 
 _BASE_URL = "https://helpf.pro"
-_FAQ_VIEW_RE = re.compile(r"/faq/view/(\d+)\.html")
-_FILE_VIEW_RE = re.compile(r"/file/view/([^/]+)\.html")
+# Match /faq/view/ and faq/view/ (relative from /faq/N.html)
+_FAQ_VIEW_RE = re.compile(r"faq/view/(\d+)\.html")
+_FILE_VIEW_RE = re.compile(r"file/view/([^/]+)\.html")
+_HELP_VIEW_RE = re.compile(r"help/view/(\d+)\.html")
+_FREELANCE_VIEW_RE = re.compile(r"freelance/view/(\d+)\.html")
 _PAGES_RE = re.compile(r"на\s+(\d+)\s+страницах", re.I)
-_FAQ_PAGE_LINK_RE = re.compile(r"/faq/(\d+)\.html")
-_FILE_PAGE_LINK_RE = re.compile(r"/file/(\d+)\.html")
+_FAQ_PAGE_LINK_RE = re.compile(r"[/]?faq/(\d+)\.html")
+_FILE_PAGE_LINK_RE = re.compile(r"[/]?file/(\d+)\.html")
+_HELP_PAGE_LINK_RE = re.compile(r"[/]?help/(\d+)\.html")
+_FREELANCE_PAGE_LINK_RE = re.compile(r"[/]?freelance/(\d+)\.html")
 
 
 def _detect_faq_pages(opener: urllib.request.OpenerDirector) -> list[int]:
@@ -49,9 +55,57 @@ def _detect_file_pages(opener: urllib.request.OpenerDirector) -> list[int]:
     return sorted(pages) if pages else [1]
 
 
+def _detect_help_pages(opener: urllib.request.OpenerDirector) -> list[int]:
+    """Fetch help.html (Forum), parse total pages."""
+    html = _fetch_help_listing(1, opener)
+    m = _PAGES_RE.search(html)
+    if m:
+        total = int(m.group(1))
+        return list(range(1, total + 1))
+    pages: set[int] = {1}
+    for m in _HELP_PAGE_LINK_RE.finditer(html):
+        pages.add(int(m.group(1)))
+    return sorted(pages) if pages else [1]
+
+
+def _detect_freelance_pages(opener: urllib.request.OpenerDirector) -> list[int]:
+    """Fetch freelance.html, parse total pages."""
+    html = _fetch_freelance_listing(1, opener)
+    m = _PAGES_RE.search(html)
+    if m:
+        total = int(m.group(1))
+        return list(range(1, total + 1))
+    pages: set[int] = {1}
+    for m in _FREELANCE_PAGE_LINK_RE.finditer(html):
+        pages.add(int(m.group(1)))
+    return sorted(pages) if pages else [1]
+
+
 def _create_opener() -> urllib.request.OpenerDirector:
     ctx = ssl.create_default_context()
     return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+
+
+def _create_opener_unverified() -> urllib.request.OpenerDirector:
+    """Fallback when default SSL verification fails (e.g. Mac, missing CA bundle)."""
+    ctx = ssl._create_unverified_context()
+    return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+
+
+def _get_opener() -> urllib.request.OpenerDirector:
+    """Return opener; use unverified SSL if default fails (certificate verify issues)."""
+    opener = _create_opener()
+    try:
+        req = urllib.request.Request(
+            f"{_BASE_URL}/faq.html",
+            headers={"User-Agent": "Mozilla/5.0 (compatible; 1c-help-parser)"},
+        )
+        opener.open(req, timeout=10)
+        return opener
+    except (urllib.error.URLError, OSError) as e:
+        if "SSL" in str(e) or "certificate" in str(e).lower():
+            return _create_opener_unverified()
+        raise
 
 
 def _fetch_url(url: str, opener: urllib.request.OpenerDirector) -> str:
@@ -78,6 +132,43 @@ def _fetch_file_listing(page: int, opener: urllib.request.OpenerDirector) -> str
     return _fetch_url(url, opener)
 
 
+def _fetch_help_listing(page: int, opener: urllib.request.OpenerDirector) -> str:
+    if page <= 1:
+        url = f"{_BASE_URL}/help.html"
+    else:
+        url = f"{_BASE_URL}/help/{page}.html"
+    return _fetch_url(url, opener)
+
+
+def _fetch_freelance_listing(page: int, opener: urllib.request.OpenerDirector) -> str:
+    if page <= 1:
+        url = f"{_BASE_URL}/freelance.html"
+    else:
+        url = f"{_BASE_URL}/freelance/{page}.html"
+    return _fetch_url(url, opener)
+
+
+def _extract_links_regex_fallback(
+    html: str, view_re: re.Pattern[str], base: str
+) -> list[tuple[str, str]]:
+    """Fallback: extract URLs by regex when BeautifulSoup finds nothing."""
+    seen: set[str] = set()
+    result: list[tuple[str, str]] = []
+    for m in view_re.finditer(html):
+        clean = m.group(0)
+        if "?" in clean.split("#")[0]:
+            continue
+        full_url = urljoin(base + "/", clean.lstrip("/"))
+        if full_url in seen:
+            continue
+        seen.add(full_url)
+        # Try to find title: text between > and </a> before this match
+        id_part = m.group(1) if m.lastindex else ""
+        title = f"HelpF #{id_part}" if id_part else "HelpF"
+        result.append((title[:300], full_url))
+    return result
+
+
 def _extract_faq_links(html: str) -> list[tuple[str, str]]:
     """Extract (title, url) from FAQ listing. Deduplicates by URL."""
     from bs4 import BeautifulSoup
@@ -90,7 +181,8 @@ def _extract_faq_links(html: str) -> list[tuple[str, str]]:
         m = _FAQ_VIEW_RE.search(href)
         if not m or "?" in href.split("#")[0]:
             continue
-        full_url = _BASE_URL + href.split("?")[0].split("#")[0]
+        clean = href.split("?")[0].split("#")[0]
+        full_url = urljoin(_BASE_URL + "/", clean)
         if full_url in seen:
             continue
         seen.add(full_url)
@@ -98,6 +190,8 @@ def _extract_faq_links(html: str) -> list[tuple[str, str]]:
         if not title or len(title) < 3:
             continue
         result.append((title[:300], full_url))
+    if not result:
+        result = _extract_links_regex_fallback(html, _FAQ_VIEW_RE, _BASE_URL)
     return result
 
 
@@ -110,9 +204,12 @@ def _extract_file_links(html: str) -> list[tuple[str, str]]:
     result: list[tuple[str, str]] = []
     for a in soup.find_all("a", href=True):
         href = a.get("href", "")
-        if "/file/view/" not in href or "?" in href.split("#")[0]:
+        if "/file/view/" not in href and "file/view/" not in href:
             continue
-        full_url = _BASE_URL + href.split("?")[0].split("#")[0]
+        if "?" in href.split("#")[0]:
+            continue
+        clean = href.split("?")[0].split("#")[0]
+        full_url = urljoin(_BASE_URL + "/", clean)
         if full_url in seen:
             continue
         seen.add(full_url)
@@ -120,6 +217,60 @@ def _extract_file_links(html: str) -> list[tuple[str, str]]:
         if not title or len(title) < 3 or title in ("Подробнее", "s"):
             continue
         result.append((title[:300], full_url))
+    if not result:
+        result = _extract_links_regex_fallback(html, _FILE_VIEW_RE, _BASE_URL)
+    return result
+
+
+def _extract_help_links(html: str) -> list[tuple[str, str]]:
+    """Extract (title, url) from Forum (help) listing."""
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    seen: set[str] = set()
+    result: list[tuple[str, str]] = []
+    for a in soup.find_all("a", href=True):
+        href = a.get("href", "")
+        m = _HELP_VIEW_RE.search(href)
+        if not m or "?" in href.split("#")[0]:
+            continue
+        clean = href.split("?")[0].split("#")[0]
+        full_url = urljoin(_BASE_URL + "/", clean)
+        if full_url in seen:
+            continue
+        seen.add(full_url)
+        title = a.get_text(strip=True)
+        if not title or len(title) < 3 or title in ("Подробнее", "s"):
+            continue
+        result.append((title[:300], full_url))
+    if not result:
+        result = _extract_links_regex_fallback(html, _HELP_VIEW_RE, _BASE_URL)
+    return result
+
+
+def _extract_freelance_links(html: str) -> list[tuple[str, str]]:
+    """Extract (title, url) from Freelance listing."""
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    seen: set[str] = set()
+    result: list[tuple[str, str]] = []
+    for a in soup.find_all("a", href=True):
+        href = a.get("href", "")
+        m = _FREELANCE_VIEW_RE.search(href)
+        if not m or "?" in href.split("#")[0]:
+            continue
+        clean = href.split("?")[0].split("#")[0]
+        full_url = urljoin(_BASE_URL + "/", clean)
+        if full_url in seen:
+            continue
+        seen.add(full_url)
+        title = a.get_text(strip=True)
+        if not title or len(title) < 3 or title in ("Подробнее", "s"):
+            continue
+        result.append((title[:300], full_url))
+    if not result:
+        result = _extract_links_regex_fallback(html, _FREELANCE_VIEW_RE, _BASE_URL)
     return result
 
 
@@ -137,10 +288,15 @@ def parse_faq_detail(html: str, title: str) -> tuple[str, str]:
 
     for p in soup.find_all("p"):
         t = p.get_text(strip=True)
-        if t and len(t) > 20 and "Разместил:" not in t and "Подробнее" not in t:
-            desc_parts.append(t)
+        if not t or len(t) <= 20:
+            continue
+        skip = ("Разместил:", "Подробнее", "Слова упорядочены по частоте", "Только текст:")
+        if any(s in t for s in skip):
+            continue
+        desc_parts.append(t)
 
-    desc = " ".join(desc_parts)[:800].strip() or title
+    # Full text for references (instruction); 8000 chars covers typical FAQ
+    desc = " ".join(desc_parts)[:8000].strip() or title
 
     blocks: list[str] = []
     for pre in soup.find_all("pre"):
@@ -162,7 +318,7 @@ def parse_file_detail(html: str, title: str) -> tuple[str, str]:
         t = p.get_text(strip=True)
         if t and len(t) > 20:
             desc_parts.append(t)
-    desc = " ".join(desc_parts)[:800].strip()
+    desc = " ".join(desc_parts)[:8000].strip()
     blocks: list[str] = []
     for pre in soup.find_all("pre"):
         code = pre.get_text().strip()
@@ -172,6 +328,44 @@ def parse_file_detail(html: str, title: str) -> tuple[str, str]:
     return (desc, code)
 
 
+def parse_help_detail(html: str, title: str) -> tuple[str, str]:
+    """Extract description and code from Forum (help) question page."""
+    return parse_faq_detail(html, title)
+
+
+def parse_freelance_detail(html: str, title: str) -> tuple[str, str]:
+    """Extract description from Freelance project page."""
+    return parse_file_detail(html, title)
+
+
+_SOURCE_CONFIG = {
+    "faq": (
+        _fetch_faq_listing,
+        _extract_faq_links,
+        "FAQ",
+        parse_faq_detail,
+    ),
+    "file": (
+        _fetch_file_listing,
+        _extract_file_links,
+        "Files",
+        parse_file_detail,
+    ),
+    "help": (
+        _fetch_help_listing,
+        _extract_help_links,
+        "Forum",
+        parse_help_detail,
+    ),
+    "freelance": (
+        _fetch_freelance_listing,
+        _extract_freelance_links,
+        "Freelance",
+        parse_freelance_detail,
+    ),
+}
+
+
 def run_parse(
     out: Path,
     source: str = "faq",
@@ -179,35 +373,50 @@ def run_parse(
     max_items: int = 0,
     delay: float = 1.0,
     fetch_detail: bool = True,
+    skip_minimal: bool = False,
 ) -> int:
-    """Fetch HelpF.pro FAQ and/or Files, parse into snippets JSON.
+    """Fetch HelpF.pro FAQ, Files, Forum, Freelance into snippets JSON.
 
-    source: 'faq' | 'file' | 'all'
-    pages: listing pages to fetch (default: [1] for faq, [1] for file)
+    source: 'faq' | 'file' | 'help' | 'freelance' | 'all'
+    pages: listing pages to fetch (default: detect from site)
     max_items: max items to fetch detail for (0 = all)
     fetch_detail: fetch each detail page for full content
     """
-    opener = _create_opener()
+    opener = _get_opener()
     all_items: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
     list_err = 0
     detail_err = 0
 
-    sources = ["faq", "file"] if source == "all" else [source]
+    sources = ["faq", "file", "help", "freelance"] if source == "all" else [source]
     if pages is None or not pages:
         progress_line("parse-helpf │ Detecting total pages...")
         try:
             if source == "all":
-                faq_p = _detect_faq_pages(opener)
-                time.sleep(delay)
-                file_p = _detect_file_pages(opener)
-                pages_by_src = {"faq": faq_p, "file": file_p}
-            elif source == "faq":
-                pages = _detect_faq_pages(opener)
-                pages_by_src = {"faq": pages}
+                pages_by_src = {}
+                for src in sources:
+                    det = (
+                        _detect_faq_pages
+                        if src == "faq"
+                        else _detect_file_pages
+                        if src == "file"
+                        else _detect_help_pages
+                        if src == "help"
+                        else _detect_freelance_pages
+                    )
+                    pages_by_src[src] = det(opener)
+                    time.sleep(delay)
             else:
-                pages = _detect_file_pages(opener)
-                pages_by_src = {"file": pages}
+                det = (
+                    _detect_faq_pages
+                    if source == "faq"
+                    else _detect_file_pages
+                    if source == "file"
+                    else _detect_help_pages
+                    if source == "help"
+                    else _detect_freelance_pages
+                )
+                pages_by_src = {source: det(opener)}
         except Exception:
             pages_by_src = {src: [1] for src in sources}
         total = sum(len(p) for p in pages_by_src.values())
@@ -217,10 +426,11 @@ def run_parse(
         pages_by_src = {src: pages for src in sources}
 
     for src in sources:
-        src_pages = pages_by_src[src]
-        fetch_listing = _fetch_faq_listing if src == "faq" else _fetch_file_listing
-        extract_links = _extract_faq_links if src == "faq" else _extract_file_links
-        label = "FAQ" if src == "faq" else "Files"
+        cfg = _SOURCE_CONFIG.get(src)
+        if not cfg:
+            continue
+        fetch_listing, extract_links, label, _ = cfg
+        src_pages = pages_by_src.get(src, [1])
 
         progress_line(f"parse-helpf │ {label} listing 0/{len(src_pages)} │ 0 items │ 0 err")
 
@@ -261,12 +471,14 @@ def run_parse(
             url = it.get("source_url", "")
             if not url:
                 continue
-            parse_fn = parse_faq_detail if it.get("source") == "faq" else parse_file_detail
+            parse_fn = _SOURCE_CONFIG.get(it.get("source"), (None, None, None, parse_faq_detail))[3]
             try:
                 detail_html = _fetch_url(url, opener)
                 desc, code = parse_fn(detail_html, it.get("title", ""))
                 if desc:
                     all_items[idx]["description"] = desc[:500]
+                    # Full text for references (instruction); snippets keep code_snippet
+                    all_items[idx]["instruction"] = desc
                 if code:
                     all_items[idx]["code_snippet"] = code
             except Exception:
@@ -283,6 +495,19 @@ def run_parse(
         if not it.get("code_snippet") and not it.get("description"):
             it["description"] = (it.get("title", "") or "")[:500]
 
+    if skip_minimal:
+        before = len(all_items)
+        all_items = [
+            it
+            for it in all_items
+            if it.get("code_snippet")
+            or it.get("instruction")
+            or (it.get("description") or "").strip() != (it.get("title") or "").strip()
+        ]
+        dropped = before - len(all_items)
+        if dropped:
+            progress_done(f"parse-helpf │ Dropped {dropped} minimal (title-only) items")
+
     from .snippet_classifier import classify_snippet_vs_reference
 
     snippets_n = 0
@@ -294,6 +519,11 @@ def run_parse(
         )
         if it["type"] == "snippet":
             snippets_n += 1
+        # References: use instruction (full text); drop if redundant with description
+        if it["type"] == "reference" and it.get("instruction"):
+            pass  # keep instruction
+        elif it["type"] == "snippet" and it.get("instruction"):
+            it.pop("instruction", None)  # snippets use code_snippet
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(all_items, ensure_ascii=False, indent=2), encoding="utf-8")

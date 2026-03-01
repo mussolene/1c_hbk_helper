@@ -48,8 +48,8 @@ services:
       - /opt/1cv8:/opt/1cv8:ro
       - ./data/qdrant:/qdrant_storage:ro
       - ./data/ingest_cache:/app/var/ingest_cache
-      - ${SNIPPETS_HOST_PATH:-./snippets}:/data/snippets
-      - ${STANDARDS_HOST_PATH:-./standards}:/data/standards
+      - ./data/snippets:/data/snippets
+      - ./data/standards:/data/standards
     command: ["sh", "-c", "sleep infinity"]
     depends_on:
       qdrant:

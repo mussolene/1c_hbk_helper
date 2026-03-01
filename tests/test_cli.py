@@ -439,6 +439,44 @@ def test_cmd_index_status_shows_last_run_when_no_active_ingest(
     assert "5000" in out and "pts" in out
 
 
+@patch("onec_help.indexer.get_all_collections_status")
+@patch("onec_help.ingest.read_ingest_cache_entries")
+@patch("onec_help.ingest.read_ingest_failed_log")
+@patch("onec_help.ingest.read_last_ingest_failed")
+@patch("onec_help.ingest.read_last_ingest_run")
+@patch("onec_help.ingest.read_ingest_status")
+@patch("onec_help.indexer.get_index_status")
+def test_cmd_index_status_shows_failed_placeholder_when_no_details(
+    mock_status: MagicMock,
+    mock_ingest: MagicMock,
+    mock_last_run: MagicMock,
+    mock_failed: MagicMock,
+    mock_failed_log: MagicMock,
+    mock_cache: MagicMock,
+    mock_collections: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """index-status shows placeholder when failed_count > 0 but DB/log have no details."""
+    mock_status.return_value = {"exists": True, "collection": "onec_help", "points_count": 100}
+    mock_collections.return_value = [
+        {"name": "onec_help", "points_count": 100, "indexed_vectors_count": 100, "segments_count": 1},
+    ]
+    mock_ingest.return_value = None
+    mock_last_run.return_value = {
+        "status": "completed",
+        "total_points": 100,
+        "total_elapsed_sec": 10.0,
+        "failed_count": 1,
+    }
+    mock_failed.return_value = []
+    mock_failed_log.return_value = []
+    mock_cache.return_value = []
+    assert cmd_index_status(make_args()) == 0
+    out = capsys.readouterr().out
+    assert "1 failed" in out or "Failed" in out
+    assert "Details not stored" in out or "re-run ingest" in out
+
+
 @patch("onec_help.ingest.run_ingest")
 def test_cmd_ingest_with_sources_env(mock_run_ingest, tmp_path: Path) -> None:
     mock_run_ingest.return_value = 10
@@ -826,6 +864,8 @@ def test_cmd_parse_fastcode_auto_pages(mock_run, tmp_path: Path) -> None:
     assert cmd_parse_fastcode(args) == 0
     mock_run.assert_called_once()
     assert mock_run.call_args[1]["pages"] is None
+
+
 
 
 @patch("onec_help.parse_helpf.run_parse")

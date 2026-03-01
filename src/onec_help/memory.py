@@ -277,7 +277,8 @@ class MemoryStore:
         domain: str = "snippets",
     ) -> int:
         """Bulk upsert curated items into long memory.
-        items: [{title, description, code_snippet}, ...]. Returns count of upserted items.
+        items: [{title, description, code_snippet?, instruction?}, ...]. Returns count of upserted items.
+        instruction: full text for references (community_help); used instead of code_snippet for embedding.
         progress_callback: optional (done, total, skipped) called periodically.
         domain: 'snippets' | 'community_help' | 'standards' — filter for search_long.
         Uses get_embedding_batch for throughput (same benefits as help indexer)."""
@@ -296,10 +297,15 @@ class MemoryStore:
             title = item.get("title", "") or ""
             desc = item.get("description", "") or ""
             code = item.get("code_snippet", "") or ""
-            if not title and not code:
+            instruction = item.get("instruction", "") or ""
+            if not title and not code and not instruction:
                 skipped += 1
                 continue
-            summary = f"{title} | {desc} | {code[:300]}"
+            # References (community_help): use instruction (full text) for embedding
+            if instruction:
+                summary = f"{title} | {instruction[:2000]}"
+            else:
+                summary = f"{title} | {desc} | {code[:300]}"
             payload = {
                 "title": title,
                 "description": desc,
@@ -307,6 +313,8 @@ class MemoryStore:
                 "domain": domain,
                 "summary": summary,
             }
+            if instruction:
+                payload["instruction"] = instruction
             point_id = f"{prefix}_{hashlib.sha256(title.encode()).hexdigest()[:12]}"
             numeric_id = int(hashlib.sha256(point_id.encode()).hexdigest()[:14], 16) % (2**63)
             valid.append((summary, payload, point_id, numeric_id))
