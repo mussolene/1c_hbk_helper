@@ -9,6 +9,7 @@ from onec_help import indexer as indexer_mod
 from onec_help.indexer import (
     _extract_keywords,
     _path_to_point_id,
+    _version_sort_key,
     build_index,
     get_1c_help_related,
     get_all_collections_status,
@@ -63,6 +64,16 @@ def test_search_index(mock_client: MagicMock) -> None:
     mock_client.return_value.search.return_value = []
     result = search_index("query", limit=5)
     assert isinstance(result, list)
+
+
+def test_version_sort_key() -> None:
+    """_version_sort_key parses version strings for comparison (newest first)."""
+    assert _version_sort_key("8.3.27.1859") == (8, 3, 27, 1859)
+    assert _version_sort_key("8.3.26") == (8, 3, 26)
+    assert _version_sort_key("8.3.27.1859") > _version_sort_key("8.3.26")
+    assert _version_sort_key("8.3.27") > _version_sort_key("8.3.26")
+    assert _version_sort_key("") == (0,)
+    assert _version_sort_key("invalid") == (0,)
 
 
 def test_extract_keywords() -> None:

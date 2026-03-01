@@ -37,6 +37,19 @@ SNIPPET_MAX_CHARS = 850
 _KEYWORDS_PATTERN = re.compile(r"[А-Яа-яA-Za-z][А-Яа-яA-Za-z0-9]{2,}")
 
 
+def _version_sort_key(version_str: str) -> tuple[int, ...]:
+    """Parse version string (e.g. '8.3.27.1859') to comparable tuple for sorting (newest first)."""
+    if not version_str or not isinstance(version_str, str):
+        return (0,)
+    parts: list[int] = []
+    for s in version_str.strip().split("."):
+        try:
+            parts.append(int(s))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts) if parts else (0,)
+
+
 def _extract_keywords(text: str, max_tokens: int = 50) -> list[str]:
     """Extract CamelCase and Cyrillic identifiers from text for payload.keywords."""
     if not text:
@@ -465,16 +478,28 @@ def search_index(
                 "title": payload.get("title", ""),
                 "text": text,
                 "score": getattr(h, "score", None),
+                "version": payload.get("version", ""),
             }
         )
     if not version and not language:
-        seen: set[str] = set()
-        deduped = []
+        # Deduplicate by path, preferring newest version then highest score
+        by_path: dict[str, dict[str, Any]] = {}
         for r in raw:
             p = r.get("path", "")
-            if p and p not in seen:
-                seen.add(p)
-                deduped.append(r)
+            if not p:
+                continue
+            vkey = _version_sort_key(r.get("version", ""))
+            score = r.get("score") or 0.0
+            if p not in by_path:
+                by_path[p] = r
+            else:
+                prev = by_path[p]
+                prev_key = _version_sort_key(prev.get("version", ""))
+                prev_score = prev.get("score") or 0.0
+                if vkey > prev_key or (vkey == prev_key and score > prev_score):
+                    by_path[p] = r
+        deduped = list(by_path.values())
+        deduped.sort(key=lambda x: (-(x.get("score") or 0.0), -len(_version_sort_key(x.get("version", "")))))
         return deduped
     return raw
 
@@ -582,9 +607,8 @@ def search_index_keyword(
         must.append(FieldCondition(key="keywords", match=MatchAny(any=query_keywords)))
     scroll_filter = Filter(must=must) if must and Filter else None
 
-    out: list[dict[str, Any]] = []
+    out_dict: dict[str, dict[str, Any]] = {}  # path -> best record (prefer newer version)
     offset = None
-    seen_paths: set[str] = set()
     scroll_kwargs: dict[str, Any] = {
         "collection_name": collection,
         "limit": batch_size,
@@ -600,32 +624,35 @@ def search_index_keyword(
         return q_lower in title or q_lower in text
 
     def _collect(res: list) -> None:
-        nonlocal out, seen_paths
+        nonlocal out_dict
         for point in res:
             payload = getattr(point, "payload", None) or {}
             path = payload.get("path", "")
-            if path in seen_paths:
+            if not path:
                 continue
             if not use_keyword_filter and not _matches(payload):
                 continue
-            seen_paths.add(path)
+            vkey = _version_sort_key(payload.get("version", ""))
             snippet = (payload.get("text") or "")[:SNIPPET_MAX_CHARS]
             links = payload.get("outgoing_links") or []
             if links:
                 titles = [lnk.get("target_title") or lnk.get("link_text", "") for lnk in links[:5]]
                 snippet = (snippet + "\nСвязанные: " + ", ".join(t for t in titles if t)).strip()
-            out.append(
-                {
-                    "path": path,
-                    "title": payload.get("title", ""),
-                    "text": snippet,
-                    "score": None,
-                }
-            )
-            if len(out) >= limit:
+            rec = {
+                "path": path,
+                "title": payload.get("title", ""),
+                "text": snippet,
+                "score": None,
+                "version": payload.get("version", ""),
+            }
+            if path not in out_dict:
+                out_dict[path] = rec
+            elif vkey > _version_sort_key(out_dict[path].get("version", "")):
+                out_dict[path] = rec
+            if len(out_dict) >= limit:
                 break
 
-    while len(out) < limit:
+    while len(out_dict) < limit:
         try:
             kwargs = dict(scroll_kwargs)
             if offset is not None:
@@ -641,7 +668,7 @@ def search_index_keyword(
         offset = next_offset
 
     # Fallback: if keyword filter returned nothing, retry with substring search
-    if not out and use_keyword_filter:
+    if not out_dict and use_keyword_filter:
         use_keyword_filter = False
         must.pop()  # remove keywords condition
         scroll_filter = Filter(must=must) if must and Filter else None
@@ -649,7 +676,7 @@ def search_index_keyword(
         if scroll_kwargs.get("scroll_filter") is None:
             scroll_kwargs.pop("scroll_filter", None)
         offset = None
-        while len(out) < limit:
+        while len(out_dict) < limit:
             try:
                 kwargs = dict(scroll_kwargs)
                 if offset is not None:
@@ -664,10 +691,14 @@ def search_index_keyword(
                 break
             offset = next_offset
 
+    out = list(out_dict.values())
     # Type.Method mode: rank title matches above text-only matches
     if use_type_method_mode and out:
         title_lower = q_lower
         out.sort(key=lambda r: (title_lower not in (r.get("title") or "").lower(),))
+    elif not version and not language:
+        # Prefer newest version first when no version filter
+        out.sort(key=lambda r: _version_sort_key(r.get("version", "")), reverse=True)
 
     return out
 
