@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ._utils import safe_error_message
+from ._utils import format_duration, safe_error_message
 
 SNIPPET_MAX_CHARS = 850
 MAX_QUERY_CHARS = 65536  # 64 KB
@@ -638,8 +638,8 @@ def run_mcp(
 
     @mcp.tool()
     def get_1c_help_index_status() -> str:
-        """Check if 1C help is indexed: returns total topics count, collection name, and (if present) versions and languages.
-        Use to verify that ingest completed successfully."""
+        """Returns index status (topics count, collection, versions, languages) and ingest progress.
+        When ingest is running: current file, ETA, speed, errors. Use after trigger_reindex to check progress."""
         s = _index_status()
         err = s.get("error")
         if err:
@@ -670,6 +670,75 @@ def run_mcp(
             lines.append(f"Versions (sample): {', '.join(s['versions'])}")
         if s.get("languages"):
             lines.append(f"Languages (sample): {', '.join(s['languages'])}")
+
+        # Ingest status: current run or last completed
+        ingest = None
+        try:
+            from .ingest import read_ingest_status, read_last_ingest_run
+
+            ingest = read_ingest_status()
+            if not ingest:
+                ingest = read_last_ingest_run()
+        except Exception:
+            pass
+        if ingest:
+            status = ingest.get("status", "")
+            if status == "in_progress":
+                lines.append("")
+                lines.append("**Ingest in progress**")
+                done = ingest.get("done_tasks", 0)
+                total = ingest.get("total_tasks", 0)
+                pts = ingest.get("total_points", 0) + (ingest.get("current_task_points") or 0)
+                est_pts = ingest.get("estimated_total_points") or 0
+                ctp = ingest.get("current_task_points") or 0
+                cte = ingest.get("current_task_estimated_total") or 0
+                if est_pts > 0 and pts > 0:
+                    pct = min(100, int(100 * pts / est_pts))
+                    lines.append(f"Progress: {pts}/{est_pts} pts ({pct}%)")
+                elif cte > 0 and ctp > 0:
+                    pct = int(100 * ctp / cte)
+                    lines.append(f"Progress: {ctp}/{cte} pts ({pct}%)")
+                elif total > 0:
+                    pct = int(100 * done / total)
+                    lines.append(f"Progress: {done}/{total} tasks ({pct}%)")
+                if pts > 0:
+                    lines.append(f"Indexed: {pts} pts")
+                if ctp > 0 and cte > 0:
+                    pct_cur = int(100 * ctp / cte)
+                    lines.append(f"Current file: {ctp}/{cte} pts ({pct_cur}%)")
+                elapsed = ingest.get("elapsed_sec")
+                if elapsed is not None:
+                    lines.append(f"Elapsed: {format_duration(elapsed)}")
+                eta = ingest.get("eta_sec")
+                if eta is not None and eta >= 0:
+                    lines.append(f"ETA: {format_duration(eta)}")
+                speed = ingest.get("embedding_speed_pts_per_sec")
+                if speed is not None:
+                    lines.append(f"Speed: {speed} pts/s")
+                current_list = ingest.get("current") or []
+                if current_list:
+                    c = current_list[0]
+                    lines.append(
+                        f"Current: {c.get('version', '')}/{c.get('language', '')} {c.get('path', '')} [{c.get('stage', '')}]"
+                    )
+                failed = ingest.get("failed_tasks") or []
+                if failed:
+                    lines.append(f"Failed: {len(failed)}")
+                    for ft in failed[:5]:
+                        lines.append(f"  - {ft.get('path', '?')}: {(ft.get('error', '') or '')[:80]}")
+            else:
+                total_sec = ingest.get("total_elapsed_sec")
+                total_pts = ingest.get("total_points", 0)
+                failed_count = ingest.get("failed_count", 0) or len(ingest.get("failed_tasks") or [])
+                lines.append("")
+                lines.append("**Last ingest**")
+                if total_sec is not None:
+                    lines.append(f"Completed in {format_duration(total_sec)}, {total_pts} pts")
+                else:
+                    lines.append(f"Completed, {total_pts} pts")
+                if failed_count > 0:
+                    lines.append(f"Failed: {failed_count} file(s)")
+
         return "\n".join(lines)
 
     def _match_priority(name_lower: str, title_lower: str) -> int:

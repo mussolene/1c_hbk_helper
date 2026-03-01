@@ -80,7 +80,6 @@ pip install -e ".[dev]"
 | `INGEST_CACHE_FILE` | Путь к SQLite-кэшу ingest (хэш .hbk → уже проиндексировано; при перезапуске не перепарсивать и не пересчитывать embedding). В Docker по умолчанию `/qdrant_storage/ingest_cache.db` | `/tmp/onec_help_ingest_cache.db` |
 | `INGEST_SKIP_CACHE` | `1`/`true` — полная переиндексация без кэша (или `ingest --no-cache`) | — |
 | `INGEST_FAILED_LOG` | Файл для списка неудачных .hbk | — |
-| `INDEX_STATUS_FILE` | Файл статуса ingest (для `index-status`: скорость эмбеддингов, по папкам, ETA) | `/tmp/onec_help_ingest_status.json` |
 | `MCP_TRANSPORT` | Транспорт MCP: `stdio`, `http` или `streamable-http` (для Docker/Cursor рекомендуется streamable-http) | `streamable-http` |
 | `MCP_HOST` | Хост для MCP HTTP | `127.0.0.1` |
 | `MCP_PORT` | Порт для MCP HTTP | `5050` |

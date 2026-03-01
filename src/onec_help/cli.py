@@ -26,6 +26,19 @@ def cmd_unpack(args: argparse.Namespace) -> int:
         return 0
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
+        print("Run: python -m onec_help unpack-diag <file> -o /tmp/out", file=sys.stderr)
+        return 1
+
+
+def cmd_unpack_diag(args: argparse.Namespace) -> int:
+    """Diagnose unpack failure: try each method and print results."""
+    from .unpack import unpack_diag
+
+    try:
+        unpack_diag(args.archive, args.output_dir or "/tmp/unpack_diag")
+        return 0
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
         return 1
 
 
@@ -169,7 +182,19 @@ def _render_index_status_compact(s, collections, ingest, spinner, format_duratio
             total_sec = ingest.get("total_elapsed_sec")
             parts.append(f"Ingest ✓ {format_duration(total_sec)}" if total_sec else "Ingest ✓ done")
         else:
-            ing = ["Ingest ⟳ in progress"]
+            done_t = ingest.get("done_tasks", 0)
+            total_t = ingest.get("total_tasks", 0)
+            pts_i = ingest.get("total_points", 0) + (ingest.get("current_task_points") or 0)
+            est_pts = ingest.get("estimated_total_points") or 0
+            cte = ingest.get("current_task_estimated_total") or 0
+            if est_pts > 0:
+                ing = [f"Ingest ⟳ {pts_i}/{est_pts} pts"]
+            elif cte > 0 and pts_i > 0:
+                ing = [f"Ingest ⟳ {pts_i} pts"]
+            elif total_t > 0:
+                ing = [f"Ingest ⟳ {done_t}/{total_t} tasks"]
+            else:
+                ing = ["Ingest ⟳ in progress"]
             if elapsed is not None:
                 ing.append(f"elapsed {format_duration(elapsed)}")
             eta = ingest.get("eta_sec")
@@ -182,10 +207,16 @@ def _render_index_status_compact(s, collections, ingest, spinner, format_duratio
                 ing.append(f"finish ~{_t.strftime('%H:%M', lt)}")
             parts.append(" ".join(ing))
         parts.append(f"embed: {backend}")
+        ctp = ingest.get("current_task_points") or 0
+        cte = ingest.get("current_task_estimated_total") or 0
+        if ctp > 0:
+            parts.append(f"{ctp}/{cte} pts" if cte > 0 else f"{ctp} pts")
         current = ingest.get("current") or []
         if current:
-            c0 = current[0]
-            cur = f"{c0.get('version','')}/{c0.get('language','')} {c0.get('path','')} {c0.get('stage','')}"
+            _sp = {"embedding": 0, "writing": 1, "indexing": 2, "build_docs": 3, "unpack": 4}
+            c0 = min(current, key=lambda c: (_sp.get(c.get("stage", ""), 99), c.get("path", "")))
+            st = (c0.get("stage") or "").replace("build_docs", "build")
+            cur = f"{c0.get('version','')}/{c0.get('language','')} {c0.get('path','')} {st}"
             if len(current) > 1:
                 cur += f" +{len(current)-1}"
             parts.append(f"cur:{cur.strip()}")
@@ -270,22 +301,67 @@ def _render_index_status_rich(s, collections, ingest, spinner, format_duration, 
         total = ingest.get("total_tasks", 0)
         pts = ingest.get("total_points", 0)
         speed = ingest.get("embedding_speed_pts_per_sec")
+        current_task_pts = ingest.get("current_task_points", 0) or 0
+        current_list = ingest.get("current") or []
 
         line(f"│ Operations {''.rjust(w - 14)}│")
-        ops = []
         if status == "completed":
-            ops.append("✓ done")
+            line(f"│   ✓ done │ embed: {backend}".ljust(w - 1) + "│")
+            total_sec = ingest.get("total_elapsed_sec")
+            pts = ingest.get("total_points", 0)
+            fail_cnt = ingest.get("failed_count", 0) or len(ingest.get("failed_tasks") or [])
+            last_run_str = f"Last run: {format_duration(total_sec)}" if total_sec else "Last run"
+            last_run_str += f", {pts} pts"
+            if fail_cnt > 0:
+                last_run_str += f", {fail_cnt} failed"
+            line(f"│   {last_run_str}".ljust(w - 1) + "│")
         else:
-            ops.extend(["indexing", "embedding", "writing", "in progress"])
-        line(f"│   {', '.join(ops)} │ embed: {backend}".ljust(w - 1) + "│")
+            # Dynamic stages — embedding/writing first (main work), then preparing
+            _stage_order = ("embedding", "writing", "indexing", "build_docs", "unpack")
+            by_stage: dict[str, int] = {}
+            for c in current_list:
+                st = c.get("stage") or "?"
+                by_stage[st] = by_stage.get(st, 0) + 1
+            def _stage_sort_key(item: tuple[str, int]) -> tuple[int, str]:
+                stage_name, _ = item
+                display = stage_name.replace("build_docs", "build")
+                try:
+                    return (_stage_order.index(stage_name), display)
+                except ValueError:
+                    return (99, display)
+            parts = [f"{k.replace('build_docs','build')} ({v})" for k, v in sorted(by_stage.items(), key=_stage_sort_key)]
+            stages_str = ", ".join(parts) if parts else "in progress"
+            line(f"│   {stages_str} │ embed: {backend}".ljust(w - 1) + "│")
 
-        if total > 0:
-            pct = int(100 * done / total) if total else 0
-            filled = int(bar_w * done / total) if total else 0
+        # Progress bar: use pts when we have estimate; else tasks
+        effective_pts = pts + current_task_pts
+        current_task_est = ingest.get("current_task_estimated_total") or 0
+        est_total_pts = ingest.get("estimated_total_points") or 0
+        if est_total_pts > 0:
+            # Overall pts estimate (from completed tasks)
+            done_pts, total_pts = effective_pts, est_total_pts
+            pct = min(100, int(100 * done_pts / total_pts))
+            filled = min(bar_w, int(bar_w * done_pts / total_pts))
             bar = "█" * filled + "░" * (bar_w - filled)
-            line(f"│   [{bar}] {done}/{total} ({pct}%)".ljust(w - 1) + "│")
-        if pts > 0 and speed:
-            line(f"│   {pts} pts, {speed} pts/s".ljust(w - 1) + "│")
+            line(f"│   [{bar}] {done_pts}/{total_pts} pts ({pct}%)".ljust(w - 1) + "│")
+        elif current_task_est > 0:
+            # First file: pts for current file only (no completed tasks yet)
+            done_pts = current_task_pts
+            total_pts = current_task_est
+            pct = min(100, int(100 * done_pts / total_pts)) if total_pts else 0
+            filled = min(bar_w, int(bar_w * done_pts / total_pts)) if total_pts else 0
+            bar = "█" * filled + "░" * (bar_w - filled)
+            line(f"│   [{bar}] {done_pts}/{total_pts} pts ({pct}%)".ljust(w - 1) + "│")
+        elif total > 0:
+            pct = int(100 * done / total)
+            filled = int(bar_w * done / total)
+            bar = "█" * filled + "░" * (bar_w - filled)
+            line(f"│   [{bar}] {done}/{total} tasks ({pct}%)".ljust(w - 1) + "│")
+        if effective_pts > 0:
+            pts_str = f"{effective_pts} pts indexed"
+            if speed:
+                pts_str += f", {speed} pts/s"
+            line(f"│   {pts_str}".ljust(w - 1) + "│")
 
         elapsed = ingest.get("elapsed_sec")
         if elapsed is not None:
@@ -303,11 +379,16 @@ def _render_index_status_rich(s, collections, ingest, spinner, format_duration, 
         if current:
             line(f"├{sep}┤")
             line(f"│ Current files {''.rjust(w - 16)}│")
-            for c in current[:5]:
+            _stage_priority = {"embedding": 0, "writing": 1, "indexing": 2, "build_docs": 3, "unpack": 4}
+            current_sorted = sorted(
+                current,
+                key=lambda c: (_stage_priority.get(c.get("stage", ""), 99), c.get("path", "")),
+            )
+            for c in current_sorted[:5]:
                 v = c.get("version", "")
                 lang = c.get("language", "")
                 path = (c.get("path") or "").replace(".hbk", "")
-                stage = c.get("stage", "")
+                stage = (c.get("stage") or "").replace("build_docs", "build")
                 line(f"│   {v}/{lang} {path} [{stage}]".ljust(w - 1) + "│")
             if len(current) > 5:
                 line(f"│   ... +{len(current) - 5} more".ljust(w - 1) + "│")
@@ -356,7 +437,7 @@ def _render_index_status(*, spinner: str = "", compact: bool = False) -> tuple[s
     Returns (output_string, exit_code)."""
     from ._utils import format_duration
     from .indexer import get_all_collections_status, get_index_status
-    from .ingest import read_ingest_status
+    from .ingest import read_ingest_status, read_last_ingest_run
 
     host = os.environ.get("QDRANT_HOST", "localhost")
     port = int(os.environ.get("QDRANT_PORT", "6333"))
@@ -365,6 +446,21 @@ def _render_index_status(*, spinner: str = "", compact: bool = False) -> tuple[s
     if s.get("error"):
         return f"Error: {s['error']}\n", 1
     ingest = read_ingest_status()
+    if not ingest:
+        last_run = read_last_ingest_run()
+        if last_run:
+            ingest = {
+                "status": "completed",
+                "embedding_backend": last_run.get("embedding_backend", "none"),
+                "total_points": last_run.get("total_points", 0),
+                "done_tasks": last_run.get("done_tasks", 0),
+                "total_tasks": last_run.get("total_tasks", 0),
+                "total_elapsed_sec": last_run.get("total_elapsed_sec"),
+                "failed_count": last_run.get("failed_count", 0),
+                "current": [],
+                "folders": [],
+                "failed_tasks": [],
+            }
     collections = get_all_collections_status(qdrant_host=host, qdrant_port=port)
     if not collections and s.get("exists"):
         collections = [
@@ -843,6 +939,16 @@ def main() -> int:
         "--output-dir", "-o", type=str, default="./unpacked", help="Output directory"
     )
     p_unpack.set_defaults(func=cmd_unpack)
+
+    p_unpack_diag = sub.add_parser(
+        "unpack-diag",
+        help="Diagnose unpack failure (try each method, print 7z output)",
+    )
+    p_unpack_diag.add_argument("archive", type=str, help="Path to .hbk file")
+    p_unpack_diag.add_argument(
+        "--output-dir", "-o", type=str, default="/tmp/unpack_diag", help="Output dir"
+    )
+    p_unpack_diag.set_defaults(func=cmd_unpack_diag)
 
     # unpack-dir — only unpack all .hbk into a directory (no build-docs, no index)
     p_unpack_dir = sub.add_parser(

@@ -98,8 +98,10 @@ def build_index(
     embedding_batch_size: int | None = None,
     embedding_workers: int | None = None,
     source_dir: str | None = None,
+    progress_callback=None,
 ) -> int:
     """Index .md (and optionally .html) files from docs_dir into Qdrant in batches. Returns total points.
+    progress_callback(pts_done, phase, total_estimated): optional; total_estimated = len(paths_to_index).
     extra_payload: merged into each point (e.g. {"version": "8.3", "language": "ru"}).
     incremental: if True, do not recreate collection; upsert by path (add new, update changed).
     source_dir: optional path to unpacked HTML with __categories__ for section_path/breadcrumb in payload.
@@ -154,6 +156,7 @@ def build_index(
     if not paths_to_index:
         return 0
 
+    total_estimated = len(paths_to_index)
     if embedding_batch_size is None:
         embedding_batch_size = embedding._embedding_batch_size()
     if embedding_workers is None:
@@ -208,6 +211,16 @@ def build_index(
                 continue
         if not items:
             continue
+        if progress_callback and callable(progress_callback):
+            try:
+                progress_callback(total, "embedding", total_estimated)
+            except TypeError:
+                try:
+                    progress_callback(total, "embedding")
+                except Exception:
+                    pass
+            except Exception:
+                pass
         texts_for_embedding = [it[1][:max_input_chars] for it in items]
         vectors = embedding.get_embedding_batch(
             texts_for_embedding,
@@ -273,6 +286,16 @@ def build_index(
             collection_created = True
         client.upsert(collection_name=collection, points=points)
         total += len(points)
+        if progress_callback and callable(progress_callback):
+            try:
+                progress_callback(total, "writing", total_estimated)
+            except TypeError:
+                try:
+                    progress_callback(total, "writing")
+                except Exception:
+                    pass
+            except Exception:
+                pass
     return total
 
 

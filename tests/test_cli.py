@@ -392,6 +392,35 @@ def test_cmd_index_status_shows_failed_task_details(
     assert "shcntx_ru" in out
 
 
+@patch("onec_help.indexer.get_all_collections_status")
+@patch("onec_help.ingest.read_last_ingest_run")
+@patch("onec_help.ingest.read_ingest_status")
+@patch("onec_help.indexer.get_index_status")
+def test_cmd_index_status_shows_last_run_when_no_active_ingest(
+    mock_status: MagicMock,
+    mock_ingest: MagicMock,
+    mock_last_run: MagicMock,
+    mock_collections: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """index-status shows Last run from ingest_runs when no active ingest."""
+    mock_status.return_value = {"exists": True, "collection": "onec_help", "points_count": 5000}
+    mock_collections.return_value = [
+        {"name": "onec_help", "points_count": 5000, "indexed_vectors_count": 5000, "segments_count": 2},
+    ]
+    mock_ingest.return_value = None
+    mock_last_run.return_value = {
+        "status": "completed",
+        "total_points": 5000,
+        "total_elapsed_sec": 120.5,
+        "failed_count": 0,
+    }
+    assert cmd_index_status(make_args()) == 0
+    out = capsys.readouterr().out
+    assert "Last run" in out
+    assert "5000" in out and "pts" in out
+
+
 @patch("onec_help.ingest.run_ingest")
 def test_cmd_ingest_with_sources_env(mock_run_ingest, tmp_path: Path) -> None:
     mock_run_ingest.return_value = 10

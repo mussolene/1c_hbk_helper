@@ -9,7 +9,9 @@ from onec_help.ingest import (
     _file_sha256,
     _language_from_filename,
     _load_ingest_cache,
+    _persist_ingest_status_sqlite,
     _update_ingest_cache_entry,
+    _vacuum_cache_db,
     _write_ingest_status,
     collect_hbk_tasks,
     discover_version_dirs,
@@ -17,6 +19,7 @@ from onec_help.ingest import (
     parse_source_dirs_env,
     read_ingest_failed_log,
     read_ingest_status,
+    read_last_ingest_run,
     run_ingest,
     run_unpack_only,
 )
@@ -155,43 +158,111 @@ def test_run_ingest_skips_cached(tmp_path: Path) -> None:
 
 
 def test_write_ingest_status_completed_clears_current(tmp_path: Path) -> None:
-    """When status is completed, written JSON has current=[] so no stale workers are shown."""
-    import json
+    """When status is completed, ingest_current is cleared and run is in ingest_runs."""
+    cache_db = tmp_path / "cache.db"
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": str(cache_db)}, clear=False):
+        _write_ingest_status(
+            started_at=0.0,
+            embedding_backend="local",
+            total_tasks=2,
+            done_tasks=2,
+            total_points=100,
+            folders=[],
+            status="completed",
+            finished_at=1.0,
+        )
+        last = read_last_ingest_run()
+        assert last is not None
+        assert last["status"] == "completed"
+        assert last["total_points"] == 100
+        assert read_ingest_status() is None  # ingest_current cleared
 
-    status_file = str(tmp_path / "status.json")
-    _write_ingest_status(
-        status_file,
-        started_at=0.0,
-        embedding_backend="local",
-        total_tasks=2,
-        done_tasks=2,
-        total_points=100,
-        folders=[],
-        status="completed",
-        finished_at=1.0,
-    )
-    data = json.loads((tmp_path / "status.json").read_text(encoding="utf-8"))
-    assert data["status"] == "completed"
-    assert data["current"] == []
 
-
-def test_read_ingest_status_missing() -> None:
-    """read_ingest_status returns None when file does not exist."""
-    assert read_ingest_status("/nonexistent/path/status.json") is None
+def test_read_ingest_status_missing(tmp_path: Path) -> None:
+    """read_ingest_status returns None when SQLite ingest_current has no row."""
+    cache_db = tmp_path / "cache.db"
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": str(cache_db)}, clear=False):
+        assert read_ingest_status() is None
 
 
 def test_read_ingest_status_exists(tmp_path: Path) -> None:
-    """read_ingest_status returns parsed JSON when file exists."""
-    status_file = tmp_path / "status.json"
-    status_file.write_text(
-        '{"status": "completed", "embedding_backend": "local", "total_points": 10}',
-        encoding="utf-8",
-    )
-    out = read_ingest_status(str(status_file))
+    """read_ingest_status returns data from SQLite ingest_current when present."""
+    cache_db = tmp_path / "cache.db"
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": str(cache_db)}, clear=False):
+        _persist_ingest_status_sqlite(
+            started_at=1000.0,
+            embedding_backend="local",
+            total_tasks=1,
+            done_tasks=1,
+            total_points=10,
+            folders=[],
+            status="in_progress",
+        )
+        out = read_ingest_status()
     assert out is not None
-    assert out["status"] == "completed"
+    assert out["status"] == "in_progress"
     assert out["embedding_backend"] == "local"
     assert out["total_points"] == 10
+
+
+def test_read_ingest_status_from_sqlite(tmp_path: Path) -> None:
+    """read_ingest_status returns data from SQLite ingest_current when present."""
+    cache_db = tmp_path / "cache.db"
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": str(cache_db)}, clear=False):
+        _persist_ingest_status_sqlite(
+            started_at=1000.0,
+            embedding_backend="local",
+            total_tasks=5,
+            done_tasks=2,
+            total_points=100,
+            folders=[],
+            status="in_progress",
+        )
+        out = read_ingest_status()
+    assert out is not None
+    assert out["status"] == "in_progress"
+    assert out["embedding_backend"] == "local"
+    assert out["total_points"] == 100
+    assert out["done_tasks"] == 2
+    assert out["total_tasks"] == 5
+
+
+def test_read_last_ingest_run(tmp_path: Path) -> None:
+    """read_last_ingest_run returns last row from ingest_runs when present."""
+    cache_db = tmp_path / "cache.db"
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": str(cache_db)}, clear=False):
+        _persist_ingest_status_sqlite(
+            started_at=1000.0,
+            embedding_backend="openai_api",
+            total_tasks=10,
+            done_tasks=10,
+            total_points=5000,
+            folders=[],
+            status="completed",
+            finished_at=1100.0,
+            failed_tasks=[{"path": "a.hbk", "version": "8.3", "language": "ru", "error": "err"}],
+        )
+        out = read_last_ingest_run()
+    assert out is not None
+    assert out["status"] == "completed"
+    assert out["total_points"] == 5000
+    assert out["total_elapsed_sec"] == 100.0
+    assert out["failed_count"] == 1
+
+
+def test_read_last_ingest_run_empty(tmp_path: Path) -> None:
+    """read_last_ingest_run returns None when ingest_runs is empty."""
+    cache_db = tmp_path / "cache.db"
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": str(cache_db)}, clear=False):
+        assert read_last_ingest_run() is None
+
+
+def test_vacuum_cache_db_no_error(tmp_path: Path) -> None:
+    """_vacuum_cache_db runs without error on valid DB."""
+    cache_db = tmp_path / "cache.db"
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": str(cache_db)}, clear=False):
+        _load_ingest_cache()  # creates DB
+        _vacuum_cache_db()  # should not raise
 
 
 def test_read_ingest_failed_log(tmp_path: Path) -> None:

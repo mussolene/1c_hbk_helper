@@ -4,7 +4,7 @@
 include:
   - docker-compose.base.yml
 
-# full: mcp runs ingest, status file in shared /app/var/ingest_cache
+# full: mcp runs ingest, status in shared SQLite /app/var/ingest_cache
 services:
   mcp:
     environment:

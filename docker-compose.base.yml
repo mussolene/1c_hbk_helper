@@ -38,7 +38,6 @@ services:
       HELP_LANGUAGES: ${HELP_LANGUAGES:-ru}
       HELP_INGEST_TEMP: ${HELP_INGEST_TEMP:-/tmp/help_ingest}
       INGEST_CACHE_FILE: ${INGEST_CACHE_FILE:-/app/var/ingest_cache/ingest_cache.db}
-      INDEX_STATUS_FILE: ${INDEX_STATUS_FILE:-/app/var/ingest_cache/ingest_status.json}
       INGEST_FAILED_LOG: ${INGEST_FAILED_LOG:-/var/log/ingest_failed.log}
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-openai_api}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-text-embedding-mxbai-embed-large-v1}

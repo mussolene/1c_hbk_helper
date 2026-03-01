@@ -3,7 +3,7 @@
 Unpacks to a temp dir in the container, builds docs, indexes with version/language, then cleans up.
 Supports language filter (e.g. only *_ru.hbk) and concurrent processing.
 Progress is printed to stderr so long runs are not killed by "no output" timeouts.
-Writes ingest status to INDEX_STATUS_FILE for index-status command (embedding speed, per-folder, ETA).
+Writes ingest status to SQLite cache DB (ingest_current, ingest_runs) for index-status command.
 """
 
 from __future__ import annotations
@@ -25,13 +25,15 @@ from typing import Any
 
 from ._utils import mask_path_for_log, safe_error_message
 
-# Path for ingest status (read by index-status). Default under /tmp so it works without /app.
-DEFAULT_INDEX_STATUS_FILE = "/tmp/onec_help_ingest_status.json"
-# How often to write status file while ingest runs (seconds); env INDEX_STATUS_INTERVAL_SEC
+# How often to write status to SQLite while ingest runs (seconds); env INDEX_STATUS_INTERVAL_SEC
 STATUS_UPDATE_INTERVAL_SEC = 2.0
 # Path for ingest cache (SQLite). Skip re-parsing and re-embedding if .hbk unchanged.
 DEFAULT_INGEST_CACHE_FILE = "/tmp/onec_help_ingest_cache.db"
 _CACHE_TABLE = "ingest_cache"
+_STATUS_TABLE_RUNS = "ingest_runs"
+_STATUS_TABLE_CURRENT = "ingest_current"
+_STATUS_TABLE_FAILED = "ingest_failed"
+_INGEST_RUNS_LIMIT = 20
 
 
 def _default_workers() -> int:
@@ -108,43 +110,64 @@ def _update_ingest_cache_entry(key: str, file_hash: str, points: int) -> None:
         _log_cache_error("write", path, e)
 
 
-def _status_writer_loop(
-    stop_event: threading.Event,
-    state_lock: threading.Lock,
-    state: dict[str, Any],
-    status_file: str,
-    interval_sec: float,
-) -> None:
-    """Background thread: write status file every interval_sec until stop_event is set."""
-    while not stop_event.wait(timeout=interval_sec):
-        with state_lock:
-            if state.get("status") == "completed":
-                break
-            done_tasks = state["done_tasks"]
-            total_points = state["total_points"]
-            folders = copy.deepcopy(state["folders"])
-            current = list(state["current_work"].values())
-            failed_tasks = list(state.get("failed", []))
-        _write_ingest_status(
-            status_file,
-            started_at=state["started_at"],
-            embedding_backend=state["embedding_backend"],
-            total_tasks=state["total_tasks"],
-            done_tasks=done_tasks,
-            total_points=total_points,
-            folders=folders,
-            status="in_progress",
-            current=current,
-            failed_tasks=failed_tasks,
+def _log_status_error(op: str, err: Exception) -> None:
+    """Log ingest status SQLite error once per run to avoid spam."""
+    if not hasattr(_log_status_error, "_warned"):
+        _log_status_error._warned = set()  # type: ignore[attr-defined]
+    key = op
+    if key not in _log_status_error._warned:  # type: ignore[attr-defined]
+        _log_status_error._warned.add(key)  # type: ignore[attr-defined]
+        _log(
+            f"[ingest] WARN: ingest status {op} failed: {safe_error_message(err)}. "
+            "Status will fall back to JSON file."
         )
 
 
-def _log(msg: str) -> None:
-    print(msg, file=sys.stderr, flush=True)
+def _init_ingest_status_tables(conn: sqlite3.Connection) -> None:
+    """Create ingest status tables if not exist. Enables WAL for read concurrency."""
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(
+        f"""CREATE TABLE IF NOT EXISTS {_STATUS_TABLE_CURRENT} (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            started_at REAL NOT NULL,
+            total_tasks INTEGER NOT NULL,
+            done_tasks INTEGER NOT NULL,
+            total_points INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        )"""
+    )
+    conn.execute(
+        f"""CREATE TABLE IF NOT EXISTS {_STATUS_TABLE_RUNS} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at REAL NOT NULL,
+            finished_at REAL NOT NULL,
+            status TEXT NOT NULL,
+            total_tasks INTEGER NOT NULL,
+            done_tasks INTEGER NOT NULL,
+            total_points INTEGER NOT NULL,
+            failed_count INTEGER NOT NULL,
+            embedding_backend TEXT,
+            total_elapsed_sec REAL
+        )"""
+    )
+    conn.execute(
+        f"""CREATE TABLE IF NOT EXISTS {_STATUS_TABLE_FAILED} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            version TEXT NOT NULL,
+            language TEXT NOT NULL,
+            path TEXT NOT NULL,
+            error TEXT NOT NULL,
+            error_category TEXT,
+            FOREIGN KEY (run_id) REFERENCES {_STATUS_TABLE_RUNS}(id)
+        )"""
+    )
+    conn.commit()
 
 
-def _write_ingest_status(
-    status_file: str,
+def _persist_ingest_status_sqlite(
     *,
     started_at: float,
     embedding_backend: str,
@@ -152,14 +175,15 @@ def _write_ingest_status(
     done_tasks: int,
     total_points: int,
     folders: list[dict[str, Any]],
-    status: str = "in_progress",
+    status: str,
     finished_at: float | None = None,
     current: list[dict[str, Any]] | None = None,
     failed_tasks: list[dict[str, Any]] | None = None,
+    current_task_points: int | None = None,
+    current_task_estimated_total: int | None = None,
 ) -> None:
-    """Write ingest status JSON for index-status command.
-    current = list of {path, version, language, stage} per active thread.
-    failed_tasks = list of {path, version, language, error} for failed .hbk tasks."""
+    """Persist ingest status to SQLite (ingest_current). On completion, append to ingest_runs."""
+    path = _ingest_cache_path()
     elapsed = time.time() - started_at
     payload: dict[str, Any] = {
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started_at)),
@@ -173,14 +197,21 @@ def _write_ingest_status(
     }
     if status == "completed":
         payload["current"] = []
-    elif current:
+    elif current is not None:
         payload["current"] = current
+    if current_task_points is not None and current_task_points > 0:
+        payload["current_task_points"] = current_task_points
+    if current_task_estimated_total is not None and current_task_estimated_total > 0:
+        payload["current_task_estimated_total"] = current_task_estimated_total
     if failed_tasks:
         payload["failed_tasks"] = failed_tasks[-50:]
     if elapsed > 0 and total_points > 0:
         payload["embedding_speed_pts_per_sec"] = round(total_points / elapsed, 2)
     failed_count = len(failed_tasks) if failed_tasks else 0
     done_successful = max(0, done_tasks - failed_count)
+    if done_successful > 0 and total_tasks > 0 and total_points > 0:
+        avg_pts = total_points / done_successful
+        payload["estimated_total_points"] = int(avg_pts * total_tasks)
     if done_successful > 0 and total_tasks > done_tasks and total_points > 0 and elapsed > 0:
         avg_pts = total_points / done_successful
         remaining_tasks = total_tasks - done_tasks
@@ -193,21 +224,209 @@ def _write_ingest_status(
     if finished_at is not None:
         payload["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(finished_at))
         payload["total_elapsed_sec"] = round(finished_at - started_at, 1)
+
     try:
-        with open(status_file, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-    except OSError:
+        conn = sqlite3.connect(path)
+        _init_ingest_status_tables(conn)
+        updated_at = time.time()
+        payload_json = json.dumps(payload, ensure_ascii=False)
+
+        if status == "completed":
+            # Insert into ingest_runs and clear ingest_current
+            run_id = conn.execute(
+                f"""INSERT INTO {_STATUS_TABLE_RUNS}
+                    (started_at, finished_at, status, total_tasks, done_tasks, total_points,
+                     failed_count, embedding_backend, total_elapsed_sec)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    started_at,
+                    finished_at,
+                    status,
+                    total_tasks,
+                    done_tasks,
+                    total_points,
+                    failed_count,
+                    embedding_backend or "none",
+                    finished_at - started_at if finished_at else None,
+                ),
+            ).lastrowid
+            if run_id and failed_tasks:
+                for ft in failed_tasks:
+                    err = ft.get("error", "") or ""
+                    cat = "unpack" if "unpack" in err.lower() or "7z" in err else "other"
+                    if "embed" in err.lower() or "429" in err or "timeout" in err.lower():
+                        cat = "embed"
+                    elif "qdrant" in err.lower() or "upsert" in err.lower():
+                        cat = "index"
+                    elif "build" in err.lower() or "html" in err.lower():
+                        cat = "build"
+                    conn.execute(
+                        f"""INSERT INTO {_STATUS_TABLE_FAILED}
+                            (run_id, version, language, path, error, error_category)
+                            VALUES (?, ?, ?, ?, ?, ?)""",
+                        (
+                            run_id,
+                            ft.get("version", ""),
+                            ft.get("language", ""),
+                            ft.get("path", ""),
+                            err[:500],
+                            cat,
+                        ),
+                    )
+            # Trim old runs
+            cursor = conn.execute(
+                f"SELECT id FROM {_STATUS_TABLE_RUNS} ORDER BY id DESC LIMIT 1 OFFSET {_INGEST_RUNS_LIMIT}"
+            )
+            row = cursor.fetchone()
+            if row:
+                conn.execute(f"DELETE FROM {_STATUS_TABLE_RUNS} WHERE id <= ?", (row[0],))
+                conn.execute(
+                    f"DELETE FROM {_STATUS_TABLE_FAILED} WHERE run_id <= ?", (row[0],)
+                )
+            conn.execute(f"DELETE FROM {_STATUS_TABLE_CURRENT} WHERE id = 1")
+        else:
+            conn.execute(
+                f"""INSERT OR REPLACE INTO {_STATUS_TABLE_CURRENT}
+                    (id, started_at, total_tasks, done_tasks, total_points, status, payload_json, updated_at)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?)""",
+                (started_at, total_tasks, done_tasks, total_points, status, payload_json, updated_at),
+            )
+        conn.commit()
+        conn.close()
+    except (OSError, sqlite3.Error) as e:
+        _log_status_error("write", e)
+
+
+def _vacuum_cache_db() -> None:
+    """VACUUM the ingest cache SQLite DB to reclaim space. Non-blocking; logs on error."""
+    path = _ingest_cache_path()
+    try:
+        conn = sqlite3.connect(path)
+        conn.execute("VACUUM")
+        conn.close()
+    except (OSError, sqlite3.Error) as e:
+        _log(f"[ingest] WARN: VACUUM failed for {mask_path_for_log(path)}: {safe_error_message(e)}")
+
+
+def _status_writer_loop(
+    stop_event: threading.Event,
+    state_lock: threading.Lock,
+    state: dict[str, Any],
+    interval_sec: float,
+) -> None:
+    """Background thread: write status to SQLite every interval_sec until stop_event is set."""
+    while not stop_event.wait(timeout=interval_sec):
+        with state_lock:
+            if state.get("status") == "completed":
+                break
+            done_tasks = state["done_tasks"]
+            total_points = state["total_points"]
+            folders = copy.deepcopy(state["folders"])
+            current = list(state["current_work"].values())
+            failed_tasks = list(state.get("failed", []))
+            current_task_points = state.get("current_task_points", 0) or 0
+            current_task_estimated = state.get("current_task_estimated_total")
+        _write_ingest_status(
+            started_at=state["started_at"],
+            embedding_backend=state["embedding_backend"],
+            total_tasks=state["total_tasks"],
+            done_tasks=done_tasks,
+            total_points=total_points,
+            folders=folders,
+            status="in_progress",
+            current=current,
+            failed_tasks=failed_tasks,
+            current_task_points=current_task_points if current_task_points > 0 else None,
+            current_task_estimated_total=current_task_estimated,
+        )
+
+
+def _log(msg: str) -> None:
+    print(msg, file=sys.stderr, flush=True)
+
+
+def _write_ingest_status(
+    *,
+    started_at: float,
+    embedding_backend: str,
+    total_tasks: int,
+    done_tasks: int,
+    total_points: int,
+    folders: list[dict[str, Any]],
+    status: str = "in_progress",
+    finished_at: float | None = None,
+    current: list[dict[str, Any]] | None = None,
+    failed_tasks: list[dict[str, Any]] | None = None,
+    current_task_points: int | None = None,
+    current_task_estimated_total: int | None = None,
+) -> None:
+    """Write ingest status to SQLite cache DB for index-status command."""
+    _persist_ingest_status_sqlite(
+        started_at=started_at,
+        embedding_backend=embedding_backend,
+        total_tasks=total_tasks,
+        done_tasks=done_tasks,
+        total_points=total_points,
+        folders=folders,
+        status=status,
+        finished_at=finished_at,
+        current=current,
+        failed_tasks=failed_tasks,
+        current_task_points=current_task_points,
+        current_task_estimated_total=current_task_estimated_total,
+    )
+
+
+def read_ingest_status() -> dict[str, Any] | None:
+    """Read ingest status from SQLite cache DB (ingest_current). Returns None if unavailable."""
+    db_path = _ingest_cache_path()
+    try:
+        conn = sqlite3.connect(db_path)
+        _init_ingest_status_tables(conn)
+        row = conn.execute(
+            f"SELECT payload_json, started_at FROM {_STATUS_TABLE_CURRENT} WHERE id = 1"
+        ).fetchone()
+        conn.close()
+        if row:
+            data = json.loads(row[0])
+            if data.get("status") == "in_progress" and row[1] is not None:
+                data["elapsed_sec"] = round(time.time() - row[1], 1)
+            return data
+    except (OSError, sqlite3.Error, json.JSONDecodeError):
         pass
+    return None
 
 
-def read_ingest_status(status_file: str | None = None) -> dict[str, Any] | None:
-    """Read ingest status JSON (for index-status). Returns None if file missing or invalid."""
-    path = status_file or os.environ.get("INDEX_STATUS_FILE", DEFAULT_INDEX_STATUS_FILE)
+def read_last_ingest_run() -> dict[str, Any] | None:
+    """Read last completed ingest run from SQLite ingest_runs. Returns None if none."""
+    db_path = _ingest_cache_path()
     try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
+        conn = sqlite3.connect(db_path)
+        _init_ingest_status_tables(conn)
+        row = conn.execute(
+            f"""SELECT started_at, finished_at, status, total_tasks, done_tasks, total_points,
+                       failed_count, embedding_backend, total_elapsed_sec
+                FROM {_STATUS_TABLE_RUNS} ORDER BY id DESC LIMIT 1"""
+        ).fetchone()
+        conn.close()
+        if row:
+            return {
+                "started_at": row[0],
+                "finished_at": row[1],
+                "status": row[2],
+                "total_tasks": row[3],
+                "done_tasks": row[4],
+                "total_points": row[5],
+                "failed_count": row[6],
+                "embedding_backend": row[7],
+                "total_elapsed_sec": row[8],
+                "finished_at_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(row[1]))
+                if row[1]
+                else None,
+            }
+    except (OSError, sqlite3.Error):
+        pass
+    return None
 
 
 def read_ingest_failed_log(limit: int = 30) -> list[dict[str, str]]:
@@ -441,7 +660,6 @@ def run_ingest(
     if verbose:
         _log(f"[ingest] Found {len(tasks)} .hbk task(s); workers={max_workers}")
 
-    status_file = os.environ.get("INDEX_STATUS_FILE", DEFAULT_INDEX_STATUS_FILE)
     embedding_backend = (os.environ.get("EMBEDDING_BACKEND") or "local").strip().lower()
     if embedding_backend not in ("local", "openai_api", "deterministic"):
         embedding_backend = "none"
@@ -465,7 +683,6 @@ def run_ingest(
         for (v, lang) in sorted(folder_hbk_count.keys())
     ]
     _write_ingest_status(
-        status_file,
         started_at=started_at,
         embedding_backend=embedding_backend,
         total_tasks=len(tasks),
@@ -488,7 +705,8 @@ def run_ingest(
         "embedding_backend": embedding_backend,
         "total_tasks": len(tasks),
         "status": "in_progress",
-        "status_file": status_file,
+        "current_task_points": 0,
+        "current_task_estimated_total": None,
     }
     interval_sec = float(
         os.environ.get("INDEX_STATUS_INTERVAL_SEC", str(STATUS_UPDATE_INTERVAL_SEC))
@@ -496,7 +714,7 @@ def run_ingest(
     stop_event = threading.Event()
     writer = threading.Thread(
         target=_status_writer_loop,
-        args=(stop_event, state_lock, state, status_file, interval_sec),
+        args=(stop_event, state_lock, state, interval_sec),
         daemon=True,
     )
     writer.start()
@@ -560,7 +778,6 @@ def run_ingest(
                     state["done_tasks"] = done
                     state["total_points"] = total_indexed
                 _write_ingest_status(
-                    status_file,
                     started_at=started_at,
                     embedding_backend=embedding_backend,
                     total_tasks=len(tasks),
@@ -582,12 +799,26 @@ def run_ingest(
                         f"[ingest] [{done}/{len(tasks)}] indexing {version}/{language} — {path_hbk}"
                     )
                 with state_lock:
+                    state["current_task_points"] = 0
                     current_work[main_ident] = {
                         "path": path_hbk.name,
                         "version": version,
                         "language": language,
                         "stage": "indexing",
                     }
+
+                def _on_batch(
+                    pts: int,
+                    phase: str | None = None,
+                    total_estimated: int | None = None,
+                ) -> None:
+                    with state_lock:
+                        state["current_task_points"] = pts
+                        if total_estimated is not None:
+                            state["current_task_estimated_total"] = total_estimated
+                        if phase and main_ident in current_work:
+                            current_work[main_ident]["stage"] = phase
+
                 try:
                     n = build_index(
                         docs_dir=md_dir,
@@ -600,6 +831,7 @@ def run_ingest(
                         embedding_batch_size=embedding_batch_size,
                         embedding_workers=embedding_workers,
                         source_dir=str(unpacked) if unpacked and unpacked.exists() else None,
+                        progress_callback=_on_batch,
                     )
                     total_indexed += n
                     key = f"{version}/{language}/{path_hbk.name}"
@@ -624,7 +856,6 @@ def run_ingest(
                         state["total_points"] = total_indexed
                         current_snapshot = list(current_work.values())
                     _write_ingest_status(
-                        status_file,
                         started_at=started_at,
                         embedding_backend=embedding_backend,
                         total_tasks=len(tasks),
@@ -642,6 +873,8 @@ def run_ingest(
                 finally:
                     with state_lock:
                         current_work.pop(main_ident, None)
+                        state["current_task_points"] = 0
+                        state["current_task_estimated_total"] = None
                     try:
                         shutil.rmtree(md_dir.parent)
                     except OSError:
@@ -655,7 +888,6 @@ def run_ingest(
     stop_event.set()
     writer.join(timeout=interval_sec * 2 + 1)
     _write_ingest_status(
-        status_file,
         started_at=started_at,
         embedding_backend=embedding_backend,
         total_tasks=len(tasks),
@@ -667,6 +899,7 @@ def run_ingest(
         current=[],
         failed_tasks=failed_tasks_list,
     )
+    _vacuum_cache_db()
     try:
         shutil.rmtree(base)
     except OSError:
