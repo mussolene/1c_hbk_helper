@@ -499,7 +499,9 @@ def search_index(
                 if vkey > prev_key or (vkey == prev_key and score > prev_score):
                     by_path[p] = r
         deduped = list(by_path.values())
-        deduped.sort(key=lambda x: (-(x.get("score") or 0.0), -len(_version_sort_key(x.get("version", "")))))
+        deduped.sort(
+            key=lambda x: (-(x.get("score") or 0.0), -len(_version_sort_key(x.get("version", ""))))
+        )
         return deduped
     return raw
 
