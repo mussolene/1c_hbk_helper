@@ -65,6 +65,17 @@ def _embedding_timeout() -> int:
         return DEFAULT_EMBEDDING_TIMEOUT
 
 
+def _embedding_batch_timeout(batch_size: int) -> int:
+    """Timeout for batch request. EMBEDDING_BATCH_TIMEOUT overrides formula when set."""
+    v = (os.environ.get("EMBEDDING_BATCH_TIMEOUT") or "").strip()
+    if v:
+        try:
+            return max(10, int(v))
+        except ValueError:
+            pass
+    return max(_embedding_timeout(), 30 + batch_size // 10)
+
+
 def _embedding_force_batch() -> bool:
     """True if EMBEDDING_FORCE_BATCH is set (1, true, yes) — use max batch size and workers."""
     v = (os.environ.get("EMBEDDING_FORCE_BATCH") or "").strip().lower()
@@ -456,7 +467,7 @@ def _get_embedding_api_batch(texts: list[str]) -> list[list[float]]:
     truncated = [t[:MAX_EMBEDDING_INPUT_CHARS] for t in texts]
     url = f"{_EMBEDDING_API_URL}/embeddings"
     body = json.dumps({"model": model_id, "input": truncated}).encode("utf-8")
-    timeout = _embedding_timeout()
+    batch_timeout = _embedding_batch_timeout(len(texts))
     last_err = None
     for attempt in range(RETRY_ATTEMPTS):
         _acquire_api_slot()
@@ -474,7 +485,7 @@ def _get_embedding_api_batch(texts: list[str]) -> list[list[float]]:
                 },
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=max(timeout, 30 + len(texts) // 10)) as resp:
+            with urllib.request.urlopen(req, timeout=batch_timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             out = data.get("data") or []
             if len(out) >= len(texts):

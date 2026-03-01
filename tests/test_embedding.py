@@ -119,6 +119,20 @@ def test_get_embedding_batch_placeholder() -> None:
     importlib.reload(embedding_mod)
 
 
+def test_embedding_batch_timeout() -> None:
+    """_embedding_batch_timeout uses formula or EMBEDDING_BATCH_TIMEOUT when set."""
+    import importlib
+
+    with patch.dict("os.environ", {"EMBEDDING_BATCH_TIMEOUT": "120"}, clear=False):
+        importlib.reload(embedding_mod)
+        assert embedding_mod._embedding_batch_timeout(256) == 120
+    with patch.dict("os.environ", {"EMBEDDING_BATCH_TIMEOUT": ""}, clear=False):
+        importlib.reload(embedding_mod)
+        t = embedding_mod._embedding_batch_timeout(100)
+        assert t >= 30 + 10  # 30 + 100//10
+    importlib.reload(embedding_mod)
+
+
 def test_embedding_timeout_default() -> None:
     """_embedding_timeout returns int from env or default."""
     import importlib
