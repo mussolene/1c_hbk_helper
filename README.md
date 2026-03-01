@@ -52,7 +52,8 @@ pip install -e ".[dev]"
 
 | Команда | Описание |
 |--------|----------|
-| **`unpack <archive> [--output-dir]`** | Распаковать один .hbk через 7z |
+| **`unpack <archive> [--output-dir]`** | Распаковать один .hbk (7z → zipfile → offset → unzip → scan local headers) |
+| **`unpack-diag <archive> [-o dir]`** | Диагностика распаковки: пробует каждый метод, печатает результат (при «All unpack methods failed») |
 | **`unpack-dir [source_dir] [-o output]`** | Распаковать все .hbk из дерева каталогов в указанную директорию (без индексации). Источники: `source_dir`, `HELP_SOURCE_BASE` или `--sources` |
 | **`build-docs <project_dir> [--output]`** | Сгенерировать Markdown из HTML справки |
 | **`build-index <directory> [--incremental] [--embedding-batch-size N] [--embedding-workers N]`** | Построить векторный индекс в Qdrant по .md/.html (батч-эмбеддинги; при openai_api — параллельные запросы) |

@@ -1,12 +1,15 @@
 """Tests for unpack module."""
 
+import struct
 import zipfile
+import zlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from onec_help.unpack import (
+    _try_zipfile_scan_local_headers,
     _try_unzip,
     _try_zipfile_from_offset,
     ensure_dir,
@@ -63,11 +66,8 @@ def test_unpack_hbk_error_message(tmp_path: Path) -> None:
     out = tmp_path / "out"
     with patch("onec_help.unpack.subprocess.run") as run:
         run.return_value = MagicMock(returncode=2, stderr="Headers Error", stdout="")
-        run.side_effect = [
-            MagicMock(returncode=2),
-            MagicMock(returncode=2),
-            MagicMock(returncode=1),
-        ]
+        run.side_effect = [MagicMock(returncode=2)] * 4 + [MagicMock(returncode=1)]
+        # 7z: default, *, cab, zip; then unzip
         with pytest.raises(RuntimeError) as exc_info:
             unpack_hbk(archive, out)
         msg = str(exc_info.value)
@@ -82,11 +82,8 @@ def test_unpack_hbk_all_methods_fail_including_offset(tmp_path: Path) -> None:
     out = tmp_path / "out"
     with patch("onec_help.unpack.subprocess.run") as run:
         run.return_value = MagicMock(returncode=2, stderr="Headers Error", stdout="")
-        run.side_effect = [
-            MagicMock(returncode=2),
-            MagicMock(returncode=2),
-            MagicMock(returncode=1),
-        ]
+        run.side_effect = [MagicMock(returncode=2)] * 4 + [MagicMock(returncode=1)]
+        # 7z: default, *, cab, zip; then unzip
         with pytest.raises(RuntimeError) as exc_info:
             unpack_hbk(archive, out)
         msg = str(exc_info.value)
@@ -169,7 +166,7 @@ def test_unpack_hbk_via_offset(tmp_path: Path) -> None:
         zf.writestr("PayloadData/index.html", "<h1>OK</h1>")
     out = tmp_path / "out"
     with patch("onec_help.unpack.subprocess.run") as run:
-        run.side_effect = [MagicMock(returncode=1), MagicMock(returncode=1)]
+        run.side_effect = [MagicMock(returncode=1)] * 4  # 7z: default, *, cab, zip
         unpack_hbk(archive, out)
     assert (out / "PayloadData" / "index.html").exists()
 
@@ -180,11 +177,8 @@ def test_unpack_hbk_non_hbk_suffix_error(tmp_path: Path) -> None:
     archive.write_bytes(b"x" * 3000)
     out = tmp_path / "out"
     with patch("onec_help.unpack.subprocess.run") as run:
-        run.side_effect = [
-            MagicMock(returncode=2),
-            MagicMock(returncode=2),
-            MagicMock(returncode=1),
-        ]
+        run.side_effect = [MagicMock(returncode=2)] * 4 + [MagicMock(returncode=1)]
+        # 7z: default, *, cab, zip; then unzip
         with pytest.raises(RuntimeError) as exc_info:
             unpack_hbk(archive, out)
     assert "All unpack methods failed" in str(exc_info.value)
@@ -253,3 +247,53 @@ def test_unpack_hbk_7z_not_found_fallback_zipfile(tmp_path: Path) -> None:
         run.side_effect = FileNotFoundError("7z not found")
         unpack_hbk(archive, out)
     assert (out / "inner.txt").read_text() == "content"
+
+
+def _make_embedded_zip_local_entry(filename: str, content: bytes) -> bytes:
+    """Build a single local file header + deflated payload (no EOCD)."""
+    compressed = zlib.compress(content, 9)[2:-4]  # raw deflate
+    fn = filename.encode("utf-8")
+    # Local header: ver(H) flags(H) comp(H) modtime(H) moddate(H) crc(I) comp_sz(I) uncomp_sz(I) fn_len(H) extra_len(H)
+    hdr = (
+        b"PK\x03\x04"
+        + struct.pack(
+            "<HHHHHIIIHH",
+            20,
+            0,
+            8,
+            0,
+            0,
+            0,
+            len(compressed),
+            len(content),
+            len(fn),
+            0,
+        )
+    )
+    return hdr + fn + compressed
+
+
+def test_try_zipfile_scan_local_headers(tmp_path: Path) -> None:
+    """Scan extracts entries from embedded ZIP with corrupted EOCD (schemui-style)."""
+    # 1C-style header padding + embedded ZIP (no valid EOCD)
+    padding = b"\x00" * 200
+    entry = _make_embedded_zip_local_entry("test.txt", b"hello from scan")
+    archive = tmp_path / "schemui.hbk"
+    archive.write_bytes(padding + entry)
+    out = tmp_path / "out"
+    out.mkdir()
+    assert _try_zipfile_scan_local_headers(archive, out) is True
+    assert (out / "test.txt").read_text() == "hello from scan"
+
+
+def test_unpack_hbk_via_scan_local_headers(tmp_path: Path) -> None:
+    """Unpack schemui-style .hbk via scan when 7z, zipfile, offset, unzip fail."""
+    padding = b"x" * 500
+    entry = _make_embedded_zip_local_entry("__categories__", b"{1,2,3}")
+    archive = tmp_path / "schemui_ru.hbk"
+    archive.write_bytes(padding + entry)
+    out = tmp_path / "out"
+    with patch("onec_help.unpack.subprocess.run") as run:
+        run.side_effect = [MagicMock(returncode=2)] * 4 + [MagicMock(returncode=1)]
+        unpack_hbk(archive, out)
+    assert (out / "__categories__").read_bytes() == b"{1,2,3}"
