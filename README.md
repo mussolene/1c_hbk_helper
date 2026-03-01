@@ -30,8 +30,8 @@
 
 ## Требования
 
-- Python 3.14+ (в образе Docker используется python:3.14-slim; при несовместимости зависимостей можно понизить до 3.12)
-- Docker и docker-compose (для контейнерного запуска)
+- Python 3.10+ (локально); Docker-образ — python:3.14-slim
+- Docker и docker compose (для контейнерного запуска)
 - 7z (p7zip-full) — для распаковки .hbk внутри контейнера
 
 ## Установка (локально)
@@ -104,151 +104,119 @@ pip install -e ".[dev]"
 | `WATCHDOG_POLL_INTERVAL` | Интервал проверки новых .hbk (секунды) | `600` |
 | `WATCHDOG_PENDING_INTERVAL` | Интервал обработки pending embeddings (секунды) | `600` |
 
-## Запуск из коробки (Docker Compose)
+## Запуск
 
-Данные справки берутся через **ingest**: монтируется один каталог (`HELP_SOURCE_BASE=/opt/1cv8`), в нём каждая подпапка считается версией 1С и сканируется автоматически. Поиск .hbk рекурсивный, в т.ч. в подпапке `bin/` (на Windows: `C:\Program Files\1cv8\8.3.27.1859\bin`).
+Три варианта: **локально (pip)**, **Docker Compose**, **Make** (обёртки над compose). Все используют один CLI: `python -m onec_help <команда>`.
 
-**macOS (Docker Desktop):** по умолчанию Docker не имеет доступа к `/opt`. Откройте **Docker Desktop → Settings (⚙️) → Resources → File sharing** и добавьте путь **`/opt`** (или **`/opt/1cv8`**). Нажмите **Apply & Restart**.
+| Инструмент | Когда использовать |
+|------------|--------------------|
+| **pip + python** | Локальная разработка, отладка, без Docker |
+| **docker compose** | Запуск в контейнерах (рекомендуется) |
+| **make** | Обёртки над compose; `make help` — полный список |
 
-**Путь к .hbk:** на Linux/macOS часто `/opt/1cv8/8.3.27.1859/1cv8_ru.hbk`; на Windows — `...\8.3.27.1859\bin\1cv8_ru.hbk`. Ingest ищет `.hbk` рекурсивно, оба варианта поддерживаются.
+**Быстрый старт (Docker):** `make up` → `make ingest` → MCP: http://localhost:5050/mcp. Данные в `./data/`.
 
-### Быстрый старт
+---
+
+### 1. Локально (pip)
 
 ```bash
-docker compose up -d
-# Данные в ./data/ (qdrant, ingest_cache, snippets, standards) — backup: копируйте папку data/.
-# MCP: http://localhost:5050/mcp (подключить в Cursor через .cursor/mcp.json)
-# Индексация вручную: make ingest
-# Проверка индекса: docker compose exec mcp python -m onec_help index-status
+pip install -e ".[mcp]"
+# Qdrant (Docker): docker run -d -p 6333:6333 -v qdrant_data:/qdrant/storage qdrant/qdrant:v1.12.0
+
+HELP_SOURCE_BASE=/opt/1cv8 python -m onec_help ingest
+python -m onec_help mcp . --transport streamable-http --host 0.0.0.0 --port 5050
+python -m onec_help serve ./unpacked   # HELP_SERVE_ALLOWED_DIRS обязательна
 ```
+
+Подробнее: [docs/run.md](docs/run.md).
+
+---
+
+### 2. Docker Compose
+
+Данные в `./data/`. MCP: http://localhost:5050/mcp.
+
+**macOS:** Docker Desktop → Settings → Resources → File sharing — добавьте `/opt` (или `/opt/1cv8`).
+
+| Действие | Команда |
+|----------|---------|
+| Запуск (split) | `docker compose up -d` |
+| Запуск + веб (serve) | `docker compose --profile serve up -d` |
+| Запуск full (один контейнер) | `docker compose -f docker-compose.full.yml up -d` |
+| Индексация (split) | `docker compose exec ingest-worker python -m onec_help ingest` |
+| Индексация (full) | `docker compose -f docker-compose.full.yml exec mcp python -m onec_help ingest` |
+| Статус индекса | `docker compose exec mcp python -m onec_help index-status` |
+| Распаковка без индекса | `docker compose run --rm -v /opt/1cv8:/input:ro -v $(pwd)/data/unpacked:/output mcp python -m onec_help unpack-dir /input -o /output -l ru` |
+
+---
+
+### 3. Make (обёртки над Docker Compose)
+
+`make help` — полный список. Частые команды:
+
+| Команда | Описание |
+|---------|----------|
+| `make up` | Запуск split (qdrant + mcp + ingest-worker) |
+| `make up-full` | Запуск full (один контейнер mcp) |
+| `make up-serve` | Split + веб-просмотр (порт 5000) |
+| `make ingest` | Индексация .hbk (split) |
+| `make ingest-full` | Индексация (full) |
+| `make index-status` | Статус индекса |
+| `make unpack-help` | Распаковка .hbk в data/unpacked (без индекса) |
+| `make init` | ingest + load-snippets + load-standards |
+| `make reinit ARGS='--force'` | Стереть коллекции и кэш, затем init |
+| `make load-snippets` | Загрузить сниппеты из SNIPPETS_DIR |
+| `make load-standards` | Загрузить стандарты (v8-code-style, v8std) |
+| `make snippets` | parse-fastcode + parse-helpf + load-snippets |
+
+Аргументы CLI: `make ingest ARGS="--no-cache --workers 4"`.
+
+---
 
 ### Режимы развёртывания
 
-**Split (по умолчанию)** — `mcp` только MCP API (быстрый отклик), `ingest-worker` — batch (ingest, cron, load-snippets, watchdog). Рекомендуется для большинства сценариев.
+- **Split (по умолчанию):** mcp (API) + ingest-worker (batch). Cron в ingest-worker.
+- **Full:** один контейнер mcp; cron раз в сутки. `make up-full`, `make ingest-full`.
+- **Serve:** split + веб (Flask:5000). Требуется `./data/unpacked`.
 
-```bash
-docker compose up -d
-make ingest   # индексация вручную
-```
+---
 
-**Split + serve** — дополнительно веб-просмотр справки (Flask, порт 5000). Требуется `./data/unpacked` с распакованной справкой.
+### Ingest: мультикаталоги и расписание
 
-```bash
-docker compose --profile serve up -d
-```
+Ingest берёт .hbk из `HELP_SOURCE_BASE` (подпапки = версии 1С). Путь к .hbk: `/opt/1cv8/8.3.27.../1cv8_ru.hbk` или `.../bin/1cv8_ru.hbk` (поиск рекурсивный).
 
-**Full** — один контейнер `mcp` выполняет всё: MCP API, ingest, cron, watchdog. Подходит для локальной разработки или малой нагрузки.
+- **Вручную:** `make ingest` или `docker compose exec ingest-worker python -m onec_help ingest`
+- **Cron:** full — 3:00; split — настраивается в ingest-worker
+- **Watchdog** (`WATCHDOG_ENABLED=1`): мониторинг новых .hbk + pending memory
 
-```bash
-docker compose -f docker-compose.full.yml up -d
-# или: make up-full
-# Индексация: make ingest-full
-```
+Кэш: volume `ingest_cache`. При `[ingest] WARN: ingest cache read failed` — права, диск. `reinit --force` стирает кэш.
 
-**Пересборка при изменениях:** `make build && make up` (сборка образов, затем запуск). Full: `make build-full && make up-full`. Подробнее — [docs/architecture.md](docs/architecture.md).
+---
 
-### Только распаковка .hbk (выгрузка справки в папку)
+### Эмбеддинги
 
-Чтобы **только распаковать** .hbk в свою директорию (без индексации и MCP):
+| Режим | Описание |
+|-------|----------|
+| `none` | Плейсхолдеры; только search_1c_help_keyword |
+| `deterministic` | 384 dim без модели; воспроизводимый поиск |
+| `openai_api` | LM Studio, Ollama; `EMBEDDING_API_URL` в .env |
+| `local` | sentence-transformers в контейнере; build-arg при сборке |
 
-```bash
-make unpack-help
-# или с параметрами:
-make unpack-help HELP_SOURCE_PATH=/opt/1cv8 UNPACK_OUTPUT=data/unpacked HELP_LANGS=ru
-```
+При `openai_api`/`none`/`deterministic` sentence-transformers не ставится. Сборка без них: `EMBEDDING_BACKEND=none docker compose build`.
 
-Либо напрямую:
-
-```bash
-docker compose run --rm \
-  -v /opt/1cv8:/input:ro \
-  -v $(pwd)/data/unpacked:/output \
-  mcp python -m onec_help unpack-dir /input -o /output -l ru
-```
-
-Структура выхода: `output/<версия>/<язык>/<имя_архива>/` (например `unpacked/8.3.27.1859/ru/1cv8_ru/`). Только распаковка, конвертация в Markdown и индексация не выполняются.
-
-Локально та же логика:
-
-```bash
-python -m onec_help unpack-dir /opt/1cv8 -o ./unpacked -l ru
-```
-
-### Мультикаталоги (ingest): несколько версий 1С
-
-Исходные каталоги **не изменяются**: из них читаются только `*.hbk`, распаковка и временные файлы — только внутри контейнера, после индексации всё удаляется.
-
-**Из коробки** монтируется `/opt/1cv8` (только чтение). Ingest просматривает подпапки (`8.3.27.1859`, `8.3.27.1719`) и считает каждую версией 1С. Язык по имени файла (`*_ru.hbk` и т.д.): по умолчанию `HELP_LANGUAGES=ru`.
-
-- **При старте (full):** если смонтирован `/opt/1cv8`, ingest один раз запускается в фоне (логи: `docker compose -f docker-compose.full.yml exec mcp tail -f /app/var/log/ingest.log`).
-- **Вручную:** `make ingest` (split) или `make ingest-full` (full).
-- **По расписанию:** cron в full-режиме — раз в сутки в 3:00; в split — настраивается в ingest-worker.
-- **Watchdog** (при `WATCHDOG_ENABLED=1`): мониторинг новых .hbk в HELP_SOURCE_BASE; при появлении или изменении — полный ingest; каждые N минут — обработка pending memory (эмбеддинги, сохранённые при недоступном API). Логи: `tail -f /app/var/log/watchdog.log`.
-
-Дополнительно:
-
-```bash
-make ingest ARGS="--workers 4"
-make ingest ARGS="--dry-run"   # сколько .hbk будет обработано
-make ingest ARGS="--max-tasks 1"  # ограничить объём за один запуск
-make ingest ARGS="--recreate"  # пересоздать коллекцию (после смены модели/размерности)
-make ingest ARGS="--no-cache"  # полная переиндексация без кэша
-```
-
-**Сколько топиков:** полная справка (один 1cv8_ru.hbk) — обычно 10–25 тыс. страниц. Проверка индексации: `docker compose exec mcp python -m onec_help index-status` или MCP **get_1c_help_index_status** (локально: `python -m onec_help index-status`).
-
-**Troubleshooting: файлы переиндексируются при каждом перезапуске.** Проверьте: (1) в Docker используется volume `ingest_cache`; (2) при `[ingest] WARN: ingest cache read failed` — права, место на диске; (3) `reinit --force` стирает кэш. Подробнее — [AGENTS.md](AGENTS.md).
-
-**Таймаут:** полная индексация может занимать 15–60 минут. Запуск в фоне (split: ingest-worker; full: mcp):
-
-```bash
-docker compose exec -d ingest-worker sh -c 'python -m onec_help ingest >> /app/var/log/ingest.log 2>&1'
-docker compose exec ingest-worker tail -f /app/var/log/ingest.log
-```
-
-### Эмбеддинги: отключение, локальная модель, внешний сервис
-
-- **Отключение эмбеддингов** (`EMBEDDING_BACKEND=none`): семантический поиск отключён, в индекс пишутся плейсхолдер-векторы; поиск по смыслу не работает, но **search_1c_help_keyword** (по ключевым словам) и остальные инструменты MCP работают. Подходит для экономии ресурсов или когда нужен только поиск по строкам.
-- **Deterministic** (`deterministic`): детерминированные векторы 384 dim без внешней модели — хэш от токенов текста. Семантический поиск ограничен, но воспроизводим. Без зависимостей.
-- **Локальная модель** (`local`): sentence-transformers в контейнере. Нужна установка зависимостей для эмбеддингов (см. ниже).
-- **Внешний API** (`openai_api`): LM Studio, Ollama, llama.cpp server и т.п. Задайте в `.env`:
-
-```env
-EMBEDDING_BACKEND=openai_api
-EMBEDDING_API_URL=http://llama:8080/v1
-EMBEDDING_MODEL=your-embedding-model
-EMBEDDING_DIMENSION=768
-```
-
-Если сервис эмбеддингов в том же Compose, задайте `EMBEDDING_API_URL` по имени сервиса. Размерность вектора при openai_api определяется автоматически по первому ответу API; при смене модели пересоздайте коллекцию: `make ingest ARGS="--recreate"`.
-
-**Нужно ли ставить зависимости для эмбеддингов (sentence-transformers), если используется сторонний сервис, `none` или `deterministic`?** Нет. При `openai_api`, `none` или `deterministic` sentence-transformers не используются. При сборке образа зависимости для эмбеддингов ставятся **только если** `EMBEDDING_BACKEND=local` (значение передаётся как build-arg). Если в `.env` задано `EMBEDDING_BACKEND=none`, `openai_api` или `deterministic`, при `docker compose build` образ будет собран без sentence-transformers — меньше по размеру:
-
-```bash
-# В .env: EMBEDDING_BACKEND=none  (или openai_api)
-docker compose build
-# или явно:
-docker build --build-arg EMBEDDING_BACKEND=none -t onec-help .
-```
-
-Одна и та же переменная `EMBEDDING_BACKEND` задаёт и режим в рантайме, и необходимость установки зависимостей при сборке.
+---
 
 ### Один контейнер без Compose
-
-Только MCP (Qdrant на хосте):
 
 ```bash
 docker run --rm -d -p 5050:5050 \
   -v /opt/1cv8:/opt/1cv8:ro \
-  -e QDRANT_HOST=host.docker.internal \
-  -e QDRANT_PORT=6333 \
+  -e QDRANT_HOST=host.docker.internal -e QDRANT_PORT=6333 \
   -e HELP_SOURCE_BASE=/opt/1cv8 \
-  --name onec-help-mcp \
-  $(docker build -q .) \
+  --name onec-help-mcp $(docker build -q .) \
   /app/entrypoint.sh python -m onec_help mcp /data --transport streamable-http --host 0.0.0.0 --port 5050
 ```
-
-MCP: http://localhost:5050/mcp.
 
 ## MCP
 
@@ -279,7 +247,7 @@ ruff check src tests && ruff format --check src tests
 
 ## CI (GitHub Actions)
 
-- **test** — pytest, покрытие ≥90%, матрица Python 3.10–3.12; отчёт загружается в Codecov (action v3, для публичного репо токен не нужен). Чтобы плашка Coverage отображала процент, один раз добавьте репозиторий на [codecov.io](https://codecov.io) (вход через GitHub).
+- **test** — pytest, покрытие ≥90%, матрица Python 3.10–3.14; отчёт в Codecov (для публичного репо токен не нужен). Добавьте репо на [codecov.io](https://codecov.io) для отображения бейджа.
 - **lint** — ruff check и ruff format.
 - **deploy** — сборка и push Docker-образа в GHCR (при push в main/master или вручную).
 - **release** — при push тега `v*`: сборка sdist и создание GitHub Release; отдельно — сборка и push Docker-образа с тегом версии.
