@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import unicodedata
 import urllib.request
@@ -97,6 +98,40 @@ def _embedding_workers() -> int:
         )
     except ValueError:
         return DEFAULT_EMBEDDING_WORKERS
+
+
+def _embedding_max_concurrent() -> int | None:
+    """Max concurrent API batch requests (global). None = no limit. Use to avoid overloading LM Studio."""
+    v = (os.environ.get("EMBEDDING_MAX_CONCURRENT") or "").strip()
+    if not v:
+        return None
+    try:
+        n = int(v)
+        return max(1, n) if n > 0 else None
+    except ValueError:
+        return None
+
+
+_api_semaphore: threading.Semaphore | None = None
+_api_semaphore_lock = threading.Lock()
+
+
+def _acquire_api_slot() -> None:
+    """Acquire a slot for API request if EMBEDDING_MAX_CONCURRENT is set."""
+    global _api_semaphore
+    max_c = _embedding_max_concurrent()
+    if max_c is None:
+        return
+    with _api_semaphore_lock:
+        if _api_semaphore is None:
+            _api_semaphore = threading.Semaphore(max_c)
+    _api_semaphore.acquire()
+
+
+def _release_api_slot() -> None:
+    """Release API slot after request."""
+    if _api_semaphore is not None:
+        _api_semaphore.release()
 
 
 _resolved_api_model_id: str | None = None
@@ -358,6 +393,7 @@ def _get_embedding_api_single(text: str) -> list[float]:
     timeout = _embedding_timeout()
     last_err = None
     for attempt in range(RETRY_ATTEMPTS):
+        _acquire_api_slot()
         try:
             req = urllib.request.Request(
                 url,
@@ -384,6 +420,8 @@ def _get_embedding_api_single(text: str) -> list[float]:
             if attempt < RETRY_ATTEMPTS - 1:
                 delay = RETRY_BASE_DELAY * (2**attempt)
                 time.sleep(delay)
+        finally:
+            _release_api_slot()
     global _resolved_api_model_id
     _resolved_api_model_id = None
     _log_fallback(f"embedding API error/timeout, using placeholder: {type(last_err).__name__}")
@@ -405,6 +443,7 @@ def _get_embedding_api_batch(texts: list[str]) -> list[list[float]]:
     timeout = _embedding_timeout()
     last_err = None
     for attempt in range(RETRY_ATTEMPTS):
+        _acquire_api_slot()
         try:
             req = urllib.request.Request(
                 url,
@@ -438,6 +477,8 @@ def _get_embedding_api_batch(texts: list[str]) -> list[list[float]]:
             if attempt < RETRY_ATTEMPTS - 1:
                 delay = RETRY_BASE_DELAY * (2**attempt)
                 time.sleep(delay)
+        finally:
+            _release_api_slot()
     global _resolved_api_model_id
     _resolved_api_model_id = None
     _log_fallback(

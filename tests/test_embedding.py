@@ -192,6 +192,22 @@ def test_embedding_force_batch() -> None:
     importlib.reload(embedding_mod)
 
 
+def test_embedding_max_concurrent() -> None:
+    """EMBEDDING_MAX_CONCURRENT limits concurrent API requests; None when unset."""
+    import importlib
+
+    with patch.dict("os.environ", {"EMBEDDING_MAX_CONCURRENT": "8"}, clear=False):
+        importlib.reload(embedding_mod)
+        assert embedding_mod._embedding_max_concurrent() == 8
+    with patch.dict("os.environ", {"EMBEDDING_MAX_CONCURRENT": ""}, clear=False):
+        importlib.reload(embedding_mod)
+        assert embedding_mod._embedding_max_concurrent() is None
+    with patch.dict("os.environ", {"EMBEDDING_MAX_CONCURRENT": "1"}, clear=False):
+        importlib.reload(embedding_mod)
+        assert embedding_mod._embedding_max_concurrent() == 1
+    importlib.reload(embedding_mod)
+
+
 def test_log_fallback() -> None:
     """_log_fallback logs first time and every 100th."""
     import importlib
