@@ -2,6 +2,7 @@
 
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -214,7 +215,21 @@ def build_index(
             workers=embedding_workers,
         )
         if len(vectors) != len(items):
-            continue
+            # Retry once with same batch (transient API/parsing issue)
+            vectors_retry = embedding.get_embedding_batch(
+                texts_for_embedding,
+                batch_size=embedding_batch_size,
+                workers=embedding_workers,
+            )
+            if len(vectors_retry) != len(items):
+                print(
+                    f"[indexer] WARN: embedding count mismatch ({len(vectors_retry)} != {len(items)}), "
+                    f"skipping batch of {len(items)} files",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                continue
+            vectors = vectors_retry
         points = []
         for idx_in_items, (rel_str, text, title, point_index, outgoing_links) in enumerate(items):
             vector = vectors[idx_in_items]
