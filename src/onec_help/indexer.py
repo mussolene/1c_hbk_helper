@@ -178,8 +178,16 @@ def build_index(
 
     collection_created = False
     total = 0
+    batch_num = 0
     for batch_start in range(0, len(paths_to_index), batch_size):
+        batch_num += 1
         batch_paths = paths_to_index[batch_start : batch_start + batch_size]
+        batch_end = min(batch_start + batch_size, len(paths_to_index))
+        print(
+            f"[indexer] batch {batch_num}: files {batch_start + 1}-{batch_end} of {len(paths_to_index)}",
+            file=sys.stderr,
+            flush=True,
+        )
         items: list[
             tuple[str, str, str, int, list[dict[str, Any]]]
         ] = []  # (rel_str, text, title, point_index, outgoing_links)

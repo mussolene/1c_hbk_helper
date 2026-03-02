@@ -400,14 +400,15 @@ def test_run_ingest_max_tasks(mock_qdrant: MagicMock, mock_task: MagicMock, tmp_
         (tmp_path / "v" / name).write_bytes(b"x")
     mock_task.return_value = (None, None, "v", "ru", "skip")
     mock_qdrant.return_value.collection_exists.return_value = True
-    n = run_ingest(
-        source_dirs_with_versions=[(tmp_path, "v")],
-        languages=["ru"],
-        temp_base=tmp_path / "temp",
-        max_tasks=2,
-        max_workers=1,
-        verbose=False,
-    )
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": str(tmp_path / "cache.db")}, clear=False):
+        n = run_ingest(
+            source_dirs_with_versions=[(tmp_path, "v")],
+            languages=["ru"],
+            temp_base=tmp_path / "temp",
+            max_tasks=2,
+            max_workers=1,
+            verbose=False,
+        )
     assert mock_task.call_count == 2, "_unpack_and_build_docs should be called max_tasks=2 times"
     assert n == 0
 
@@ -498,13 +499,15 @@ def test_run_ingest_unpack_fails_one_task(
     (tmp_path / "v" / "1cv8_ru.hbk").write_bytes(b"x")
     mock_unpack.side_effect = RuntimeError("7z failed")
     mock_qdrant.return_value.collection_exists.return_value = True
-    n = run_ingest(
-        source_dirs_with_versions=[(tmp_path, "v")],
-        languages=["ru"],
-        temp_base=tmp_path / "temp",
-        max_workers=1,
-        verbose=False,
-    )
+    cache_db = tmp_path / "cache.db"
+    with patch.dict("os.environ", {"INGEST_CACHE_FILE": str(cache_db)}, clear=False):
+        n = run_ingest(
+            source_dirs_with_versions=[(tmp_path, "v")],
+            languages=["ru"],
+            temp_base=tmp_path / "temp",
+            max_workers=1,
+            verbose=False,
+        )
     assert n == 0
     mock_build_index.assert_not_called()
 

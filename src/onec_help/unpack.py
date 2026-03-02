@@ -8,6 +8,14 @@ import zlib
 from io import BytesIO
 from pathlib import Path
 
+# Таймаут 7z/unzip (секунды). UNPACK_TIMEOUT env; по умолчанию 1800 (30 мин)
+def _unpack_timeout() -> int:
+    try:
+        v = (os.environ.get("UNPACK_TIMEOUT") or "1800").strip()
+        return max(60, int(v))
+    except (TypeError, ValueError):
+        return 1800
+
 
 def ensure_dir(path) -> None:
     """Create directory if it does not exist."""
@@ -49,6 +57,7 @@ def _try_unzip(archive_path: Path, output_dir: Path) -> bool:
         ["unzip", "-o", "-q", str(archive_path), "-d", str(output_dir)],
         capture_output=True,
         text=True,
+        timeout=_unpack_timeout(),
     )
     return result.returncode == 0
 
@@ -130,12 +139,13 @@ def unpack_hbk(path_to_hbk, output_dir) -> None:
 
     # 1) 7z — auto, all formats, cab, zip (mapui/schemui sometimes CAB)
     result = None
+    timeout = _unpack_timeout()
     try:
         for fmt in [None, "*", "cab", "zip"]:
             cmd = ["7z", "x", str(path_to_hbk), f"-o{output_dir}", "-y"]
             if fmt:
                 cmd.insert(2, f"-t{fmt}")
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
             if result.returncode == 0 or _7z_extracted():
                 return
     except FileNotFoundError:

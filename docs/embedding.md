@@ -50,7 +50,7 @@
 | EMBEDDING_DIMENSION | Размерность при openai_api | авто |
 | EMBEDDING_BATCH_SIZE | Размер батча | 64 |
 | EMBEDDING_WORKERS | Параллельных воркеров (только openai_api) | 4 |
-| EMBEDDING_MAX_CONCURRENT | Глобальный семафор для API (ограничение нагрузки на LM Studio) | нет |
+| EMBEDDING_MAX_CONCURRENT | Глобальный семафор для API; ожидание слота — таймаут 300 с (избежание deadlock) | нет |
 | EMBEDDING_TIMEOUT | Таймаут одиночного запроса (с) | 60 |
 | EMBEDDING_BATCH_TIMEOUT | Таймаут batch-запроса (с) | max(timeout, 30 + batch/10) |
 | EMBEDDING_FORCE_BATCH | 1/true — макс. батч (256) и воркеры (16) | 0 |

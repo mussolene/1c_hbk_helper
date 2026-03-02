@@ -5,6 +5,7 @@ See docs/help_formats.md for formal spec."""
 import html
 import os
 import re
+import sys
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -156,6 +157,13 @@ def _legacy_body_to_md(body) -> str:
 # Справка 1С: пробуем UTF-8, затем CP1251 (при ошибке декода UTF-8 для 1251-файлов)
 _ENCODINGS_UTF8_FIRST = ("utf-8", "cp1251", "cp866", "latin-1")
 
+# Макс. размер HTML (байты). HELP_HTML_MAX_BYTES env; файлы больше — пропускаются (BeautifulSoup может виснуть).
+def _html_max_bytes() -> int:
+    try:
+        return max(1024 * 100, int(os.environ.get("HELP_HTML_MAX_BYTES", "10485760")))
+    except (TypeError, ValueError):
+        return 10 * 1024 * 1024
+
 
 def _looks_like_utf8_mojibake(text: str) -> bool:
     """True, если текст похож на кракозябры: UTF-8 байты прочитаны как однобайтовая кодировка.
@@ -229,7 +237,18 @@ def read_file_with_encoding_fallback(path: Path, encodings: tuple[str, ...] | No
 
 
 def _read_html_file(path: Path) -> str:
-    """Read file content; try utf-8, then cp1251/cp866/latin-1 for legacy 1C help."""
+    """Read file content; try utf-8, then cp1251/cp866/latin-1. Skip files over HELP_HTML_MAX_BYTES."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return ""
+    if size > _html_max_bytes():
+        print(
+            f"[html2md] skip {path.name} ({size} bytes > {_html_max_bytes()}): too large",
+            file=sys.stderr,
+            flush=True,
+        )
+        return ""
     return read_file_with_encoding_fallback(path)
 
 
@@ -237,6 +256,7 @@ def html_to_md_content(html_path) -> str:
     """
     Extract help article from HTML and return Markdown string.
     Sections: title, description, syntax, parameters, return value, examples, see also.
+    Skips files over HELP_HTML_MAX_BYTES to avoid BeautifulSoup hang on huge HTML.
     """
     path = Path(html_path)
     if not path.exists():

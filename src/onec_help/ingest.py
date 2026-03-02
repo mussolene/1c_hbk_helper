@@ -327,10 +327,17 @@ def _persist_ingest_status_sqlite(
                     cat = "unpack" if "unpack" in err.lower() or "7z" in err else "other"
                     if "embed" in err.lower() or "429" in err or "timeout" in err.lower():
                         cat = "embed"
+                        hint = " Рекомендация: проверьте EMBEDDING_API_URL, EMBEDDING_TIMEOUT; перезапустите ingest."
+                        err_stored = (err[:450] + hint) if len(err) + len(hint) > 500 else err + hint
                     elif "qdrant" in err.lower() or "upsert" in err.lower():
                         cat = "index"
+                        err_stored = err[:500]
                     elif "build" in err.lower() or "html" in err.lower():
                         cat = "build"
+                        err_stored = err[:500]
+                    else:
+                        err_stored = err[:500]
+                    path_for_db = ft.get("path_full") or ft.get("path", "")
                     conn.execute(
                         f"""INSERT INTO {_STATUS_TABLE_FAILED}
                             (run_id, version, language, path, error, error_category)
@@ -339,8 +346,8 @@ def _persist_ingest_status_sqlite(
                             run_id,
                             ft.get("version", ""),
                             ft.get("language", ""),
-                            ft.get("path", ""),
-                            err[:500],
+                            path_for_db,
+                            err_stored[:500],
                             cat,
                         ),
                     )
@@ -893,6 +900,7 @@ def run_ingest(
                         failed_tasks_list.append(
                             {
                                 "path": path_hbk.name,
+                                "path_full": str(path_hbk),
                                 "version": version,
                                 "language": language,
                                 "error": (err_msg or "unknown").split("\n")[0].strip()[:200],
@@ -1039,7 +1047,56 @@ def run_ingest(
                             shutil.rmtree(md_dir.parent)
                         except OSError:
                             pass
-                except Exception:
+                except Exception as e:
+                    err_msg = f"{type(e).__name__}: {e}"
+                    with state_lock:
+                        failed_tasks_list.append(
+                            {
+                                "path": path_hbk.name,
+                                "path_full": str(path_hbk),
+                                "version": version,
+                                "language": language,
+                                "error": err_msg,
+                            }
+                        )
+                        completed_files.append(
+                            {
+                                "path": path_hbk.name,
+                                "version": version,
+                                "language": language,
+                                "points": 0,
+                                "status": "fail",
+                            }
+                        )
+                        failed.append((path_hbk, version, language, err_msg))
+                        state["done_tasks"] = done
+                        state["total_points"] = total_indexed
+                    for fo in folders:
+                        if fo["version"] == version and fo["language"] == language:
+                            fo["err_count"] = fo.get("err_count", 0) + 1
+                            fo["tasks_done"] = fo.get("tasks_done", 0) + 1
+                            if fo["tasks_done"] + fo.get("err_count", 0) >= fo["hbk_count"]:
+                                fo["status"] = "done"
+                            break
+                    _write_ingest_status(
+                        started_at=started_at,
+                        embedding_backend=embedding_backend,
+                        total_tasks=len(tasks),
+                        done_tasks=done,
+                        total_points=total_indexed,
+                        folders=folders,
+                        status="in_progress",
+                        failed_tasks=failed_tasks_list,
+                        completed_files=completed_files,
+                        max_workers=max_workers,
+                        embedding_workers=embedding_workers,
+                    )
+                    if verbose:
+                        _log(f"[ingest] [{done}/{len(tasks)}] indexing failed {version}/{language} — {path_hbk}: {err_msg}")
+                    try:
+                        shutil.rmtree(md_dir.parent)
+                    except OSError:
+                        pass
                     raise
     finally:
         # Всегда пишем завершение в кэш — index-status читает реальный статус из той же БД

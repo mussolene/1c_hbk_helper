@@ -128,9 +128,13 @@ def _embedding_max_concurrent() -> int | None:
 _api_semaphore: threading.Semaphore | None = None
 _api_semaphore_lock = threading.Lock()
 
+# Таймаут ожидания слота (секунды). При зависании одного запроса остальные не блокируются вечно.
+_ACQUIRE_SLOT_TIMEOUT = 300
+
 
 def _acquire_api_slot() -> None:
-    """Acquire a slot for API request if EMBEDDING_MAX_CONCURRENT is set."""
+    """Acquire a slot for API request if EMBEDDING_MAX_CONCURRENT is set.
+    Raises TimeoutError if slot not available within _ACQUIRE_SLOT_TIMEOUT (avoid deadlock)."""
     global _api_semaphore
     max_c = _embedding_max_concurrent()
     if max_c is None:
@@ -138,7 +142,11 @@ def _acquire_api_slot() -> None:
     with _api_semaphore_lock:
         if _api_semaphore is None:
             _api_semaphore = threading.Semaphore(max_c)
-    _api_semaphore.acquire()
+    if not _api_semaphore.acquire(timeout=_ACQUIRE_SLOT_TIMEOUT):
+        raise TimeoutError(
+            f"embedding API slot not available within {_ACQUIRE_SLOT_TIMEOUT}s "
+            "(another request may be stuck)"
+        )
 
 
 def _release_api_slot() -> None:

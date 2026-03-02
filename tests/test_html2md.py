@@ -44,6 +44,15 @@ def test_html_to_md_content_missing() -> None:
     assert html_to_md_content(Path("/nonexistent")) == ""
 
 
+def test_read_html_file_skips_oversized(tmp_path: Path, monkeypatch) -> None:
+    """Files over HELP_HTML_MAX_BYTES are skipped to avoid BeautifulSoup hang."""
+    monkeypatch.setenv("HELP_HTML_MAX_BYTES", "200000")
+    f = tmp_path / "big.html"
+    f.write_text("<html><body>" + "x" * 250_000 + "</body></html>", encoding="utf-8")
+    text = _read_html_file(f)
+    assert text == ""
+
+
 def test_read_html_file_utf8(tmp_path: Path) -> None:
     f = tmp_path / "a.html"
     f.write_text("<html><body>Test</body></html>", encoding="utf-8")

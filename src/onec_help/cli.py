@@ -454,12 +454,20 @@ def _render_index_status_rich(
         if failed_tasks:
             total_err = total_err or len(failed_tasks)
             line(f"├{sep}┤")
-            line(f"│ Failed ({total_err})  ver/lang = version/language".ljust(w - 1) + "│")
+            line(
+                f"│ Failed ({total_err})  ver = метка каталога (HELP_SOURCE_BASE или path:ver)".ljust(
+                    w - 1
+                )
+                + "│"
+            )
             for ft in failed_tasks[:10]:
-                path = (ft.get("path") or "?").replace(".hbk", "")
+                path_raw = ft.get("path") or "?"
+                path = path_raw.replace(".hbk", "")
                 err = (ft.get("error") or "").strip()
                 ver = ft.get("version", "") or "?"
                 lang = ft.get("language", "") or "?"
+                if len(path) > w - 10:
+                    path = "…" + path[-(w - 11) :]
                 line(f"│   {ver}/{lang} {path}".ljust(w - 1) + "│")
                 if err:
                     err_short = err[: (w - 8)] + ("…" if len(err) > w - 8 else "")
