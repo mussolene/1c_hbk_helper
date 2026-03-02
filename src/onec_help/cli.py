@@ -1807,7 +1807,10 @@ def main() -> int:
         help="Создать снапшот коллекции onec_help и сохранить в data/backup/",
     )
     p_qdrant_backup.add_argument(
-        "--output-dir", "-o", type=str, default="data/backup",
+        "--output-dir",
+        "-o",
+        type=str,
+        default="data/backup",
         help="Каталог для снапшота (default: data/backup)",
     )
     p_qdrant_backup.set_defaults(func=cmd_qdrant_backup)
@@ -1817,11 +1820,16 @@ def main() -> int:
         help="Восстановить коллекцию onec_help из снапшота в data/backup/",
     )
     p_qdrant_restore.add_argument(
-        "--file", "-f", type=str, default=None,
+        "--file",
+        "-f",
+        type=str,
+        default=None,
         help="Путь к снапшоту (default: последний в data/backup/)",
     )
     p_qdrant_restore.add_argument(
-        "--backup-dir", type=str, default="data/backup",
+        "--backup-dir",
+        type=str,
+        default="data/backup",
         help="Каталог со снапшотами (default: data/backup)",
     )
     p_qdrant_restore.set_defaults(func=cmd_qdrant_restore)
