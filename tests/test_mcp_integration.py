@@ -17,11 +17,11 @@ pytestmark = pytest.mark.skipif(
 
 
 def _call_mcp_via_http(tool: str, args: dict) -> str:
-    """Call MCP tool via HTTP. Requires streamable-http MCP on localhost:5050."""
+    """Call MCP tool via HTTP. Requires streamable-http MCP on localhost:8050."""
     import json
     import urllib.request
 
-    url = os.environ.get("MCP_URL", "http://localhost:5050/mcp")
+    url = os.environ.get("MCP_URL", "http://localhost:8050/mcp")
     # Minimal JSON-RPC for MCP list tools / call tool
     body = json.dumps(
         {

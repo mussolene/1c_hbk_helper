@@ -95,7 +95,7 @@ docker compose up -d
 {
   "mcpServers": {
     "1c-help": {
-      "url": "http://localhost:5050/mcp"
+      "url": "http://localhost:8050/mcp"
     },
     "lsp-bsl-bridge": {
       "command": "docker",
@@ -171,7 +171,7 @@ document_diagnostics(uri="file:///projects/src/DataProcessors/.../Forms/.../Ext/
 {
   "mcpServers": {
     "1c-help": {
-      "url": "http://localhost:5050/mcp"
+      "url": "http://localhost:8050/mcp"
     },
     "lsp-bsl-bridge": {
       "command": "docker",

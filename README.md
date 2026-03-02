@@ -18,7 +18,7 @@
 ## Безопасность
 
 - **Веб (serve)** и **MCP по HTTP** не имеют встроенной аутентификации. Предназначены **только** для доверенной среды (localhost, VPN, внутренняя сеть). При экспозиции в интернет — обязателен обратный прокси с аутентификацией.
-- Не выставляйте порты 5000 (Flask) и 5050 (MCP) в интернет без обратного прокси с аутентификацией (nginx + Basic Auth, API key и т.п.).
+- Не выставляйте порты 5000 (Flask) и 8050 (MCP) в интернет без обратного прокси с аутентификацией (nginx + Basic Auth, API key и т.п.).
 - **HELP_SERVE_ALLOWED_DIRS** — обязательна для serve: без неё форма просмотра справки не принимает пути (защита от чтения произвольных каталогов). Задайте список разрешённых базовых каталогов через запятую.
 - Секреты и пароли задавайте только через переменные окружения, не храните в коде или в репозитории.
 - CLI (аргументы `--sources-file`, пути к каталогам) предназначен для доверенного запуска; не передавайте недоверенный ввод в аргументы.
@@ -83,7 +83,7 @@ pip install -e ".[dev]"
 | `INGEST_FAILED_LOG` | Файл для списка неудачных .hbk | — |
 | `MCP_TRANSPORT` | Транспорт MCP: `stdio`, `http` или `streamable-http` (для Docker/Cursor рекомендуется streamable-http) | `streamable-http` |
 | `MCP_HOST` | Хост для MCP HTTP | `127.0.0.1` |
-| `MCP_PORT` | Порт для MCP HTTP | `5050` |
+| `MCP_PORT` | Порт для MCP HTTP | `8050` |
 | `MCP_PATH` | URL-путь эндпоинта MCP | `/mcp` |
 | `PORT` | Порт веб-сервера (serve) | `5000` |
 | `SERVE_PORT` | Порт serve в Docker (split, профиль serve) | `5000` |
@@ -114,7 +114,7 @@ pip install -e ".[dev]"
 | **docker compose** | Запуск в контейнерах (рекомендуется) |
 | **make** | Обёртки над compose; `make help` — полный список |
 
-**Быстрый старт (Docker):** `make up` → `make ingest` → MCP: http://localhost:5050/mcp. Данные в `./data/`.
+**Быстрый старт (Docker):** `make up` → `make ingest` → MCP: http://localhost:8050/mcp. Данные в `./data/`.
 
 ---
 
@@ -125,7 +125,7 @@ pip install -e ".[mcp]"
 # Qdrant (Docker): docker run -d -p 6333:6333 -v qdrant_data:/qdrant/storage qdrant/qdrant:v1.12.0
 
 HELP_SOURCE_BASE=/opt/1cv8 python -m onec_help ingest
-python -m onec_help mcp . --transport streamable-http --host 0.0.0.0 --port 5050
+python -m onec_help mcp . --transport streamable-http --host 0.0.0.0 --port 8050
 python -m onec_help serve ./unpacked   # HELP_SERVE_ALLOWED_DIRS обязательна
 ```
 
@@ -135,7 +135,7 @@ python -m onec_help serve ./unpacked   # HELP_SERVE_ALLOWED_DIRS обязате�
 
 ### 2. Docker Compose
 
-Данные в `./data/`. MCP: http://localhost:5050/mcp.
+Данные в `./data/`. MCP: http://localhost:8050/mcp.
 
 **macOS:** Docker Desktop → Settings → Resources → File sharing — добавьте `/opt` (или `/opt/1cv8`).
 
@@ -210,12 +210,12 @@ Ingest берёт .hbk из `HELP_SOURCE_BASE` (подпапки = версии 
 ### Один контейнер без Compose
 
 ```bash
-docker run --rm -d -p 5050:5050 \
+docker run --rm -d -p 8050:8050 \
   -v /opt/1cv8:/opt/1cv8:ro \
   -e QDRANT_HOST=host.docker.internal -e QDRANT_PORT=6333 \
   -e HELP_SOURCE_BASE=/opt/1cv8 \
   --name onec-help-mcp $(docker build -q .) \
-  /app/entrypoint.sh python -m onec_help mcp /data --transport streamable-http --host 0.0.0.0 --port 5050
+  /app/entrypoint.sh python -m onec_help mcp /data --transport streamable-http --host 0.0.0.0 --port 8050
 ```
 
 ## MCP
@@ -231,9 +231,9 @@ docker run --rm -d -p 5050:5050 \
 
 **Рекомендация:** для точных имён — сначала **search_1c_help_keyword**; для общих вопросов — **search_1c_help**.
 
-Конфиг Cursor: **`.cursor/mcp.json`** (пример — `docs/mcp.json.example`). MCP по HTTP (порт 5050). После правок конфига Cursor перезапускают.
+Конфиг Cursor: **`.cursor/mcp.json`** (пример — `docs/mcp.json.example`). MCP по HTTP (порт 8050). После правок конфига Cursor перезапускают.
 
-**Если Cursor пишет «connect ECONNREFUSED 127.0.0.1:5050»:** проверьте `docker compose up -d`, `docker compose ps`, `docker compose logs mcp`.
+**Если Cursor пишет «connect ECONNREFUSED 127.0.0.1:8050»:** проверьте `docker compose up -d`, `docker compose ps`, `docker compose logs mcp`.
 
 ## Тесты и линт
 
@@ -245,12 +245,12 @@ ruff check src tests && ruff format --check src tests
 
 Покрытие не менее 70% (исключены из расчёта: `__main__.py`, `tests/`).
 
-## CI (GitHub Actions)
+## CI
 
-- **test** — pytest, покрытие ≥70%, матрица Python 3.10–3.14; отчёт в Codecov (для публичного репо токен не нужен). Добавьте репо на [codecov.io](https://codecov.io) для отображения бейджа.
-- **lint** — ruff check и ruff format.
-- **deploy** — сборка и push Docker-образа в GHCR (при push в main/master или вручную).
-- **release** — при push тега `v*`: сборка sdist и создание GitHub Release; отдельно — сборка и push Docker-образа с тегом версии.
+- **test** — pytest, покрытие ≥70%, матрица Python 3.10–3.14; Codecov (`CODECOV_TOKEN` в secrets).
+- **lint** — ruff check, ruff format.
+- **commitlint** — conventional commits.
+- **release** — при push тега `v*`: changelog (git-cliff), sdist, GitHub Release.
 
 ## Документация
 

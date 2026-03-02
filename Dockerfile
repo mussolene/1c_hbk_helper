@@ -40,7 +40,7 @@ EXPOSE 5000
 ENV HELP_PATH=/data
 VOLUME ["/data"]
 
-# Healthcheck removed from image — set per-service in docker-compose (Flask :5000 vs MCP :5050)
+# Healthcheck removed from image — set per-service in docker-compose (Flask :5000 vs MCP :8050)
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python", "-m", "onec_help", "serve", "/data"]

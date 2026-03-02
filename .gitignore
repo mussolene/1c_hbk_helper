@@ -36,6 +36,7 @@ htmlcov/
 
 # Data / artifacts (do not commit)
 data/
+deps/
 *.hbk
 functions_data.json
 unpacked/

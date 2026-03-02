@@ -1,11 +1,9 @@
 # По умолчанию: split mode — mcp только API, ingest-worker — batch (ingest, cron, load-snippets).
-# usage: docker compose up -d   или   make up
+# usage: docker compose -f docker-compose.base.yml -f docker-compose.yml up -d   или   make up
 #
-# Для одного контейнера (mcp выполняет всё): make up-full   или   docker compose -f docker-compose.full.yml up -d
+# Для одного контейнера: make up-full   или   docker compose -f docker-compose.base.yml -f docker-compose.full.yml up -d
 #
-include:
-  - docker-compose.base.yml
-
+# Объединение через -f (не include): иначе "services.mcp conflicts with imported resource".
 services:
   mcp:
     environment:
@@ -51,6 +49,7 @@ services:
       - ./data/ingest_cache:/app/var/ingest_cache
       - ./data/snippets:/data/snippets
       - ./data/standards:/data/standards
+      - ./data/backup:/data/backup
     command: ["sh", "-c", "sleep infinity"]
     depends_on:
       qdrant:

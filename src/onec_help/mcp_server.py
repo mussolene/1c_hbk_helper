@@ -276,7 +276,7 @@ def run_mcp(
     help_path: Path,
     transport: str = "stdio",
     host: str = "127.0.0.1",
-    port: int = 5050,
+    port: int = 8050,
     path: str = "/mcp",
 ) -> None:
     """Run MCP server. help_path: directory with .md or HTML.

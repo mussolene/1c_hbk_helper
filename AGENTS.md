@@ -42,7 +42,7 @@
 
 ## MCP и конфиг Cursor
 
-- MCP работает **в контейнере** по протоколу **streamable-http** (порт 5050). Рабочий конфиг: **`.cursor/mcp.json`** с полем `url: "http://localhost:5050/mcp"` (без command/stdio). Пример — `docs/mcp.json.example`.
+- MCP работает **в контейнере** по протоколу **streamable-http** (порт 8050). Рабочий конфиг: **`.cursor/mcp.json`** с полем `url: "http://localhost:8050/mcp"` (без command/stdio). Пример — `docs/mcp.json.example`.
 - **Skill и Rules:** примеры для индексации и синхронизации — `docs/cursor-examples/`. Папка `.cursor/` исключена из git; при настройке Cursor скопируйте содержимое `docs/cursor-examples/` в `.cursor/skills/` и `.cursor/rules/`. При доработке MCP или workflow — обновляйте `docs/cursor-examples/` как зависимость.
 - **Рекомендуемый порядок вызовов:**
   1. Ответ с кодом — `get_1c_code_answer` (при необходимости `code_only=True`).

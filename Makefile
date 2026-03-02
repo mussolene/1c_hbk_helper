@@ -3,20 +3,43 @@
 # Usage: make parse-fastcode | make load-snippets | make snippets
 # Pages: auto by default. Limit: ARGS="--pages 1-5 --no-fetch-detail"
 
+# Windows: PowerShell по умолчанию для make (иначе cmd, BSL_SET не сработает)
+ifeq ($(OS),Windows_NT)
+  SHELL := powershell.exe
+  .SHELLFLAGS := -NoProfile -Command
+endif
+
 ARGS ?=
 HELP_SOURCE_PATH ?= /opt/1cv8
 UNPACK_OUTPUT ?= data/unpacked
 HELP_LANGS ?= ru
 
-COMPOSE = docker compose
-COMPOSE_FULL = docker compose -f docker-compose.full.yml
+# -f base + overlay: merge вместо include (избегаем "conflicts with imported resource")
+COMPOSE = docker compose -f docker-compose.base.yml -f docker-compose.yml
+COMPOSE_FULL = docker compose -f docker-compose.base.yml -f docker-compose.full.yml
+
+# BSL_HOST_PROJECTS_ROOT: PowerShell ($env:) / export (sh) / set (cmd). Docker — слэши /
+BSL_ROOT = $(subst \\,/,$(CURDIR))
+ifneq ($(findstring powershell,$(SHELL))$(findstring pwsh,$(SHELL)),)
+  BSL_SET = $$env:BSL_HOST_PROJECTS_ROOT="$(BSL_ROOT)";
+else ifneq ($(findstring sh,$(SHELL)),)
+  BSL_SET = export BSL_HOST_PROJECTS_ROOT="$(BSL_ROOT)" &&
+else
+  BSL_SET = set "BSL_HOST_PROJECTS_ROOT=$(BSL_ROOT)" &&
+endif
 
 # По умолчанию split; для full добавлять -full к таргету
 INGEST_SERVICE = ingest-worker
 INDEX_STATUS_SERVICE = mcp
 
-.PHONY: build build-full parse-fastcode parse-helpf load-snippets load-snippets-from-project load-standards snippets
-.PHONY: up down up-full down-full bsl-start bsl-stop
+.PHONY: build build-full fetch-bsl-bridge parse-fastcode parse-helpf load-snippets load-snippets-from-project load-standards snippets
+.PHONY: up down up-full down-full bsl-start bsl-stop qdrant-logs qdrant-reset qdrant-backup qdrant-restore
+
+# bsl-bridge: локальный клон (Git URL в context не работает на Docker Windows)
+deps/mcp-bsl-lsp-bridge/.git/HEAD:
+	git clone --depth 1 https://github.com/SteelMorgan/mcp-bsl-lsp-bridge.git deps/mcp-bsl-lsp-bridge
+
+fetch-bsl-bridge: deps/mcp-bsl-lsp-bridge/.git/HEAD
 .PHONY: init init-full reinit reinit-full ingest ingest-full build-index build-index-full index-status index-status-full
 .PHONY: watch-index-status watch-index-status-full unpack-help help
 
@@ -98,23 +121,20 @@ watch-index-status-full:
 
 # Unpack .hbk без индексации
 unpack-help:
-	mkdir -p "$(UNPACK_OUTPUT)"
 	$(COMPOSE) run --rm -v "$(HELP_SOURCE_PATH):/input:ro" -v "$(abspath $(UNPACK_OUTPUT)):/output" mcp python -m onec_help unpack-dir /input -o /output -l $(HELP_LANGS) $(ARGS)
 
 # Start (split: qdrant + mcp + ingest-worker + bsl-bridge)
-# mkdir -p создаёт каталоги только если их нет — существующие данные не трогает
-up:
-	mkdir -p data/qdrant data/ingest_cache data/snippets data/standards
-	BSL_HOST_PROJECTS_ROOT="$$(pwd)" $(COMPOSE) up -d
+# Каталоги data/* создаются Docker при volume mount — кросс-платформенно
+up: deps/mcp-bsl-lsp-bridge/.git/HEAD
+	$(BSL_SET) $(COMPOSE) up -d
 
 # Start full (один контейнер mcp)
-up-full:
-	mkdir -p data/qdrant data/ingest_cache data/snippets data/standards
-	BSL_HOST_PROJECTS_ROOT="$$(pwd)" $(COMPOSE_FULL) up -d
+up-full: deps/mcp-bsl-lsp-bridge/.git/HEAD
+	$(BSL_SET) $(COMPOSE_FULL) up -d
 
 # Start split + serve
-up-serve:
-	BSL_HOST_PROJECTS_ROOT="$$(pwd)" $(COMPOSE) --profile serve up -d
+up-serve: deps/mcp-bsl-lsp-bridge/.git/HEAD
+	$(BSL_SET) $(COMPOSE) --profile serve up -d
 
 # Stop
 down:
@@ -124,11 +144,29 @@ down-full:
 	$(COMPOSE_FULL) down
 
 # BSL LS bridge only
-bsl-start:
-	BSL_HOST_PROJECTS_ROOT="$$(pwd)" $(COMPOSE) up -d bsl-bridge
+bsl-start: deps/mcp-bsl-lsp-bridge/.git/HEAD
+	$(BSL_SET) $(COMPOSE) up -d bsl-bridge
 
 bsl-stop:
 	$(COMPOSE) stop bsl-bridge
+
+# При qdrant exit 101: логи и сброс данных. Использовать оба -f!
+qdrant-logs:
+	docker compose -f docker-compose.base.yml -f docker-compose.yml logs qdrant
+
+# Удалить data/qdrant и перезапустить (если qdrant падает с 101 — повреждённые данные)
+qdrant-reset:
+	-$(COMPOSE) stop qdrant
+	docker run --rm -v "$(CURDIR)/data:/data" alpine rm -rf /data/qdrant
+	@echo "data/qdrant удалён. Запустите: make up"
+
+# Снапшот коллекции → data/backup/onec_help-{timestamp}.snapshot (для миграции между хостами)
+qdrant-backup:
+	$(COMPOSE) exec mcp python -m onec_help qdrant-backup -o /data/backup
+
+# Восстановить коллекцию из последнего снапшота в data/backup/ (в контейнере: /data/backup)
+qdrant-restore:
+	$(COMPOSE) exec mcp python -m onec_help qdrant-restore --backup-dir /data/backup
 
 help:
 	@echo "1C Help MCP — Docker (по умолчанию split)"
@@ -149,9 +187,18 @@ help:
 	@echo "  make build-index      Индексация из папки (ARGS=путь)"
 	@echo "  make index-status     Статус индекса"
 	@echo "  make watch-index-status  Статус в реальном времени"
+	@echo "  make fetch-bsl-bridge  Клонировать mcp-bsl-lsp-bridge (для Windows)"
 	@echo "  make up               Start split (qdrant + mcp + ingest-worker)"
 	@echo "  make up-full          Start full (один контейнер mcp)"
 	@echo "  make up-serve         Start split + serve"
 	@echo "  make down             Stop"
+	@echo "  make qdrant-logs      Логи qdrant (при exit 101)"
+	@echo "  make qdrant-reset     Удалить data/qdrant, перезапустить с пустым индексом"
+	@echo "  make qdrant-backup    Снапшот → data/backup/ (для миграции)"
+	@echo "  make qdrant-restore   Восстановить из data/backup/"
+	@echo ""
+	@echo "При qdrant exit 101: make qdrant-logs, затем make qdrant-reset && make up && make ingest"
+	@echo "Миграция индекса с другого хоста: docs/qdrant-migration.md"
+	@echo "Compose требует оба файла: -f docker-compose.base.yml -f docker-compose.yml"
 	@echo ""
 	@echo "Args: ARGS=...  make ingest ARGS='--dry-run'"

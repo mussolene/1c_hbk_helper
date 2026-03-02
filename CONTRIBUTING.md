@@ -41,11 +41,11 @@ chore: ruff format
 
 ### Валидация
 
-Сообщения коммитов проверяются в CI при создании Pull Request (workflow `Lint Commits`). Коммиты должны соответствовать формату, иначе проверка не пройдёт.
+Сообщения коммитов проверяются в CI при создании Pull Request (workflow `commitlint`). Коммиты должны соответствовать формату, иначе проверка не пройдёт.
 
 ### Release notes
 
-При пуше тега (`v*`) workflow Release генерирует changelog из conventional commits с помощью [git-cliff](https://git-cliff.org/) и использует его как описание GitHub Release.
+При пуше тега (`v*`) workflow Release генерирует changelog из conventional commits с помощью [git-cliff](https://git-cliff.org/) и создаёт GitHub Release.
 
 ### Версионирование
 

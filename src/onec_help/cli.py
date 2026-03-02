@@ -1165,7 +1165,7 @@ def cmd_mcp(args: argparse.Namespace) -> int:
         return 1
     transport = getattr(args, "transport", None) or os.environ.get("MCP_TRANSPORT", "stdio")
     host = getattr(args, "host", None) or os.environ.get("MCP_HOST", "127.0.0.1")
-    port = int(getattr(args, "port", None) or os.environ.get("MCP_PORT", "5050"))
+    port = int(getattr(args, "port", None) or os.environ.get("MCP_PORT", "8050"))
     path = getattr(args, "path", None) or os.environ.get("MCP_PATH", "/mcp")
     try:
         run_mcp(
@@ -1295,6 +1295,95 @@ def cmd_reinit(args: argparse.Namespace) -> int:
         return rc
     standards_args = _make_args(standards_path=os.environ.get("STANDARDS_DIR", ""))
     return cmd_load_standards(standards_args)
+
+
+def cmd_qdrant_backup(args: argparse.Namespace) -> int:
+    """Создать снапшот коллекции и сохранить в data/backup/."""
+    import urllib.request
+    from datetime import datetime
+
+    host = os.environ.get("QDRANT_HOST", "localhost")
+    port = int(os.environ.get("QDRANT_PORT", "6333"))
+    collection = os.environ.get("QDRANT_COLLECTION", "onec_help")
+    base = f"http://{host}:{port}"
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # 1. Create snapshot
+        req = urllib.request.Request(
+            f"{base}/collections/{collection}/snapshots",
+            data=b"",
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            data = json.loads(resp.read().decode())
+        name = data.get("result", {}).get("name")
+        if not name:
+            print("Error: no snapshot name in response", file=sys.stderr)
+            return 1
+
+        # 2. Download snapshot
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        out_path = out_dir / f"onec_help-{ts}.snapshot"
+        req = urllib.request.Request(f"{base}/collections/{collection}/snapshots/{name}")
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            out_path.write_bytes(resp.read())
+
+        print(f"Backup saved: {out_path}")
+        return 0
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_qdrant_restore(args: argparse.Namespace) -> int:
+    """Восстановить коллекцию из снапшота."""
+    import urllib.request
+
+    host = os.environ.get("QDRANT_HOST", "localhost")
+    port = int(os.environ.get("QDRANT_PORT", "6333"))
+    collection = os.environ.get("QDRANT_COLLECTION", "onec_help")
+    base = f"http://{host}:{port}"
+    backup_dir = Path(args.backup_dir)
+
+    if args.file:
+        snap_path = Path(args.file)
+        if not snap_path.is_file():
+            print(f"Error: file not found: {snap_path}", file=sys.stderr)
+            return 1
+    else:
+        snaps = sorted(backup_dir.glob("onec_help-*.snapshot"), reverse=True)
+        if not snaps:
+            print(f"Error: no snapshots in {backup_dir}", file=sys.stderr)
+            return 1
+        snap_path = snaps[0]
+        print(f"Using latest: {snap_path}")
+
+    try:
+        boundary = "----WebKitFormBoundary7MA4YWxk"
+        body = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="snapshot"; filename="snapshot.snapshot"\r\n'
+            "Content-Type: application/octet-stream\r\n\r\n"
+        ).encode()
+        body += snap_path.read_bytes()
+        body += f"\r\n--{boundary}--\r\n".encode()
+
+        req = urllib.request.Request(
+            f"{base}/collections/{collection}/snapshots/upload?priority=snapshot",
+            data=body,
+            method="POST",
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            json.loads(resp.read().decode())
+
+        print(f"Restored from {snap_path}")
+        return 0
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
 
 def main() -> int:
@@ -1688,7 +1777,7 @@ def main() -> int:
         help="Host for sse/http (default: 127.0.0.1). Use 0.0.0.0 in Docker.",
     )
     p_mcp.add_argument(
-        "--port", "-p", type=int, default=None, help="Port for sse/http (default: 5050)"
+        "--port", "-p", type=int, default=None, help="Port for sse/http (default: 8050)"
     )
     p_mcp.add_argument("--path", type=str, default=None, help="URL path (default: /mcp)")
     p_mcp.set_defaults(func=cmd_mcp)
@@ -1711,6 +1800,31 @@ def main() -> int:
         help="Seconds between pending memory processing (default: 600)",
     )
     p_watchdog.set_defaults(func=cmd_watchdog)
+
+    # qdrant-backup / qdrant-restore — снапшоты в data/backup/
+    p_qdrant_backup = sub.add_parser(
+        "qdrant-backup",
+        help="Создать снапшот коллекции onec_help и сохранить в data/backup/",
+    )
+    p_qdrant_backup.add_argument(
+        "--output-dir", "-o", type=str, default="data/backup",
+        help="Каталог для снапшота (default: data/backup)",
+    )
+    p_qdrant_backup.set_defaults(func=cmd_qdrant_backup)
+
+    p_qdrant_restore = sub.add_parser(
+        "qdrant-restore",
+        help="Восстановить коллекцию onec_help из снапшота в data/backup/",
+    )
+    p_qdrant_restore.add_argument(
+        "--file", "-f", type=str, default=None,
+        help="Путь к снапшоту (default: последний в data/backup/)",
+    )
+    p_qdrant_restore.add_argument(
+        "--backup-dir", type=str, default="data/backup",
+        help="Каталог со снапшотами (default: data/backup)",
+    )
+    p_qdrant_restore.set_defaults(func=cmd_qdrant_restore)
 
     args = parser.parse_args()
     return args.func(args)
