@@ -11,7 +11,9 @@ from typing import Any
 from ._utils import format_duration, safe_error_message
 
 SNIPPET_MAX_CHARS = 850
-MAX_TOPIC_CONTENT_CHARS = 2000  # truncate full topic in get_1c_code_answer/search_with_content to reduce tokens
+MAX_TOPIC_CONTENT_CHARS = (
+    2000  # truncate full topic in get_1c_code_answer/search_with_content to reduce tokens
+)
 MAX_QUERY_CHARS = 65536  # 64 KB
 MAX_CODE_SNIPPET_CHARS = 65536  # 64 KB
 _RATE_LIMIT_REQUESTS = 120

@@ -8,6 +8,7 @@ import zlib
 from io import BytesIO
 from pathlib import Path
 
+
 # Таймаут 7z/unzip (секунды). UNPACK_TIMEOUT env; по умолчанию 1800 (30 мин)
 def _unpack_timeout() -> int:
     try:

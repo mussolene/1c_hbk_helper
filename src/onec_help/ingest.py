@@ -328,7 +328,9 @@ def _persist_ingest_status_sqlite(
                     if "embed" in err.lower() or "429" in err or "timeout" in err.lower():
                         cat = "embed"
                         hint = " Рекомендация: проверьте EMBEDDING_API_URL, EMBEDDING_TIMEOUT; перезапустите ingest."
-                        err_stored = (err[:450] + hint) if len(err) + len(hint) > 500 else err + hint
+                        err_stored = (
+                            (err[:450] + hint) if len(err) + len(hint) > 500 else err + hint
+                        )
                     elif "qdrant" in err.lower() or "upsert" in err.lower():
                         cat = "index"
                         err_stored = err[:500]
@@ -1092,7 +1094,9 @@ def run_ingest(
                         embedding_workers=embedding_workers,
                     )
                     if verbose:
-                        _log(f"[ingest] [{done}/{len(tasks)}] indexing failed {version}/{language} — {path_hbk}: {err_msg}")
+                        _log(
+                            f"[ingest] [{done}/{len(tasks)}] indexing failed {version}/{language} — {path_hbk}: {err_msg}"
+                        )
                     try:
                         shutil.rmtree(md_dir.parent)
                     except OSError:

@@ -861,15 +861,16 @@ def cmd_load_snippets(args: argparse.Namespace) -> int:
         update_snippets_cache,
     )
 
-    skip_cache = (
-        getattr(args, "no_cache", False)
-        or (os.environ.get("SNIPPETS_SKIP_CACHE") or "").strip().lower() in ("1", "true", "yes")
-    )
+    skip_cache = getattr(args, "no_cache", False) or (
+        os.environ.get("SNIPPETS_SKIP_CACHE") or ""
+    ).strip().lower() in ("1", "true", "yes")
 
     try:
         sources = _build_snippets_sources(args)
         if not sources:
-            path_arg = getattr(args, "snippets_file", None) or os.environ.get("SNIPPETS_JSON_PATH", "")
+            path_arg = getattr(args, "snippets_file", None) or os.environ.get(
+                "SNIPPETS_JSON_PATH", ""
+            )
             if path_arg:
                 p = Path(path_arg.strip())
                 if not p.exists():

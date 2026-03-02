@@ -4,6 +4,7 @@ Run with: MCP_INTEGRATION=1 pytest tests/test_mcp_integration.py -v
 
 Note: Uses raw HTTP; streamable-http MCP may require different protocol (406 = format mismatch).
 """
+
 import os
 
 import pytest

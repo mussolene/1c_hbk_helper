@@ -157,6 +157,7 @@ def _legacy_body_to_md(body) -> str:
 # Справка 1С: пробуем UTF-8, затем CP1251 (при ошибке декода UTF-8 для 1251-файлов)
 _ENCODINGS_UTF8_FIRST = ("utf-8", "cp1251", "cp866", "latin-1")
 
+
 # Макс. размер HTML (байты). HELP_HTML_MAX_BYTES env; файлы больше — пропускаются (BeautifulSoup может виснуть).
 def _html_max_bytes() -> int:
     try:

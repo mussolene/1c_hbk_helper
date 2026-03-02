@@ -70,9 +70,10 @@ def test_extract_keyword_tokens_edge_cases() -> None:
 
 def test_hybrid_search_returns_meta() -> None:
     """_hybrid_search returns (results, meta) with has_keyword_hits and top_semantic_score."""
-    with patch.object(mcp_server, "_search") as mock_search, patch.object(
-        mcp_server, "_search_keyword"
-    ) as mock_kw:
+    with (
+        patch.object(mcp_server, "_search") as mock_search,
+        patch.object(mcp_server, "_search_keyword") as mock_kw,
+    ):
         mock_search.return_value = [
             {"path": "a.md", "title": "A", "text": "x", "score": 0.35},
         ]
@@ -94,24 +95,39 @@ def test_hybrid_search_returns_meta() -> None:
 
 def test_should_show_low_score_hint() -> None:
     """_should_show_low_score_hint: True when no keyword hits, low score, has results."""
-    assert mcp_server._should_show_low_score_hint(
-        [{"path": "a.md"}], [], {"has_keyword_hits": False, "top_semantic_score": 0.3}
-    ) is True
-    assert mcp_server._should_show_low_score_hint(
-        [], ["mem"], {"has_keyword_hits": False, "top_semantic_score": 0.4}
-    ) is True
+    assert (
+        mcp_server._should_show_low_score_hint(
+            [{"path": "a.md"}], [], {"has_keyword_hits": False, "top_semantic_score": 0.3}
+        )
+        is True
+    )
+    assert (
+        mcp_server._should_show_low_score_hint(
+            [], ["mem"], {"has_keyword_hits": False, "top_semantic_score": 0.4}
+        )
+        is True
+    )
     # No hint when keyword hits
-    assert mcp_server._should_show_low_score_hint(
-        [{"path": "a.md"}], [], {"has_keyword_hits": True, "top_semantic_score": 0.3}
-    ) is False
+    assert (
+        mcp_server._should_show_low_score_hint(
+            [{"path": "a.md"}], [], {"has_keyword_hits": True, "top_semantic_score": 0.3}
+        )
+        is False
+    )
     # No hint when score above threshold
-    assert mcp_server._should_show_low_score_hint(
-        [{"path": "a.md"}], [], {"has_keyword_hits": False, "top_semantic_score": 0.6}
-    ) is False
+    assert (
+        mcp_server._should_show_low_score_hint(
+            [{"path": "a.md"}], [], {"has_keyword_hits": False, "top_semantic_score": 0.6}
+        )
+        is False
+    )
     # No hint when no results
-    assert mcp_server._should_show_low_score_hint(
-        [], [], {"has_keyword_hits": False, "top_semantic_score": 0.3}
-    ) is False
+    assert (
+        mcp_server._should_show_low_score_hint(
+            [], [], {"has_keyword_hits": False, "top_semantic_score": 0.3}
+        )
+        is False
+    )
 
 
 def test_extract_code_blocks() -> None:
