@@ -8,7 +8,7 @@
 | **mcp** | MCP API — поиск, чтение топиков, get_1c_code_answer | I/O, embedding для memory | 8050 |
 | **ingest-worker** | Batch ETL: ingest, cron, load-snippets, watchdog | CPU, RAM, embedding API | — |
 | **serve** | Веб-просмотр справки (Flask), профиль `serve` | I/O | 5000 |
-| **bsl-bridge** | BSL LS MCP — диагностика, рефакторинг | Java/BSL LS | — |
+| **bsl-bridge** | BSL LS MCP — диагностика, рефакторинг (отдельно: `make bsl-start`) | Java/BSL LS | — |
 
 ## Коллекции Qdrant
 
@@ -29,7 +29,6 @@ flowchart LR
         mcpApi[mcp]
         ingestWorker[ingest-worker]
         qdrant[qdrant]
-        bsl[bsl-bridge]
     end
     mcpApi -->|read| qdrant
     ingestWorker -->|write| qdrant
@@ -57,7 +56,6 @@ flowchart LR
     subgraph full [Full mode]
         mcp[mcp]
         qdrant[qdrant]
-        bsl[bsl-bridge]
     end
     mcp -->|read/write| qdrant
 ```

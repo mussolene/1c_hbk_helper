@@ -4,17 +4,20 @@
 
 ## Интегрированный вариант (этот проект)
 
-BSL LS встроен в `docker-compose.yml` и запускается вместе с qdrant и mcp. Проект 1С монтируется в volume `.:/projects`; код обычно в `src` или в корне.
+BSL LS — отдельный compose (`docker-compose.bsl.yml`), запускается командой `make bsl-start`. Проект 1С монтируется в volume `.:/projects`; код обычно в `src` или в корне.
 
 ```bash
-# Запустить всё (qdrant + mcp + bsl-bridge)
+# Основные сервисы (qdrant + mcp)
 make up
 
+# BSL LS bridge отдельно
+make bsl-start
+
 # Или напрямую
-docker compose up -d
+docker compose -f docker-compose.bsl.yml up -d
 ```
 
-Сервис `bsl-bridge` собирается из [mcp-bsl-lsp-bridge](https://github.com/SteelMorgan/mcp-bsl-lsp-bridge) (build context — GitHub). В `.cursor/mcp.json` добавлен `lsp-bsl-bridge`. Контейнер: `mcp-lsp-1c-hbk-helper`. Проверка: tool `lsp_status`.
+Сервис `bsl-bridge` собирается из [mcp-bsl-lsp-bridge](https://github.com/SteelMorgan/mcp-bsl-lsp-bridge) (локальный клон в `deps/`, нужен `make fetch-bsl-bridge`). В `.cursor/mcp.json` добавлен `lsp-bsl-bridge`. Контейнер: `mcp-lsp-1c-hbk-helper`. Проверка: tool `lsp_status`.
 
 **Skill и Rules для Cursor:** см. [docs/cursor-examples/](cursor-examples/README.md) — примеры для индексации; при изменении workflow обновляйте `docs/cursor-examples/` как зависимость.
 

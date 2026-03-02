@@ -1,0 +1,34 @@
+# BSL LS bridge — только по команде make bsl-start (не с up/up-full).
+# usage: docker compose -f docker-compose.bsl.yml up -d   или   make bsl-start
+#
+# Требует deps/mcp-bsl-lsp-bridge (make fetch-bsl-bridge).
+
+services:
+  bsl-bridge:
+    build:
+      context: ./deps/mcp-bsl-lsp-bridge
+      dockerfile: Dockerfile
+      args:
+        BSL_LS_VERSION: ${BSL_LS_VERSION:-latest}
+    container_name: mcp-lsp-1c-hbk-helper
+    restart: unless-stopped
+    mem_limit: ${BSL_CONTAINER_MEMORY:-4g}
+    cpus: ${BSL_CONTAINER_CPUS:-4}
+    environment:
+      HOST_PROJECTS_ROOT: ${BSL_HOST_PROJECTS_ROOT:-/projects}
+      PROJECTS_ROOT: /projects
+      WORKSPACE_ROOT: ${BSL_WORKSPACE_ROOT:-/projects}
+      BSL_LS_PORT: ${BSL_LS_PORT:-9999}
+      MCP_LSP_BSL_JAVA_XMX: ${MCP_LSP_BSL_JAVA_XMX:-2g}
+      MCP_LSP_BSL_JAVA_XMS: ${MCP_LSP_BSL_JAVA_XMS:-512m}
+      MCP_LSP_LOG_LEVEL: ${MCP_LSP_LOG_LEVEL:-info}
+      FILE_WATCHER_MODE: ${FILE_WATCHER_MODE:-polling}
+      FILE_WATCHER_INTERVAL: ${FILE_WATCHER_INTERVAL:-30s}
+    volumes:
+      - .:/projects:ro
+    healthcheck:
+      test: ["CMD", "sh", "-c", "nc -z localhost ${BSL_LS_PORT:-9999}"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 3

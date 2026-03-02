@@ -17,6 +17,7 @@ HELP_LANGS ?= ru
 # -f base + overlay: merge вместо include (избегаем "conflicts with imported resource")
 COMPOSE = docker compose -f docker-compose.base.yml -f docker-compose.yml
 COMPOSE_FULL = docker compose -f docker-compose.base.yml -f docker-compose.full.yml
+COMPOSE_BSL = docker compose -f docker-compose.bsl.yml
 
 # BSL_HOST_PROJECTS_ROOT: PowerShell ($env:) / export (sh) / set (cmd). Docker — слэши /
 BSL_ROOT = $(subst \\,/,$(CURDIR))
@@ -123,18 +124,18 @@ watch-index-status-full:
 unpack-help:
 	$(COMPOSE) run --rm -v "$(HELP_SOURCE_PATH):/input:ro" -v "$(abspath $(UNPACK_OUTPUT)):/output" mcp python -m onec_help unpack-dir /input -o /output -l $(HELP_LANGS) $(ARGS)
 
-# Start (split: qdrant + mcp + ingest-worker + bsl-bridge)
+# Start (split: qdrant + mcp + ingest-worker)
 # Каталоги data/* создаются Docker при volume mount — кросс-платформенно
-up: deps/mcp-bsl-lsp-bridge/.git/HEAD
-	$(BSL_SET) $(COMPOSE) up -d
+up:
+	$(COMPOSE) up -d
 
 # Start full (один контейнер mcp)
-up-full: deps/mcp-bsl-lsp-bridge/.git/HEAD
-	$(BSL_SET) $(COMPOSE_FULL) up -d
+up-full:
+	$(COMPOSE_FULL) up -d
 
 # Start split + serve
-up-serve: deps/mcp-bsl-lsp-bridge/.git/HEAD
-	$(BSL_SET) $(COMPOSE) --profile serve up -d
+up-serve:
+	$(COMPOSE) --profile serve up -d
 
 # Stop
 down:
@@ -143,12 +144,12 @@ down:
 down-full:
 	$(COMPOSE_FULL) down
 
-# BSL LS bridge only
+# BSL LS bridge only (отдельный compose, не с up)
 bsl-start: deps/mcp-bsl-lsp-bridge/.git/HEAD
-	$(BSL_SET) $(COMPOSE) up -d bsl-bridge
+	$(BSL_SET) $(COMPOSE_BSL) up -d
 
 bsl-stop:
-	$(COMPOSE) stop bsl-bridge
+	$(COMPOSE_BSL) stop
 
 # При qdrant exit 101: логи и сброс данных. Использовать оба -f!
 qdrant-logs:
@@ -192,6 +193,8 @@ help:
 	@echo "  make up-full          Start full (один контейнер mcp)"
 	@echo "  make up-serve         Start split + serve"
 	@echo "  make down             Stop"
+	@echo "  make bsl-start        BSL LS bridge only (отдельно от up)"
+	@echo "  make bsl-stop         Stop BSL bridge"
 	@echo "  make qdrant-logs      Логи qdrant (при exit 101)"
 	@echo "  make qdrant-reset     Удалить data/qdrant, перезапустить с пустым индексом"
 	@echo "  make qdrant-backup    Снапшот → data/backup/ (для миграции)"

@@ -6,7 +6,7 @@
 
 - **Назначение:** распаковка справки 1С (.hbk), конвертация в Markdown, индексация в Qdrant, MCP-сервер для поиска по справке, интеграция с BSL LS.
 - **Стек:** Python 3.14, Flask (serve), FastMCP (MCP по HTTP), Qdrant, sentence-transformers / внешние embedding API.
-- **Архитектура:** Docker Compose (qdrant, mcp, bsl-bridge), cron для ingest, опциональный watchdog.
+- **Архитектура:** Docker Compose (qdrant, mcp). BSL bridge — отдельно `make bsl-start`. Cron для ingest, опциональный watchdog.
 - **Конфиденциальные данные:** текст справки и поисковые запросы идут на embedding API; память (topic_path, save_snippet) в JSONL и Qdrant; сниппеты и код 1С в SNIPPETS_DIR.
 
 ## NDA и конфиденциальность

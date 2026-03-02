@@ -11,7 +11,7 @@
 - **Локально:** `python -m onec_help unpack/build-docs/build-index/ingest/load-snippets/load-standards/parse-fastcode/parse-helpf/watchdog/serve/mcp <args>`
 - **init** — стартовая загрузка: ingest (справка) + load-snippets + load-standards. Использует env (HELP_SOURCE_BASE, SNIPPETS_DIR, STANDARDS_REPOS). Не стирает данные.
 - **reinit** — выполняет init. Если индекс уже существует с данными — без стирания (init). **reinit --force** — стирает коллекции и cache, затем init.
-- **Docker:** `docker-compose up` (сервисы `qdrant` + `mcp` + `bsl-bridge`). В mcp смонтирован `/opt/1cv8`, cron раз в сутки в 3:00 запускает ingest; при `WATCHDOG_ENABLED=1` — watchdog в фоне. bsl-bridge — BSL LS для проекта (volume `.:/projects`, код в `src` или в корне).
+- **Docker:** `docker-compose up` (сервисы `qdrant` + `mcp`). В mcp смонтирован `/opt/1cv8`, cron раз в сутки в 3:00 запускает ingest; при `WATCHDOG_ENABLED=1` — watchdog в фоне. BSL LS — `make bsl-start` (отдельный compose, volume `.:/projects`).
 - **По умолчанию split:** `docker compose up -d` — mcp только API (MCP_MODE=api), ingest-worker — batch (ingest, cron, load-snippets, watchdog). Индексация: `make ingest` (exec ingest-worker).
 - **Full (один контейнер):** `docker compose -f docker-compose.full.yml up -d` — mcp выполняет всё. Индексация: `make ingest-full`.
 - **Индекс вручную:** `make ingest` (split) или `make ingest-full` (full). Каталог версий — `HELP_SOURCE_BASE`, подпапки = версии 1С, поиск .hbk рекурсивно, в т.ч. в `bin/` на Windows.
@@ -82,7 +82,7 @@
 
 Циклы с проверками; при ошибках — возврат к шагу исправления.
 
-1. **Индексация.** `make up` или `docker compose up -d` — bsl-bridge входит в compose, volume `.:/projects`. Дождаться индексации (`lsp_status`).
+1. **Индексация.** `make up` или `docker compose up -d`. BSL LS: `make bsl-start` (отдельно), volume `.:/projects`. Дождаться индексации (`lsp_status`).
 2. **Ориентирование.** `project_analysis` — поиск символов/файлов; `symbol_explore` — детали по символу; `call_graph` — граф вызовов перед рефакторингом (обязательно перед правками).
 
 ### Цикл «Написание кода»

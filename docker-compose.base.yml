@@ -1,4 +1,5 @@
-# Base: Qdrant + mcp + bsl-bridge. Include from docker-compose.yml (split) or docker-compose.full.yml.
+# Base: Qdrant + mcp. Include from docker-compose.yml (split) or docker-compose.full.yml.
+# BSL bridge — отдельно: make bsl-start (docker-compose.bsl.yml).
 # compose-spec: https://docs.docker.com/compose/compose-file/
 # Данные в ./data/ (в .gitignore) — backup: копируйте папку data/.
 # Переменные окружения: .env в корне проекта (скопируйте env.example в .env).
@@ -75,33 +76,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-
-  # context: локальный клон (Git URL не работает на Docker Desktop Windows)
-  bsl-bridge:
-    build:
-      context: ./deps/mcp-bsl-lsp-bridge
-      dockerfile: Dockerfile
-      args:
-        BSL_LS_VERSION: ${BSL_LS_VERSION:-latest}
-    container_name: mcp-lsp-1c-hbk-helper
-    restart: unless-stopped
-    mem_limit: ${BSL_CONTAINER_MEMORY:-4g}
-    cpus: ${BSL_CONTAINER_CPUS:-4}
-    environment:
-      HOST_PROJECTS_ROOT: ${BSL_HOST_PROJECTS_ROOT:-/projects}
-      PROJECTS_ROOT: /projects
-      WORKSPACE_ROOT: ${BSL_WORKSPACE_ROOT:-/projects}
-      BSL_LS_PORT: ${BSL_LS_PORT:-9999}
-      MCP_LSP_BSL_JAVA_XMX: ${MCP_LSP_BSL_JAVA_XMX:-2g}
-      MCP_LSP_BSL_JAVA_XMS: ${MCP_LSP_BSL_JAVA_XMS:-512m}
-      MCP_LSP_LOG_LEVEL: ${MCP_LSP_LOG_LEVEL:-info}
-      FILE_WATCHER_MODE: ${FILE_WATCHER_MODE:-polling}
-      FILE_WATCHER_INTERVAL: ${FILE_WATCHER_INTERVAL:-30s}
-    volumes:
-      - .:/projects:ro
-    healthcheck:
-      test: ["CMD", "sh", "-c", "nc -z localhost ${BSL_LS_PORT:-9999}"]
-      interval: 30s
-      timeout: 10s
-      start_period: 120s
-      retries: 3
