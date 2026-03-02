@@ -157,6 +157,7 @@ def _release_api_slot() -> None:
 
 _resolved_api_model_id: str | None = None
 _cached_api_dimension: int | None = None
+_cached_qdrant_dimension: int | None = None
 _dimension_detecting: bool = False
 _embedding_api_available: bool | None = None
 _fallback_log_count = 0
@@ -263,6 +264,25 @@ def _check_embedding_api_available() -> bool:
         return False
 
 
+def _get_fallback_dim_from_qdrant() -> int | None:
+    """When API is unavailable, get vector size from Qdrant collection for correct-dim placeholder.
+    Cached to avoid repeated Qdrant calls."""
+    global _cached_qdrant_dimension
+    if _cached_qdrant_dimension is not None:
+        return _cached_qdrant_dimension
+    try:
+        from . import indexer
+
+        coll = os.environ.get("QDRANT_COLLECTION", "onec_help")
+        dim = indexer.get_collection_vector_size(collection=coll)
+        if dim and dim > 0:
+            _cached_qdrant_dimension = dim
+            return dim
+    except Exception as e:
+        logging.getLogger(__name__).debug("get_fallback_dim_from_qdrant failed: %s", e)
+    return None
+
+
 def get_embedding_dimension() -> int:
     """Return vector size for the current embedding backend (for collection creation)."""
     global _cached_api_dimension, _dimension_detecting
@@ -285,6 +305,10 @@ def get_embedding_dimension() -> int:
             logging.getLogger(__name__).debug("embedding dimension detect failed: %s", e)
         finally:
             _dimension_detecting = False
+        # API failed: try Qdrant collection dimension so placeholder matches index
+        dim = _get_fallback_dim_from_qdrant()
+        if dim is not None:
+            return dim
     return VECTOR_SIZE
 
 
@@ -359,7 +383,11 @@ def _resolve_openai_api_model() -> str:
 
 
 def _embedding_fallback_dim() -> int:
-    return VECTOR_SIZE if _dimension_detecting else get_embedding_dimension()
+    """Dimension for placeholder when API fails. Prefer Qdrant collection size over default 384."""
+    if _dimension_detecting:
+        dim = _get_fallback_dim_from_qdrant()
+        return dim if dim is not None else VECTOR_SIZE
+    return get_embedding_dimension()
 
 
 def _get_embedding_placeholder(text: str, dimension: int = VECTOR_SIZE) -> list[float]:

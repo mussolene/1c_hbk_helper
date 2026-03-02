@@ -278,9 +278,12 @@ def test_check_embedding_api_available_unavailable() -> None:
 
 
 def test_embedding_fallback_dim_when_detecting() -> None:
-    """_embedding_fallback_dim returns VECTOR_SIZE when _dimension_detecting is True."""
+    """_embedding_fallback_dim returns Qdrant dim when available, else VECTOR_SIZE when detecting."""
     with patch.object(embedding_mod, "_dimension_detecting", True):
-        assert embedding_mod._embedding_fallback_dim() == embedding_mod.VECTOR_SIZE
+        with patch.object(embedding_mod, "_get_fallback_dim_from_qdrant", return_value=None):
+            assert embedding_mod._embedding_fallback_dim() == embedding_mod.VECTOR_SIZE
+        with patch.object(embedding_mod, "_get_fallback_dim_from_qdrant", return_value=768):
+            assert embedding_mod._embedding_fallback_dim() == 768
 
 
 def test_get_embedding_dimension_openai_api_detects_from_api() -> None:
@@ -316,7 +319,7 @@ def test_get_embedding_dimension_openai_api_detects_from_api() -> None:
 
 
 def test_get_embedding_dimension_openai_api_invalid_dimension() -> None:
-    """When EMBEDDING_DIMENSION is not int, falls through to VECTOR_SIZE or API."""
+    """When EMBEDDING_DIMENSION is not int, falls through to Qdrant dim or VECTOR_SIZE."""
     import importlib
 
     with patch.dict(
@@ -330,8 +333,14 @@ def test_get_embedding_dimension_openai_api_invalid_dimension() -> None:
     ):
         importlib.reload(embedding_mod)
         with patch("onec_help.embedding._check_embedding_api_available", return_value=False):
-            dim = embedding_mod.get_embedding_dimension()
-        assert dim == embedding_mod.VECTOR_SIZE
+            with patch("onec_help.embedding._get_fallback_dim_from_qdrant", return_value=None):
+                dim = embedding_mod.get_embedding_dimension()
+            assert dim == embedding_mod.VECTOR_SIZE
+            embedding_mod._cached_api_dimension = None  # reset so we re-detect
+            embedding_mod._cached_qdrant_dimension = None
+            with patch("onec_help.embedding._get_fallback_dim_from_qdrant", return_value=768):
+                dim = embedding_mod.get_embedding_dimension()
+            assert dim == 768
     importlib.reload(embedding_mod)
 
 

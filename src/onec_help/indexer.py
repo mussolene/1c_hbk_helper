@@ -72,6 +72,44 @@ def get_embedding_dimension() -> int:
     return embedding.get_embedding_dimension()
 
 
+def get_collection_vector_size(
+    collection: str = COLLECTION_NAME,
+    qdrant_host: str | None = None,
+    qdrant_port: int | None = None,
+) -> int | None:
+    """Return vector dimension from Qdrant collection config, or None if unavailable.
+    Used as fallback when embedding API is down to produce correct-dim placeholder vectors."""
+    if QdrantClient is None:
+        return None
+    host = qdrant_host or os.environ.get("QDRANT_HOST", "localhost")
+    port = qdrant_port or int(os.environ.get("QDRANT_PORT", "6333"))
+    try:
+        client = QdrantClient(host=host, port=port, check_compatibility=False)
+        if not client.collection_exists(collection):
+            return None
+        info = client.get_collection(collection)
+        config = getattr(info, "config", None)
+        if not config:
+            return None
+        params = getattr(config, "params", None)
+        if not params:
+            return None
+        vectors = getattr(params, "vectors", None)
+        if vectors is None:
+            return None
+        # VectorsConfig: VectorParams or Dict[str, VectorParams]
+        if hasattr(vectors, "size"):
+            return int(vectors.size)
+        if isinstance(vectors, dict) and vectors:
+            first = next(iter(vectors.values()))
+            if hasattr(first, "size"):
+                return int(first.size)
+        return None
+    except Exception as e:
+        logging.getLogger(__name__).debug("get_collection_vector_size failed: %s", e)
+        return None
+
+
 def _path_to_point_id(rel_path: str, version: str = "", language: str = "") -> int:
     """Stable integer id from path (and optional version/language) for incremental upsert."""
     import hashlib

@@ -13,6 +13,7 @@ from onec_help.indexer import (
     build_index,
     get_1c_help_related,
     get_all_collections_status,
+    get_collection_vector_size,
     get_embedding_dimension,
     get_index_status,
     get_topic_by_path,
@@ -32,6 +33,22 @@ def test_get_embedding_dimension_delegates_to_embedding() -> None:
     from onec_help import embedding
 
     assert dim == embedding.get_embedding_dimension()
+
+
+@patch("onec_help.indexer.QdrantClient")
+def test_get_collection_vector_size(mock_client: MagicMock) -> None:
+    """get_collection_vector_size returns vector size from collection config."""
+    mock_instance = MagicMock()
+    mock_client.return_value = mock_instance
+    mock_instance.collection_exists.return_value = True
+    # config.params.vectors is VectorParams with size
+    mock_vectors = MagicMock(size=768)
+    mock_params = MagicMock(vectors=mock_vectors)
+    mock_config = MagicMock(params=mock_params)
+    mock_instance.get_collection.return_value = MagicMock(config=mock_config)
+    assert get_collection_vector_size(collection="onec_help") == 768
+    mock_instance.collection_exists.return_value = False
+    assert get_collection_vector_size(collection="nonexistent") is None
 
 
 def test_build_index_no_qdrant_client(tmp_path: Path) -> None:

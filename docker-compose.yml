@@ -39,11 +39,12 @@ services:
       WATCHDOG_POLL_INTERVAL: ${WATCHDOG_POLL_INTERVAL:-600}
       WATCHDOG_PENDING_INTERVAL: ${WATCHDOG_PENDING_INTERVAL:-600}
       SNIPPETS_DIR: ${SNIPPETS_DIR:-/data/snippets}
+      SAVE_SNIPPET_TO_FILES: ${SAVE_SNIPPET_TO_FILES:-1}
+      MEMORY_ENABLED: ${MEMORY_ENABLED:-1}
+      MEMORY_BASE_PATH: ${MEMORY_BASE_PATH:-}
       STANDARDS_REPOS: ${STANDARDS_REPOS:-1C-Company/v8-code-style:master,zeegin/v8std:main}
       STANDARDS_SUBPATH: ${STANDARDS_SUBPATH:-docs}
       STANDARDS_DIR: ${STANDARDS_DIR:-}
-      MEMORY_ENABLED: ${MEMORY_ENABLED:-0}
-      MEMORY_BASE_PATH: ${MEMORY_BASE_PATH:-}
     volumes:
       - /opt/1cv8:/opt/1cv8:ro
       - ./data/qdrant:/qdrant_storage:ro
