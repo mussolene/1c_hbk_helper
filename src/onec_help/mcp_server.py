@@ -11,6 +11,7 @@ from typing import Any
 from ._utils import format_duration, safe_error_message
 
 SNIPPET_MAX_CHARS = 850
+MAX_TOPIC_CONTENT_CHARS = 2000  # truncate full topic in get_1c_code_answer/search_with_content to reduce tokens
 MAX_QUERY_CHARS = 65536  # 64 KB
 MAX_CODE_SNIPPET_CHARS = 65536  # 64 KB
 _RATE_LIMIT_REQUESTS = 120
@@ -289,7 +290,7 @@ def run_mcp(
     @mcp.tool()
     def search_1c_help(
         query: str,
-        limit: int = 10,
+        limit: int = 8,
         version: str | None = None,
         language: str | None = None,
         include_user_memory: bool = False,
@@ -297,7 +298,7 @@ def run_mcp(
         """Search 1C help by natural language (semantic). Returns list of relevant topics with title, path, and snippet.
         For code answers prefer get_1c_code_answer. For exact API names use search_1c_help_keyword.
         query: search text (e.g. 'Формат', 'Запрос.ПакетПолучения', 'синтаксис ОбъединитьПериоды').
-        limit: max results (default 10). version, language: optional filters.
+        limit: max results (default 8). version, language: optional filters.
         include_user_memory: if True, also search saved snippets and mark source."""
         err = _check_rate_limit()
         if err:
@@ -341,14 +342,14 @@ def run_mcp(
     @mcp.tool()
     def search_1c_help_keyword(
         query: str,
-        limit: int = 15,
+        limit: int = 10,
         version: str | None = None,
         language: str | None = None,
     ) -> str:
         """Search 1C help by exact substring in title and text (e.g. 'Формат', 'ПроцессорВыводаРезультатаКомпоновкиДанныхВКоллекциюЗначений').
         Use when semantic search misses specific API names. For code answers prefer get_1c_code_answer.
         For method names like Type.Method (e.g. HTTPСоединение.Получить) pass the full string.
-        limit: max results (default 15). version, language: optional filters."""
+        limit: max results (default 10). version, language: optional filters."""
         err = _check_rate_limit()
         if err:
             return err
@@ -373,13 +374,13 @@ def run_mcp(
     @mcp.tool()
     def search_1c_help_with_content(
         query: str,
-        limit: int = 5,
+        limit: int = 3,
         version: str | None = None,
         language: str | None = None,
     ) -> str:
         """Search 1C help and return full content of top results in one call.
         Combines semantic + keyword search, then get_topic for each result.
-        query: search text. limit: max topics with full content (default 5).
+        query: search text. limit: max topics with full content (default 3).
         version, language: optional filters."""
         err = _check_rate_limit()
         if err:
@@ -397,13 +398,15 @@ def run_mcp(
                 continue
             content = _get_topic(path, version=version, language=language, prefer_index=False)
             if content:
+                if len(content) > MAX_TOPIC_CONTENT_CHARS:
+                    content = content[:MAX_TOPIC_CONTENT_CHARS] + "\n\n..."
                 parts.append(f"---\n## {path}\n\n{content}")
         return "\n\n".join(parts) if parts else "No content could be retrieved."
 
     @mcp.tool()
     def get_1c_code_answer(
         query: str,
-        limit: int = 5,
+        limit: int = 3,
         include_memory: bool = True,
         code_only: bool = False,
         version: str | None = None,
@@ -412,7 +415,7 @@ def run_mcp(
         """Get code-ready answer from 1C help in one call. Best for: 'вывод СКД в таблицу', 'Формат', etc.
         Combines semantic + keyword search, full topic content, and memory. Prefer over search+get_topic chain.
         Traps: ПрочитатьJSON returns Structure by default — use ПрочитатьВСоответствие=Истина for Соответствие (Получить). HTTPСоединение.Получить — server only.
-        query: natural language or API name. limit: max topics (default 5). include_memory: also search saved snippets. code_only: if True, return primarily code blocks from help."""
+        query: natural language or API name. limit: max topics (default 3). include_memory: also search saved snippets. code_only: if True, return primarily code blocks from help."""
         err = _check_rate_limit()
         if err:
             return err
@@ -488,8 +491,12 @@ def run_mcp(
                             block_text = "\n\n".join(f"```bsl\n{b}\n```" for b in blocks)
                             help_blocks.append(f"---\n## {path}\n\n{block_text}")
                         else:
-                            help_blocks.append(f"---\n## {path}\n\n{content[:2000]}...")
+                            help_blocks.append(
+                                f"---\n## {path}\n\n{content[:MAX_TOPIC_CONTENT_CHARS]}..."
+                            )
                     else:
+                        if len(content) > MAX_TOPIC_CONTENT_CHARS:
+                            content = content[:MAX_TOPIC_CONTENT_CHARS] + "\n\n..."
                         help_blocks.append(f"---\n## {path}\n\n{content}")
             if help_blocks:
                 parts.append("\n### Из справки\n\n" + "\n\n".join(help_blocks))
