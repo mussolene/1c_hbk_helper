@@ -74,7 +74,7 @@ PYTHONPATH=src python3 -m onec_help metadata-graph-build data/metadata_export/<�
 
 ## Константы (MetadataExport 2.1.9+)
 
-Исходники обработки: `.nosync/MetadataExportEpf` (см. [bsl-language-server-local skill](../cursor-examples/bsl-language-server-local/SKILL.md) для проверки BSL).
+Исходники обработки: `.nosync/MetadataExportEpf`.
 
 - Раньше все константы шли только как `CatalogObject.Свойства` с владельцем «примитив» `НаборКонстант` — в `objects.jsonl` не появлялось строк `object_type: Constant`.
 - С версии **2.1.9** для каждой константы дополнительно пишется **`CatalogObject.Объекты`** с **`Тип=Константа`**, `Description`/`Имя` как в метаданных (`Константа.<Имя>`), плюс реквизит **`ТипЗначения`** с типом из `КонстантаМД.Тип`.

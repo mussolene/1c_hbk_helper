@@ -58,3 +58,10 @@ def test_resolve_metadata_surface_query_for_collection_object() -> None:
     assert "ОбъектМетаданныхКонфигурация.Документы" in names
     assert "ОбъектМетаданных: Документ" in names
     assert "Документы.РеализацияТоваровУслуг" in names
+
+
+def test_metadata_collection_keys_shared_with_structured_help() -> None:
+    from onec_help.knowledge.help_structured import _METADATA_COLLECTION_OBJECT_TYPES
+    from onec_help.knowledge.language_resolver import METADATA_COLLECTION_TO_HELP_OBJECT
+
+    assert _METADATA_COLLECTION_OBJECT_TYPES == METADATA_COLLECTION_TO_HELP_OBJECT

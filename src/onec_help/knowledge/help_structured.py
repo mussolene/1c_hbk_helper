@@ -20,6 +20,7 @@ from ..help_core.html2md import (
 from ..search_store import embedding
 from ..search_store.indexer import _version_sort_key, get_collection_vector_size
 from ..shared import env_config
+from .language_resolver import METADATA_COLLECTION_TO_HELP_OBJECT, SURFACE_FAMILY_SPECS
 
 API_OBJECTS_FILE = "api_objects.jsonl"
 # Имена менеджеров <ТипМенеджер.<…>> для подсказок MCP: platform_help_manager_templates (те же строки, что object_name здесь).
@@ -99,29 +100,7 @@ _INLINE_SECTION_RE = re.compile(
     "|".join(re.escape(label) for label in sorted(_INLINE_SECTION_LABELS, key=len, reverse=True))
 )
 
-_METADATA_COLLECTION_OBJECT_TYPES: dict[str, str] = {
-    "Документы": "ОбъектМетаданных: Документ",
-    "Справочники": "ОбъектМетаданных: Справочник",
-    "Перечисления": "ОбъектМетаданных: Перечисление",
-    "Константы": "ОбъектМетаданных: Константа",
-    "РегистрыСведений": "ОбъектМетаданных: РегистрСведений",
-    "РегистрыНакопления": "ОбъектМетаданных: РегистрНакопления",
-    "РегистрыБухгалтерии": "ОбъектМетаданных: РегистрБухгалтерии",
-    "РегистрыРасчета": "ОбъектМетаданных: РегистрРасчета",
-    "ПланыСчетов": "ОбъектМетаданных: ПланСчетов",
-    "ПланыВидовХарактеристик": "ОбъектМетаданных: ПланВидовХарактеристик",
-    "ПланыВидовРасчета": "ОбъектМетаданных: ПланВидовРасчета",
-    "ПланыОбмена": "ОбъектМетаданных: ПланОбмена",
-    "БизнесПроцессы": "ОбъектМетаданных: БизнесПроцесс",
-    "Задачи": "ОбъектМетаданных: Задача",
-    "Отчеты": "ОбъектМетаданных: Отчет",
-    "Отчёты": "ОбъектМетаданных: Отчет",
-    "Обработки": "ОбъектМетаданных: Обработка",
-    "ХранилищаНастроек": "ОбъектМетаданных: ХранилищеНастроек",
-    "КритерииОтбора": "ОбъектМетаданных: КритерийОтбора",
-    "ЖурналыДокументов": "ОбъектМетаданных: ЖурналДокументов",
-    "Последовательности": "ОбъектМетаданных: Последовательность",
-}
+_METADATA_COLLECTION_OBJECT_TYPES: dict[str, str] = dict(METADATA_COLLECTION_TO_HELP_OBJECT)
 
 
 def get_help_structured_dir() -> Path:
@@ -821,9 +800,7 @@ def _surface_aliases_for_member(full_name: str, owner_name: str, member_name: st
     if owner_name == "Глобальный контекст" and member_name:
         return [member_name]
 
-    from .language_resolver import _SURFACE_FAMILY_SPECS
-
-    for spec in _SURFACE_FAMILY_SPECS.values():
+    for spec in SURFACE_FAMILY_SPECS.values():
         placeholder_member = f"{spec.collection_manager}.{spec.collection_item_placeholder}"
         if full_name == f"Глобальный контекст.{spec.family}":
             aliases = _extend_unique(aliases, spec.family)
@@ -844,9 +821,7 @@ def _surface_aliases_for_object(object_name: str) -> list[str]:
     if object_name == "ПеречислимыеСвойстваОбъектовМетаданных":
         return ["Метаданные.СвойстваОбъектов"]
 
-    from .language_resolver import _SURFACE_FAMILY_SPECS
-
-    for spec in _SURFACE_FAMILY_SPECS.values():
+    for spec in SURFACE_FAMILY_SPECS.values():
         if object_name == spec.collection_manager:
             aliases = _extend_unique(aliases, spec.family)
         elif object_name == spec.item_manager_template:
@@ -1001,6 +976,12 @@ def _make_object_stub(
         "see_also": [],
         "source_sections": {},
     }
+
+
+def _is_object_stub(record: dict[str, Any]) -> bool:
+    return str(record.get("resolver_kind") or "") == "stub" or not str(
+        record.get("topic_path") or ""
+    ).strip()
 
 
 def _build_structured_records(
@@ -1764,7 +1745,25 @@ def build_structured_api_snapshot(
                     topic_rec.get("title") or ""
                 )
 
+    real_object_versions: set[tuple[str, str, str]] = set()
     for obj in objects_by_key.values():
+        if _is_object_stub(obj):
+            continue
+        real_object_versions.add(
+            (
+                str(obj.get("language") or ""),
+                str(obj.get("full_name") or obj.get("object_name") or ""),
+                str(obj.get("version") or ""),
+            )
+        )
+
+    for obj in objects_by_key.values():
+        if _is_object_stub(obj) and (
+            str(obj.get("language") or ""),
+            str(obj.get("full_name") or obj.get("object_name") or ""),
+            str(obj.get("version") or ""),
+        ) in real_object_versions:
+            continue
         objects_raw.append(obj)
 
     for link in html_links_raw:
@@ -2456,6 +2455,7 @@ def search_api_topics(
         language=language,
         full_payload=True,
         query_vector=query_vector,
+        fail_on_qdrant_unreachable=True,
     )
 
 
@@ -2481,36 +2481,29 @@ def _score_text_match(query: str, item: dict[str, Any], fields: list[str]) -> in
 def _scroll_payloads(collection: str) -> list[dict[str, Any]]:
     from qdrant_client import QdrantClient
 
-    from ..shared.qdrant_errors import is_qdrant_unreachable_error
-
     host = env_config.get_qdrant_host()
     port = env_config.get_qdrant_port()
-    try:
-        client = QdrantClient(host=host, port=port, check_compatibility=False)
-        if not client.collection_exists(collection):
-            return []
-        offset = None
-        items: list[dict[str, Any]] = []
-        while True:
-            points, next_offset = client.scroll(
-                collection_name=collection,
-                limit=500,
-                offset=offset,
-                with_payload=True,
-                with_vectors=False,
-            )
-            if not points:
-                break
-            for point in points:
-                items.append(getattr(point, "payload", None) or {})
-            if next_offset is None:
-                break
-            offset = next_offset
-        return items
-    except Exception as exc:
-        if is_qdrant_unreachable_error(exc):
-            return []
-        raise
+    client = QdrantClient(host=host, port=port, check_compatibility=False)
+    if not client.collection_exists(collection):
+        return []
+    offset = None
+    items: list[dict[str, Any]] = []
+    while True:
+        points, next_offset = client.scroll(
+            collection_name=collection,
+            limit=500,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        if not points:
+            break
+        for point in points:
+            items.append(getattr(point, "payload", None) or {})
+        if next_offset is None:
+            break
+        offset = next_offset
+    return items
 
 
 def search_official_examples(
@@ -2533,6 +2526,7 @@ def search_official_examples(
             language=language,
             collection=API_EXAMPLES_COLLECTION_NAME,
             query_vector=query_vector,
+            fail_on_qdrant_unreachable=True,
         )
         if results:
             return results
@@ -2583,6 +2577,7 @@ def search_api_members(
         language=language,
         full_payload=True,
         query_vector=query_vector,
+        fail_on_qdrant_unreachable=True,
     )
 
 
@@ -2683,7 +2678,9 @@ def _member_exact_sort_key(
     )
 
 
-def _object_exact_sort_key(query: str, item: dict[str, Any]) -> tuple[int, tuple[int, ...], str]:
+def _object_exact_sort_key(
+    query: str, item: dict[str, Any]
+) -> tuple[int, int, int, tuple[int, ...], str]:
     query_clean = (query or "").strip().lower()
     full_name = str(item.get("full_name") or item.get("object_name") or "").strip().lower()
     object_name = str(item.get("object_name") or "").strip().lower()
@@ -2707,8 +2704,12 @@ def _object_exact_sort_key(query: str, item: dict[str, Any]) -> tuple[int, tuple
         priority = 2
     else:
         priority = 3
+    stub_priority = 1 if _is_object_stub(item) else 0
+    content_priority = 0 if item.get("summary") or item.get("description") else 1
     return (
         priority,
+        stub_priority,
+        content_priority,
         _member_version_sort_key(str(item.get("version") or "")),
         str(item.get("topic_path") or ""),
     )
@@ -2737,6 +2738,7 @@ def search_api_objects(
         language=language,
         full_payload=True,
         query_vector=query_vector,
+        fail_on_qdrant_unreachable=True,
     )
 
 
@@ -2756,46 +2758,36 @@ def get_api_member(
     """
     from qdrant_client import QdrantClient
 
-    from ..shared.qdrant_errors import is_qdrant_unreachable_error
-
     name_clean = (name or "").strip()
     if not name_clean:
         return []
     host = qdrant_host or env_config.get_qdrant_host()
     port = qdrant_port or env_config.get_qdrant_port()
-    try:
-        client = QdrantClient(host=host, port=port, check_compatibility=False)
-        if not client.collection_exists(API_MEMBERS_COLLECTION_NAME):
-            return []
-        results: list[dict[str, Any]] = []
-        try:
-            for field in ("name", "full_name", "member_name", "aliases", "surface_aliases"):
-                results.extend(
-                    _scroll_exact_member_matches(
-                        client,
-                        field=field,
-                        value=name_clean,
-                        version=version,
-                        language=language,
-                    )
-                )
-        except Exception:
-            results = []
-        if results:
-            dedup: dict[tuple[str, str, str], dict[str, Any]] = {}
-            for item in results:
-                key = (
-                    str(item.get("full_name") or ""),
-                    str(item.get("content_hash") or ""),
-                    str(item.get("topic_path") or ""),
-                )
-                dedup[key] = item
-            return sorted(dedup.values(), key=lambda item: _member_exact_sort_key(name_clean, item))
+    client = QdrantClient(host=host, port=port, check_compatibility=False)
+    if not client.collection_exists(API_MEMBERS_COLLECTION_NAME):
         return []
-    except Exception as exc:
-        if is_qdrant_unreachable_error(exc):
-            return []
-        raise
+    results: list[dict[str, Any]] = []
+    for field in ("name", "full_name", "member_name", "aliases", "surface_aliases"):
+        results.extend(
+            _scroll_exact_member_matches(
+                client,
+                field=field,
+                value=name_clean,
+                version=version,
+                language=language,
+            )
+        )
+    if results:
+        dedup: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for item in results:
+            key = (
+                str(item.get("full_name") or ""),
+                str(item.get("content_hash") or ""),
+                str(item.get("topic_path") or ""),
+            )
+            dedup[key] = item
+        return sorted(dedup.values(), key=lambda item: _member_exact_sort_key(name_clean, item))
+    return []
 
 
 def get_api_object(
@@ -2813,49 +2805,39 @@ def get_api_object(
     """
     from qdrant_client import QdrantClient
 
-    from ..shared.qdrant_errors import is_qdrant_unreachable_error
-
     name_clean = (name or "").strip()
     if not name_clean:
         return []
     host = qdrant_host or env_config.get_qdrant_host()
     port = qdrant_port or env_config.get_qdrant_port()
-    try:
-        client = QdrantClient(host=host, port=port, check_compatibility=False)
-        if not client.collection_exists(API_OBJECTS_COLLECTION_NAME):
-            return []
-        results: list[dict[str, Any]] = []
-        try:
-            for field in ("name", "full_name", "object_name", "aliases", "surface_aliases"):
-                results.extend(
-                    _scroll_exact_object_matches(
-                        client,
-                        field=field,
-                        value=name_clean,
-                        version=version,
-                        language=language,
-                    )
-                )
-        except Exception:
-            results = []
-        if results:
-            dedup: dict[tuple[str, str, str], dict[str, Any]] = {}
-            for item in results:
-                key = (
-                    str(item.get("full_name") or item.get("object_name") or ""),
-                    str(item.get("content_hash") or ""),
-                    str(item.get("topic_path") or ""),
-                )
-                dedup[key] = item
-            return sorted(
-                dedup.values(),
-                key=lambda item: _object_exact_sort_key(name_clean, item),
-            )
+    client = QdrantClient(host=host, port=port, check_compatibility=False)
+    if not client.collection_exists(API_OBJECTS_COLLECTION_NAME):
         return []
-    except Exception as exc:
-        if is_qdrant_unreachable_error(exc):
-            return []
-        raise
+    results: list[dict[str, Any]] = []
+    for field in ("name", "full_name", "object_name", "aliases", "surface_aliases"):
+        results.extend(
+            _scroll_exact_object_matches(
+                client,
+                field=field,
+                value=name_clean,
+                version=version,
+                language=language,
+            )
+        )
+    if results:
+        dedup: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for item in results:
+            key = (
+                str(item.get("full_name") or item.get("object_name") or ""),
+                str(item.get("content_hash") or ""),
+                str(item.get("topic_path") or ""),
+            )
+            dedup[key] = item
+        return sorted(
+            dedup.values(),
+            key=lambda item: _object_exact_sort_key(name_clean, item),
+        )
+    return []
 
 
 def get_api_related(
@@ -2871,34 +2853,25 @@ def get_api_related(
     from qdrant_client import QdrantClient
     from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-    from ..shared.qdrant_errors import is_qdrant_unreachable_error
-
-    try:
-        client = QdrantClient(
-            host=env_config.get_qdrant_host(),
-            port=env_config.get_qdrant_port(),
-            check_compatibility=False,
-        )
-        if not client.collection_exists(API_LINKS_COLLECTION_NAME):
-            return []
-        must = [FieldCondition(key="source_full_name", match=MatchValue(value=name_clean))]
-        if language:
-            must.append(FieldCondition(key="language", match=MatchValue(value=language)))
-        points, _ = client.scroll(
-            collection_name=API_LINKS_COLLECTION_NAME,
-            scroll_filter=Filter(must=must),
-            limit=100,
-            with_payload=True,
-            with_vectors=False,
-        )
-        out = [dict(getattr(point, "payload", None) or {}) for point in points or []]
-        if version:
-            out = [item for item in out if payload_matches_platform_version(item, version)]
-        out.sort(
-            key=lambda item: (str(item.get("link_kind") or ""), str(item.get("target_name") or ""))
-        )
-        return out
-    except Exception as exc:
-        if is_qdrant_unreachable_error(exc):
-            return []
-        raise
+    client = QdrantClient(
+        host=env_config.get_qdrant_host(),
+        port=env_config.get_qdrant_port(),
+        check_compatibility=False,
+    )
+    if not client.collection_exists(API_LINKS_COLLECTION_NAME):
+        return []
+    must = [FieldCondition(key="source_full_name", match=MatchValue(value=name_clean))]
+    if language:
+        must.append(FieldCondition(key="language", match=MatchValue(value=language)))
+    points, _ = client.scroll(
+        collection_name=API_LINKS_COLLECTION_NAME,
+        scroll_filter=Filter(must=must),
+        limit=100,
+        with_payload=True,
+        with_vectors=False,
+    )
+    out = [dict(getattr(point, "payload", None) or {}) for point in points or []]
+    if version:
+        out = [item for item in out if payload_matches_platform_version(item, version)]
+    out.sort(key=lambda item: (str(item.get("link_kind") or ""), str(item.get("target_name") or "")))
+    return out

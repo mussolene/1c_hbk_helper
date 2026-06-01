@@ -24,31 +24,12 @@ QDRANT_VERSION ?= 1.12.0
 # -f base + overlay: merge вместо include (избегаем "conflicts with imported resource")
 COMPOSE = docker compose -f docker-compose.base.yml -f docker-compose.yml
 COMPOSE_FULL = docker compose -f docker-compose.base.yml -f docker-compose.full.yml
-COMPOSE_BSL = docker compose -f docker-compose.bsl.yml
-
-# BSL_HOST_PROJECTS_ROOT: PowerShell ($env:) / export (sh) / set (cmd). Docker — слэши /
-BSL_ROOT = $(subst \\,/,$(CURDIR))
-ifneq ($(findstring powershell,$(SHELL))$(findstring pwsh,$(SHELL)),)
-  BSL_SET = $$env:BSL_HOST_PROJECTS_ROOT="$(BSL_ROOT)";
-else ifneq ($(findstring sh,$(SHELL)),)
-  BSL_SET = export BSL_HOST_PROJECTS_ROOT="$(BSL_ROOT)" &&
-else
-  BSL_SET = set "BSL_HOST_PROJECTS_ROOT=$(BSL_ROOT)" &&
-endif
-
 # По умолчанию split; для full добавлять -full к таргету
 INGEST_SERVICE = ingest-worker
 INDEX_STATUS_SERVICE = mcp
 
-.PHONY: build build-nocache build-full fetch-bsl-ls-docker-deps parse-fastcode parse-helpf load-snippets load-snippets-from-project load-standards snippets
-.PHONY: ordinary-form-extract ordinary-form-pack ordinary-form-verify
-.PHONY: up down ingest-up ingest-down ingest-worker up-full down-full bsl-start bsl-stop qdrant-logs ingest-logs ollama-logs qdrant-reset qdrant-download qdrant-backup qdrant-restore quick-start-prebuilt ensure-data
-
-# Docker BSL LS stack: vendored git clone as build context (Docker cannot always use remote URL)
-deps/mcp-bsl-lsp-bridge/.git/HEAD:
-	git clone --depth 1 https://github.com/SteelMorgan/mcp-bsl-lsp-bridge.git deps/mcp-bsl-lsp-bridge
-
-fetch-bsl-ls-docker-deps: deps/mcp-bsl-lsp-bridge/.git/HEAD
+.PHONY: build build-nocache build-full parse-fastcode parse-helpf load-snippets load-snippets-from-project load-standards snippets
+.PHONY: up down ingest-up ingest-down ingest-worker up-full down-full qdrant-logs ingest-logs ollama-logs qdrant-reset qdrant-download qdrant-backup qdrant-restore quick-start-prebuilt ensure-data
 .PHONY: init init-full reinit reinit-full ingest ingest-full build-index build-index-full add-bm25 add-bm25-full
 .PHONY: dashboard unpack-help help
 
@@ -65,21 +46,6 @@ build-nocache:
 # Сборка образа (full, один контейнер mcp)
 build-full:
 	$(COMPOSE_FULL) build mcp
-
-# Обычная форма: FROM=.../Forms/.../Ext TO=build/...  EXTRA='--token-xml --copy-original'
-ordinary-form-extract:
-	@test -n "$(FROM)" && test -n "$(TO)" || (echo "Usage: make ordinary-form-extract FROM=path/to/Ext TO=out/dir [EXTRA=--token-xml]"; exit 1)
-	python3 tools/1c/ordinary_form_roundtrip.py extract "$(FROM)" "$(TO)" $(EXTRA)
-
-# DIR=каталог extract, DEST=путь к Form.bin  EXTRA=--from-token-xml (если правили tokens XML)
-ordinary-form-pack:
-	@test -n "$(DIR)" && test -n "$(DEST)" || (echo "Usage: make ordinary-form-pack DIR=out/dir DEST=path/Form.bin [EXTRA=--from-token-xml]"; exit 1)
-	python3 tools/1c/ordinary_form_roundtrip.py pack "$(DIR)" "$(DEST)" $(EXTRA)
-
-# FROM=Form.bin или каталог Ext/
-ordinary-form-verify:
-	@test -n "$(FROM)" || (echo "Usage: make ordinary-form-verify FROM=path/to/Form.bin-or-Ext [EXTRA=--with-stream-tokens]"; exit 1)
-	python3 tools/1c/ordinary_form_roundtrip.py verify "$(FROM)" $(EXTRA)
 
 # Parse FastCode.im templates → data/snippets/fastcode_snippets.json (в контейнере: /data/snippets)
 parse-fastcode:
@@ -185,13 +151,6 @@ down:
 
 down-full:
 	$(COMPOSE_FULL) down
-
-# BSL LS bridge only (отдельный compose, не с up)
-bsl-start: fetch-bsl-ls-docker-deps
-	$(BSL_SET) $(COMPOSE_BSL) up -d
-
-bsl-stop:
-	$(COMPOSE_BSL) stop
 
 # Создать каталоги data/ для bind-mount. После потери data/qdrant: make ensure-data && make up; для индекса: make ingest-up
 ensure-data:
@@ -348,7 +307,6 @@ help:
 	@echo "  make load-snippets-from-project  Load from 1C project"
 	@echo "  make load-standards   Load standards (STANDARDS_REPOS)"
 	@echo "  make snippets         parse-fastcode + parse-helpf (FAQ) + load-snippets"
-	@echo "  make ordinary-form-extract / ordinary-form-pack / ordinary-form-verify  Обычная форма Form.bin ↔ текст (FROM/TO/DIR/DEST/EXTRA; см. docs/reference/ordinary-form-text-roundtrip.md)"
 	@echo "  make init             ingest + load-snippets + load-standards (не стирает)"
 	@echo "  make reinit           init (если индекс есть — без стирания). reinit ARGS='--force' — стереть и init"
 	@echo "  make unpack-help      Распаковка .hbk без индексации"
@@ -357,14 +315,11 @@ help:
 	@echo "  make build-index      Построение structured help из unpacked HTML (ARGS=путь)"
 	@echo "  make add-bm25         Добавить BM25 sparse. ARGS='--collection onec_config_metadata' — только эта коллекция"
 	@echo "  make dashboard        Дашборд (Tasks, Errors, Qdrant). ARGS='--once' — один кадр"
-	@echo "  make fetch-bsl-ls-docker-deps  Клонировать зависимость для docker-compose.bsl.yml"
 	@echo "  make up               Start qdrant + mcp + redis"
 	@echo "  make ingest-up        Start + ingest-worker (watchdog, индексация)"
 	@echo "  make ingest-down      Stop ingest-worker"
 	@echo "  make up-full          Start full (один контейнер mcp)"
 	@echo "  make down             Stop все сервисы"
-	@echo "  make bsl-start        Опционально: BSL LS в Docker (отдельно от up)"
-	@echo "  make bsl-stop         Stop BSL LS compose"
 	@echo "  make ensure-data      Создать data/qdrant и др. (после потери базы)"
 	@echo "  make qdrant-logs      Логи qdrant (при exit 101)"
 	@echo "  make ingest-logs     Логи ingest-worker (эмбеддинги, fallback)"

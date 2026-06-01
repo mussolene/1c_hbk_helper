@@ -12,6 +12,7 @@ from .help_structured import (
     API_LINKS_FILE,
     API_MEMBERS_FILE,
     API_OBJECTS_FILE,
+    _is_object_stub,
     canonical_topic_path,
     get_help_structured_dir,
     iter_help_topics_from_index,
@@ -144,7 +145,7 @@ def _score_case(query: str, item: dict[str, Any]) -> int:
     return score
 
 
-def _case_sort_key(query: str, item: dict[str, Any]) -> tuple[int, int, int, str]:
+def _case_sort_key(query: str, item: dict[str, Any]) -> tuple[int, int, int, int, int, str]:
     query_norm = _normalize_name(query)
     full_name = _normalize_name(str(item.get("full_name") or ""))
     member_name = _normalize_name(str(item.get("member_name") or ""))
@@ -158,9 +159,13 @@ def _case_sort_key(query: str, item: dict[str, Any]) -> tuple[int, int, int, str
         priority = 2
     else:
         priority = 3
+    stub_priority = 1 if _is_object_stub(item) else 0
+    content_priority = 0 if item.get("summary") or item.get("description") else 1
     return (
         priority,
         owner_priority,
+        stub_priority,
+        content_priority,
         -_score_case(query, item),
         _normalize_name(str(item.get("full_name") or item.get("title") or "")),
     )

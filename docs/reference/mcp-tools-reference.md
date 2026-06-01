@@ -141,6 +141,5 @@ PYTHONPATH=src python3 -m onec_help metadata-graph-build data/metadata_export
 ## См. также
 
 - [mcp-tools-cheatsheet.md](mcp-tools-cheatsheet.md) — короткая шпаргалка по выбору MCP-инструмента.
-- [../../AGENTS.md](../../AGENTS.md) — порядок вызовов: MCP onec-context-mcp + BSL LS (CLI/IDE).
 - [../cursor-examples/README.md](../cursor-examples/README.md) — Skill и Rules для Cursor.
 - [search-and-mcp.md](search-and-mcp.md) — качество поиска, BM25 и runtime MCP route.

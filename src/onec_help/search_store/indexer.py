@@ -1383,6 +1383,7 @@ def search_index(
     entity_type: str | None = None,
     full_payload: bool = False,
     query_vector: list[float] | None = None,
+    fail_on_qdrant_unreachable: bool = False,
 ):
     """Search Qdrant; return list of payloads with path, title, text snippet.
     version, language, entity_type: optional payload filters.
@@ -1493,6 +1494,8 @@ def search_index(
         return raw
     except Exception as e:
         if is_qdrant_unreachable_error(e):
+            if fail_on_qdrant_unreachable:
+                raise
             return []
         raise
 
@@ -1522,6 +1525,7 @@ def search_hybrid(
     collection: str = COLLECTION_NAME,
     full_payload: bool = False,
     query_vector: list[float] | None = None,
+    fail_on_qdrant_unreachable: bool = False,
 ) -> list[dict[str, Any]]:
     """Semantic + keyword search merged with RRF (Reciprocal Rank Fusion).
     Used by MCP and can be reused elsewhere.
@@ -1537,6 +1541,7 @@ def search_hybrid(
         entity_type=entity_type,
         full_payload=full_payload,
         query_vector=query_vector,
+        fail_on_qdrant_unreachable=fail_on_qdrant_unreachable,
     )
     keyword_list = search_index_keyword(
         query,
@@ -1548,6 +1553,7 @@ def search_hybrid(
         language=language,
         entity_type=entity_type,
         full_payload=full_payload,
+        fail_on_qdrant_unreachable=fail_on_qdrant_unreachable,
     )
     rrf_scores: dict[str, float] = {}
     key_to_doc: dict[str, dict[str, Any]] = {}
@@ -1646,6 +1652,7 @@ def search_index_keyword(
     language: str | None = None,
     entity_type: str | None = None,
     full_payload: bool = False,
+    fail_on_qdrant_unreachable: bool = False,
 ) -> list[dict[str, Any]]:
     """Search by keyword. Uses BM25 sparse if available, else payload.keywords/substring.
     full_payload=True: return full Qdrant payload (needed for structured API collections)."""
@@ -1659,6 +1666,8 @@ def search_index_keyword(
         client = _get_default_qdrant_client(host, port)
     except Exception as e:
         if is_qdrant_unreachable_error(e):
+            if fail_on_qdrant_unreachable:
+                raise
             return []
         raise
     q_lower = query.strip().lower()
@@ -1773,6 +1782,8 @@ def search_index_keyword(
                             out = with_title + without
                         return out
         except Exception as e:
+            if fail_on_qdrant_unreachable and is_qdrant_unreachable_error(e):
+                raise
             logging.getLogger(__name__).debug("search_index_keyword BM25 path failed: %s", e)
 
     # Fallback: payload.keywords or substring scroll
@@ -1863,7 +1874,9 @@ def search_index_keyword(
             if offset is not None:
                 kwargs["offset"] = offset
             res, next_offset = client.scroll(**kwargs)
-        except Exception:
+        except Exception as e:
+            if fail_on_qdrant_unreachable and is_qdrant_unreachable_error(e):
+                raise
             break
         if not res:
             break
@@ -1887,7 +1900,9 @@ def search_index_keyword(
                 if offset is not None:
                     kwargs["offset"] = offset
                 res, next_offset = client.scroll(**kwargs)
-            except Exception:
+            except Exception as e:
+                if fail_on_qdrant_unreachable and is_qdrant_unreachable_error(e):
+                    raise
                 break
             if not res:
                 break

@@ -159,6 +159,66 @@ def test_build_structured_help_scorecard_reports_metrics(tmp_path: Path) -> None
     assert scorecard["targets"]["exact_top1_pct"]["met"] is True
 
 
+def test_build_structured_help_scorecard_prefers_real_object_over_stub(tmp_path: Path) -> None:
+    _write_jsonl(
+        tmp_path / "api_objects.jsonl",
+        [
+            {
+                "id": 1,
+                "object_name": "ЭлементыФормы",
+                "full_name": "ЭлементыФормы",
+                "kind": "type",
+                "summary": "",
+                "topic_path": "",
+                "title": "ЭлементыФормы",
+                "resolver_kind": "stub",
+            },
+            {
+                "id": 2,
+                "object_name": "ЭлементыФормы",
+                "full_name": "ЭлементыФормы",
+                "kind": "type",
+                "summary": "Используется для доступа к элементам управления.",
+                "topic_path": "shcntx_ru/objects/catalog56/catalog246/Controls.html",
+                "title": "ЭлементыФормы (Controls)",
+                "resolver_kind": "platform_object",
+            },
+        ],
+    )
+    _write_jsonl(tmp_path / "api_members.jsonl", [])
+    _write_jsonl(tmp_path / "api_examples.jsonl", [])
+    _write_jsonl(tmp_path / "api_links.jsonl", [])
+    bench = tmp_path / "bench.json"
+    bench.write_text(
+        json.dumps(
+            [
+                {
+                    "query": "ЭлементыФормы",
+                    "entity": "object",
+                    "expected_full_name": "ЭлементыФормы",
+                    "expected_kind": "type",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    with (
+        patch(
+            "onec_help.knowledge.help_structured_scorecard.iter_help_topics_from_unpacked",
+            return_value=[],
+        ),
+        patch(
+            "onec_help.knowledge.help_structured_scorecard.iter_help_topics_from_index",
+            return_value=[],
+        ),
+    ):
+        scorecard = build_structured_help_scorecard(snapshot_dir=tmp_path, benchmark_path=bench)
+
+    assert scorecard["benchmark"]["structured_sufficient_pct"] == 100.0
+    assert scorecard["cases"][0]["top_hit_path"].endswith("Controls.html")
+
+
 def test_build_structured_help_scorecard_uses_member_name_for_bare_query(tmp_path: Path) -> None:
     _write_jsonl(tmp_path / "api_objects.jsonl", [])
     _write_jsonl(

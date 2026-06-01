@@ -2,13 +2,7 @@
 
 ## Пути к .bsl
 
-Используйте пути в workspace (относительные или абсолютные). Для BSL LS CLI:
-
-```bash
-java -jar "$JAR" analyze -s ./Documents/MyDoc/Ext/ObjectModule.bsl -r console -q
-```
-
-Опционально `make bsl-start` монтирует `.:/projects:ro` — пути внутри контейнера `/projects/...`.
+Используйте пути в workspace (относительные или абсолютные).
 
 ## Пример вызова get_1c_api_answer
 
@@ -52,20 +46,11 @@ save_1c_snippet(
 )
 ```
 
-## BSL LS: диагностики без быстрого исправления
-
-Многие диагностики BSL LS (SemicolonPresence, LineLength и др.) не имеют quick-fix в `code_actions`. Исправлять вручную:
-
-- Добавить точку с запятой после `ВызватьИсключение "..."`
-- Разбить длинные строки или добавить `// BSLLS:LineLength-off` с кратким обоснованием
-- Использовать `#Область` / `#КонецОбласти` для структуры
-
-## onec-context-mcp и BSL LS
+## onec-context-mcp и локальный код
 
 - **onec-context-mcp** (MCP): справка, сниппеты, память, метаданные.
-- **BSL LS**: CLI `analyze`/`format`, IDE, опционально Docker в этом репо.
 
-Если индекса справки нет: опираться на BSL LS и локальные файлы проекта.
+Если индекса справки нет: опираться на локальные файлы проекта.
 
 ## Python-тесты (onec_help)
 
@@ -86,7 +71,6 @@ ruff check src tests && ruff format src tests
 
 Подробно: `docs/reference/1c-testing-guide.md` в репозитории.
 
-- **BSL LS** (`analyze` / IDE): статический анализ — ошибки, предупреждения, стиль. После правок по BSL; это не runtime-тесты.
 - **YaxUnit** (или xUnitFor1C): unit-тесты процедур/функций 1С. **Где искать:** `Tests/`, подсистемы тестов, модули `*Тест*`. Запуск через 1С:Предприятие, EDT или CLI.
 - **Vanessa-Automation** (xdd, UI): BDD (Gherkin `.feature`), data-driven (xdd), UI-автоматизация, приёмочные тесты. **Где искать:** `features/`, `BDD/`, каталоги с `.feature` и шагами.
 - **CoverageBSL**: измерение покрытия кода BSL в 1С:Предприятие и OneScript.

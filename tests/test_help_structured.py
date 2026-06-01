@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from onec_help.knowledge.help_structured import (
     _stable_record_hash_for_merge,
     build_structured_api_snapshot,
@@ -20,6 +22,7 @@ from onec_help.knowledge.help_structured import (
     load_api_members,
     load_api_objects,
     payload_matches_platform_version,
+    search_api_members,
     search_official_examples,
 )
 
@@ -726,6 +729,67 @@ def test_build_structured_api_snapshot_keeps_object_paths_per_version(tmp_path: 
     assert "content_hash" in objects[0]
 
 
+def test_build_structured_api_snapshot_skips_stub_when_real_object_exists_same_version(
+    tmp_path: Path,
+) -> None:
+    unpacked_dir = tmp_path / "unpacked"
+    stem_dir = unpacked_dir / "8.3.27.1859" / "shcntx_ru"
+    object_dir = stem_dir / "objects" / "catalog56" / "catalog246"
+    method_dir = object_dir / "Controls" / "methods"
+    method_dir.mkdir(parents=True, exist_ok=True)
+    (stem_dir / ".hbk_info.json").write_text(
+        '{"version":"8.3.27.1859","language":"ru","label":"Синтаксис"}',
+        encoding="utf-8",
+    )
+    (stem_dir / ".toc.json").write_text(
+        json.dumps(
+            [
+                {
+                    "path": "/objects/catalog56/catalog246/Controls.html",
+                    "title_ru": "ЭлементыФормы",
+                    "entity_type": "topic",
+                },
+                {
+                    "path": "/objects/catalog56/catalog246/Controls/methods/Add68.html",
+                    "title_ru": "Добавить",
+                    "breadcrumb": ["ЭлементыФормы"],
+                    "entity_type": "topic",
+                },
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (object_dir / "Controls.html").write_text(
+        """<html><body>
+<h1 class="V8SH_pagetitle">ЭлементыФормы (Controls)</h1>
+<p class="V8SH_chapter">Описание:</p><p>Используется для доступа к элементам управления.</p>
+<p class="V8SH_chapter">Доступность:</p><p>Толстый клиент.</p>
+</body></html>""",
+        encoding="utf-8",
+    )
+    (method_dir / "Add68.html").write_text(
+        """<html><body>
+<h1 class="V8SH_pagetitle">ЭлементыФормы.Добавить (Controls.Add)</h1>
+<p class="V8SH_chapter">Синтаксис:</p>Добавить(&lt;Тип&gt;)
+<p class="V8SH_chapter">Описание:</p><p>Добавляет элемент управления.</p>
+</body></html>""",
+        encoding="utf-8",
+    )
+
+    manifest = build_structured_api_snapshot(tmp_path / "snapshot", unpacked_dir=unpacked_dir)
+    objects = [
+        item for item in load_api_objects(tmp_path / "snapshot") if item["object_name"] == "ЭлементыФормы"
+    ]
+    members = load_api_members(tmp_path / "snapshot")
+
+    assert manifest["objects"] == 1
+    assert len(objects) == 1
+    assert objects[0]["resolver_kind"] == "platform_object"
+    assert objects[0]["summary"] == "Используется для доступа к элементам управления."
+    assert members[0]["full_name"] == "ЭлементыФормы.Добавить"
+
+
 def test_get_api_member_prefers_exact_member_name_for_bare_query() -> None:
     from unittest.mock import patch
 
@@ -869,6 +933,41 @@ def test_get_api_object_never_calls_hybrid_search() -> None:
     mock_hybrid.assert_not_called()
 
 
+def test_get_api_member_propagates_qdrant_scroll_error() -> None:
+    class _Client:
+        def collection_exists(self, _name: str) -> bool:
+            return True
+
+        def scroll(self, **_kwargs):
+            raise RuntimeError("qdrant filter failed")
+
+    with patch("qdrant_client.QdrantClient", return_value=_Client()):
+        with pytest.raises(RuntimeError, match="qdrant filter failed"):
+            get_api_member("Тип.Метод")
+
+
+def test_search_api_members_propagates_qdrant_unreachable() -> None:
+    with patch(
+        "onec_help.search_store.indexer._get_default_qdrant_client",
+        side_effect=ConnectionRefusedError("refused"),
+    ):
+        with pytest.raises(ConnectionRefusedError):
+            search_api_members("Тип.Метод")
+
+
+def test_get_api_object_propagates_qdrant_scroll_error() -> None:
+    class _Client:
+        def collection_exists(self, _name: str) -> bool:
+            return True
+
+        def scroll(self, **_kwargs):
+            raise RuntimeError("qdrant filter failed")
+
+    with patch("qdrant_client.QdrantClient", return_value=_Client()):
+        with pytest.raises(RuntimeError, match="qdrant filter failed"):
+            get_api_object("Тип")
+
+
 def test_get_api_object_exact_matches_object_name_and_full_name() -> None:
     from unittest.mock import patch
 
@@ -920,6 +1019,61 @@ def test_get_api_object_exact_matches_object_name_and_full_name() -> None:
 
     assert len(results) == 1
     assert results[0]["full_name"] == "РежимСовместимости"
+
+
+def test_get_api_object_orders_real_object_before_stub() -> None:
+    from unittest.mock import patch
+
+    class _Client:
+        def collection_exists(self, _name: str) -> bool:
+            return True
+
+        def scroll(self, *, scroll_filter, **_kwargs):
+            field = scroll_filter.must[0].key
+            value = scroll_filter.must[0].match.value
+            if value != "ЭлементыФормы" or field != "full_name":
+                return [], None
+            return [
+                type(
+                    "_Point",
+                    (),
+                    {
+                        "payload": {
+                            "full_name": "ЭлементыФормы",
+                            "object_name": "ЭлементыФормы",
+                            "title": "ЭлементыФормы",
+                            "summary": "",
+                            "topic_path": "",
+                            "version": "8.5.1.1236",
+                            "resolver_kind": "stub",
+                            "content_hash": "stub",
+                        }
+                    },
+                )(),
+                type(
+                    "_Point",
+                    (),
+                    {
+                        "payload": {
+                            "full_name": "ЭлементыФормы",
+                            "object_name": "ЭлементыФормы",
+                            "title": "ЭлементыФормы (Controls)",
+                            "summary": "Используется для доступа к элементам управления.",
+                            "topic_path": "shcntx_ru/objects/catalog56/catalog246/Controls.html",
+                            "version": "8.5.1.1236",
+                            "resolver_kind": "platform_object",
+                            "content_hash": "real",
+                        }
+                    },
+                )(),
+            ], None
+
+    with patch("qdrant_client.QdrantClient", return_value=_Client()):
+        results = get_api_object("ЭлементыФормы")
+
+    assert results[0]["resolver_kind"] == "platform_object"
+    assert results[0]["title"] == "ЭлементыФормы (Controls)"
+    assert results[1]["resolver_kind"] == "stub"
 
 
 def test_canonical_topic_path_strips_version_prefix() -> None:

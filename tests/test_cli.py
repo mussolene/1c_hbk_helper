@@ -721,6 +721,36 @@ def test_cmd_reinit_force(
 
 
 @patch("onec_help.interfaces.mcp_server.run_mcp")
+def test_cmd_mcp_calls_interfaces_server(mock_run_mcp, tmp_path: Path) -> None:
+    args = make_args(
+        directory=str(tmp_path),
+        transport="streamable-http",
+        host="127.0.0.1",
+        port=8050,
+        path="/mcp",
+    )
+
+    assert cmd_mcp(args) == 0
+    mock_run_mcp.assert_called_once()
+    call = mock_run_mcp.call_args.kwargs
+    assert call["help_path"] == tmp_path.resolve()
+    assert call["transport"] == "streamable-http"
+    assert call["host"] == "127.0.0.1"
+    assert call["port"] == 8050
+    assert call["path"] == "/mcp"
+
+
+@patch("onec_help.interfaces.mcp_server.run_mcp")
+def test_cmd_mcp_uses_help_path_env_when_directory_missing(mock_run_mcp, tmp_path: Path) -> None:
+    with patch("onec_help.interfaces.cli.env_config.get_help_path", return_value=str(tmp_path)):
+        args = make_args(directory="", transport="stdio", host=None, port=None, path=None)
+
+        assert cmd_mcp(args) == 0
+
+    assert mock_run_mcp.call_args.kwargs["help_path"] == tmp_path.resolve()
+
+
+@patch("onec_help.interfaces.mcp_server.run_mcp")
 def test_cmd_mcp_runtime_error_fastmcp(mock_run_mcp, capsys: pytest.CaptureFixture[str]) -> None:
     """cmd_mcp returns 1 when run_mcp raises RuntimeError mentioning fastmcp."""
     mock_run_mcp.side_effect = RuntimeError("fastmcp not installed")

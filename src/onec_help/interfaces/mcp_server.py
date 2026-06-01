@@ -472,16 +472,10 @@ def _search_api_topics(
     query_vector: list[float] | None = None,
 ) -> list[dict[str, Any]]:
     from ..knowledge.help_structured import search_api_topics
-    from ..shared.qdrant_errors import is_qdrant_unreachable_error
 
-    try:
-        return search_api_topics(
-            query, limit=limit, version=version, language=language, query_vector=query_vector
-        )
-    except Exception as exc:
-        if is_qdrant_unreachable_error(exc):
-            return []
-        raise
+    return search_api_topics(
+        query, limit=limit, version=version, language=language, query_vector=query_vector
+    )
 
 
 def _get_api_related(
@@ -854,9 +848,19 @@ def _structured_item_matches_version(item: dict[str, Any], version: str | None) 
     return str(item.get("version") or "").strip() == version
 
 
+def _structured_object_stub_priority(item: dict[str, Any]) -> int:
+    if item.get("member_name"):
+        return 0
+    if str(item.get("resolver_kind") or "") == "stub":
+        return 1
+    if not str(item.get("topic_path") or item.get("path") or "").strip():
+        return 1
+    return 0
+
+
 def _structured_api_sort_key(
     query: str, item: dict[str, Any]
-) -> tuple[int, int, bool, tuple[int, ...], str]:
+) -> tuple[int, int, int, int, bool, tuple[int, ...], str]:
     query_lower = (query or "").strip().lower()
     name_lower = str(item.get("name") or "").strip().lower()
     title_lower = str(item.get("title") or "").strip().lower()
@@ -896,6 +900,8 @@ def _structured_api_sort_key(
     return (
         priority,
         content_no_match,
+        _structured_object_stub_priority(item),
+        0 if item.get("summary") or item.get("description") or item.get("text") else 1,
         _member_sort_key(query_lower, name_lower or title_lower),
         _structured_platform_version_key(str(item.get("version") or "")),
         str(item.get("topic_path") or item.get("path") or ""),
@@ -1247,7 +1253,27 @@ def _dedup_structured_hits(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             str(item.get("topic_path") or item.get("path") or ""),
         )
         dedup[key] = item
-    return list(dedup.values())
+    out = list(dedup.values())
+    real_object_names = {
+        str(item.get("full_name") or item.get("name") or item.get("title") or "").strip().lower()
+        for item in out
+        if str(item.get("full_name") or item.get("name") or item.get("title") or "").strip()
+        and _structured_object_stub_priority(item) == 0
+        and not item.get("member_name")
+    }
+    if not real_object_names:
+        return out
+    return [
+        item
+        for item in out
+        if not (
+            _structured_object_stub_priority(item) > 0
+            and str(item.get("full_name") or item.get("name") or item.get("title") or "")
+            .strip()
+            .lower()
+            in real_object_names
+        )
+    ]
 
 
 def _question_structured_sort_key(
@@ -3350,7 +3376,7 @@ def _build_mcp_app(help_path: Path) -> Any:
             "Dotted BSL/query-like strings map to graph ids using the configuration object name only (first segment after the type prefix). "
             "Same name under different types: pass object_type. " + manager_help_hint_line() + "\n"
             "6. Check index health: get_1c_help_index_status.\n"
-            "7. Validate .bsl with BSL Language Server: CLI `java -jar … analyze` (see docs/cursor-examples/bsl-language-server-local) or `make bsl-start` for optional Docker; IDE BSL extension also works.\n"
+            "7. Validate .bsl with the project's own checks or IDE diagnostics.\n"
             "8. Save reusable verified code only: save_1c_snippet(code_snippet, description, title).\n"
             "Key pitfalls: ПрочитатьJSON→Структура (use ПрочитатьВСоответствие=Истина for Соответствие); "
             "HTTPСоединение.Получить server-only; НачатьТранзакцию needs Попытка+ОтменитьТранзакцию."
@@ -3359,15 +3385,15 @@ def _build_mcp_app(help_path: Path) -> Any:
             "1C-HELP REFACTOR WORKFLOW:\n"
             "1. Find symbols: IDE go-to-symbol, or search repo (rg/git grep) for procedure/function names.\n"
             "2. Read/edit modules with clear paths (Documents/…/ObjectModule.bsl, Forms/…/Module.bsl).\n"
-            "3. After edits: run BSL LS analyze on changed paths (CLI JAR or `make bsl-start` stack).\n"
+            "3. After edits: run the project's BSL checks or IDE diagnostics on changed paths.\n"
             "4. Rename/refactor in Configurator or IDE; keep modules consistent with metadata from onec-context-mcp.\n"
-            "5. Prefer small commits; re-run analyze on touched .bsl trees."
+            "5. Prefer small commits; re-run project checks on touched .bsl trees."
         )
         _guide_test = (
             "1C-HELP TEST WORKFLOW:\n"
-            "1. After every .bsl edit: BSL LS `analyze` (or IDE diagnostics) — fix Error/Warning per team policy.\n"
+            "1. After every .bsl edit: run project checks or IDE diagnostics — fix Error/Warning per team policy.\n"
             "2. Paths: use workspace-relative paths; Cyrillic paths are fine on disk — encode only if you embed file URIs.\n"
-            "3. Before commit: (a) справка использована? (b) BSL LS clean enough? (c) save_1c_snippet только для проверенного переиспользуемого кода?"
+            "3. Before commit: (a) справка использована? (b) локальные проверки чистые? (c) save_1c_snippet только для проверенного переиспользуемого кода?"
         )
         if task == "develop":
             return _guide_develop
@@ -3379,9 +3405,9 @@ def _build_mcp_app(help_path: Path) -> Any:
 
     @mcp.prompt
     def how_to_use_1c_help_and_bsl_ls(task: str = "all") -> str:
-        """Human/onboarding prompt: onec-context-mcp MCP + BSL Language Server (CLI/IDE), not a second MCP.
+        """Human/onboarding prompt: onec-context-mcp MCP + project/IDE BSL checks.
         Not the default AI route; for autonomous workflow use get_1c_quick_guide instead."""
-        block_develop = """onec-context-mcp + BSL LS — DEVELOP (human/onboarding prompt)
+        block_develop = """onec-context-mcp — DEVELOP (human/onboarding prompt)
 - AI-first route: get_1c_quick_guide(task="develop") first.
 - Exact API: get_1c_api_answer(name); rich sections: get_1c_api_answer(name, detail="full"). Surface chain (например, Документы.Имя.Метод): resolve_1c_api_name(name) → get_1c_api_answer(name). Natural-language question: answer_1c_help_question(question). Structured object: get_1c_api_object(name). Broad structured lookup: search_1c_api(query); official examples section: search_1c_api(query, include_examples=True).
 - Local anti-hallucination context: get_1c_task_context(query, file_uri=..., symbol_name=...).
@@ -3390,26 +3416,26 @@ def _build_mcp_app(help_path: Path) -> Any:
 - Empty or poor help results: first call get_1c_help_index_status to verify index.
 - Save reusable verified code only: save_1c_snippet(code_snippet, description, title).
 - get_form_metadata(xml_content): pass full Form.xml with all xmlns declarations. get_module_info(uri_or_path): path to Module.bsl or ObjectModule.bsl.
-- After editing .bsl: run BSL Language Server — CLI `java -jar … analyze` (see docs/cursor-examples/bsl-language-server-local/SKILL.md), or your IDE’s BSL extension, or optional Docker `make bsl-start` in this repo."""
-        block_refactor = """BSL LS + репозиторий — REFACTOR (human/onboarding prompt)
+- After editing .bsl: run the project's checks or IDE diagnostics."""
+        block_refactor = """Репозиторий — REFACTOR (human/onboarding prompt)
 - Навигация: поиск по проекту (rg/git grep), «перейти к символу» в IDE, чтение модулей по путям выгрузки (Documents/…/ObjectModule.bsl, Forms/…/Module.bsl).
-- После правок: `analyze` на затронутые каталоги или файлы .bsl (JAR BSL LS) либо диагностики IDE.
+- После правок: проверка затронутых каталогов или файлов .bsl средствами проекта либо диагностики IDE.
 - Рефакторинг имён и структуры — в конфигураторе или инструментах IDE; метаданные сверяйте с onec-context-mcp (search_1c_metadata_*, get_1c_metadata_object)."""
-        block_test = """BSL LS — TEST (human/onboarding prompt)
-- После правок .bsl: прогон BSL LS analyze (или панель проблем IDE) — устранить Error и значимые Warning по политике команды.
-- Чеклист перед коммитом: использован get_1c_quick_guide? BSL LS без критичных замечаний? save_1c_snippet только для проверенного переиспользуемого кода?"""
+        block_test = """BSL — TEST (human/onboarding prompt)
+- После правок .bsl: прогон проверок проекта или панели проблем IDE — устранить Error и значимые Warning по политике команды.
+- Чеклист перед коммитом: использован get_1c_quick_guide? локальные проверки без критичных замечаний? save_1c_snippet только для проверенного переиспользуемого кода?"""
         if task == "develop":
             return block_develop
         if task == "refactor":
             return block_refactor
         if task == "test":
             return block_test
-        return """Human/onboarding guide for onec-context-mcp + BSL Language Server (CLI/IDE). For AI work prefer get_1c_quick_guide; use this prompt for a long manual. Shorter blocks: task=develop|refactor|test.
+        return """Human/onboarding guide for onec-context-mcp + local project/IDE BSL checks. For AI work prefer get_1c_quick_guide; use this prompt for a long manual. Shorter blocks: task=develop|refactor|test.
 
 ---
 1) ЧТО ГДЕ
 - Только MCP onec-context-mcp: справка платформы, примеры, метаданные конфигурации (KD2), сниппеты, стандарты, compare_1c_help, save_1c_snippet.
-- BSL LS не входит в MCP этого репозитория: статический анализ и форматирование — через exec-JAR (`analyze`/`format`), расширение IDE или опционально `make bsl-start` (Docker).
+- Статический анализ и форматирование BSL не входят в MCP этого репозитория: используйте проверки конкретного проекта или расширение IDE.
 
 ---
 2) onec-context-mcp — ORDER OF CALLS
@@ -3422,10 +3448,9 @@ def _build_mcp_app(help_path: Path) -> Any:
 - For methods always use full Тип.Метод in get_1c_api_answer.
 
 ---
-3) BSL LANGUAGE SERVER — ПРАКТИКА
-- JAR: см. docs/cursor-examples/bsl-language-server-local/SKILL.md (`analyze -s <dir> -r json -o <existing-dir>`, `format -s <path>`).
-- В репозитории onec-context-mcp: опционально `make fetch-bsl-ls-docker-deps` затем `make bsl-start` — отдельный контейнер с BSL LS (не путать с MCP onec-context-mcp на :8050).
-- Семантику платформы при спорах сверяйте с onec-context-mcp, а не только с замечаниями LS.
+3) BSL CHECKS — ПРАКТИКА
+- Используйте проверки конкретного проекта или расширение IDE.
+- Семантику платформы при спорах сверяйте с onec-context-mcp, а не только с локальными замечаниями.
 
 ---
 4) COMMON 1C PITFALLS
@@ -3452,7 +3477,7 @@ def _build_mcp_app(help_path: Path) -> Any:
 
     @mcp.prompt
     def get_mcp_workflow_guide() -> str:
-        """Returns the current onec-context-mcp + BSL LS workflow guide for human onboarding."""
+        """Returns the current onec-context-mcp workflow guide for human onboarding."""
         return _read_cursor_doc("cursor-examples/rules/1c-mcp-workflow.mdc")
 
     @mcp.prompt
@@ -3749,15 +3774,15 @@ def _main() -> None:
     p.add_argument(
         "directory",
         nargs="?",
-        default="data",
-        help="Help data directory (default: data or HELP_PATH)",
+        default=None,
+        help="Help data directory (default: HELP_PATH or DATA_DIR/help_structured)",
     )
     p.add_argument(
         "--transport",
         default=None,
         help="MCP transport: stdio, sse, http, streamable-http, multi (default: env MCP_TRANSPORT or streamable-http). 'multi' serves streamable-http + SSE simultaneously.",
     )
-    p.add_argument("--host", default=None, help="Host for HTTP (default: env MCP_HOST or 0.0.0.0)")
+    p.add_argument("--host", default=None, help="Host for HTTP (default: env MCP_HOST or 127.0.0.1)")
     p.add_argument("--port", type=int, default=None, help="Port (default: env MCP_PORT or 8050)")
     p.add_argument("--path", default=None, help="URL path (default: env MCP_PATH or /mcp)")
     args = p.parse_args()
@@ -3767,8 +3792,9 @@ def _main() -> None:
     host = (args.host or env_config.get_mcp_host()).strip()
     port = args.port if args.port is not None else env_config.get_mcp_port()
     path = (args.path or env_config.get_mcp_path()).strip()
+    help_path = Path(args.directory or env_config.get_help_path()).resolve()
     run_mcp(
-        help_path=Path(args.directory).resolve(),
+        help_path=help_path,
         transport=transport,
         host=host,
         port=port,

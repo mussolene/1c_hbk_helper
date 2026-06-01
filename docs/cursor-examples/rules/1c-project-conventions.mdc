@@ -5,5 +5,5 @@ alwaysApply: true
 
 # 1C Project Conventions
 
-- 1C code → BSL LS diagnostics; spravka/examples → onec-context-mcp
+- 1C API/spravka/examples → onec-context-mcp; code diagnostics → project tooling/IDE
 - Do not edit `.cursor/plans/`

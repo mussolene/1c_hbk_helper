@@ -1,5 +1,4 @@
 # Base: Qdrant + mcp. Include from docker-compose.yml (split) or docker-compose.full.yml.
-# BSL bridge — отдельно: make bsl-start (docker-compose.bsl.yml).
 # compose-spec: https://docs.docker.com/compose/compose-file/
 # Данные в ./data/ (в .gitignore) — backup: копируйте папку data/.
 # Переменные окружения: .env в корне проекта (скопируйте env.example в .env).
@@ -11,7 +10,7 @@ services:
     image: qdrant/qdrant:v1.12.0
     restart: unless-stopped
     ports:
-      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_BIND_ADDR:-127.0.0.1}:${QDRANT_PORT:-6333}:6333"
     volumes:
       - ./data/qdrant:/qdrant/storage
     healthcheck:
@@ -27,7 +26,7 @@ services:
       context: .
     restart: unless-stopped
     ports:
-      - "${MCP_PORT:-8050}:8050"
+      - "${MCP_BIND_ADDR:-127.0.0.1}:${MCP_PORT:-8050}:${MCP_CONTAINER_PORT:-8050}"
     environment:
       # api = только MCP (без фона). full = + ingest в фоне (тяжело).
       MCP_MODE: ${MCP_MODE:-api}
@@ -41,8 +40,9 @@ services:
       # Можно переопределить: MCP_TRANSPORT=streamable-http / sse / stdio в .env.
       MCP_TRANSPORT: ${MCP_TRANSPORT:-multi}
       MCP_HOST: ${MCP_HOST:-0.0.0.0}
-      MCP_PORT: "8050"
+      MCP_PORT: ${MCP_CONTAINER_PORT:-8050}
       MCP_PATH: ${MCP_PATH:-/mcp}
+      HELP_PATH: ${HELP_PATH:-/app/data/help_structured}
       HELP_LANGUAGES: ${HELP_LANGUAGES:-ru}
       INGEST_TEMP_DIR: ${INGEST_TEMP_DIR:-/tmp/help_ingest}
       INGEST_CACHE_FILE: ${INGEST_CACHE_FILE:-/app/var/ingest_cache/ingest_cache.db}
@@ -80,12 +80,12 @@ services:
       - ./data/backup:/data/backup
       - ./data/bm25_vocab:/app/data/bm25_vocab
     # Транспорт из MCP_TRANSPORT (по умолчанию multi: streamable-http + SSE на одном порту).
-    command: ["python", "-m", "onec_help.interfaces.mcp_server", "/app/data/help_structured", "--host", "0.0.0.0", "--port", "8050", "--path", "/mcp"]
+    command: ["python", "-m", "onec_help.interfaces.mcp_server"]
     depends_on:
       qdrant:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', 8050)); s.close()\" || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import os, socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', int(os.environ.get('MCP_PORT', '8050')))); s.close()\" || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5

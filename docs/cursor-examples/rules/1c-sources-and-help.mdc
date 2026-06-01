@@ -1,5 +1,5 @@
 ---
-description: Работа с исходниками 1С (BSL) и вопросами по платформе — справка onec-context-mcp MCP и проверка BSL LS (CLI/IDE).
+description: Работа с исходниками 1С (BSL) и вопросами по платформе через onec-context-mcp MCP.
 globs: "**/*.bsl,**/*.os,**/Form.xml,**/Module.bsl"
 alwaysApply: false
 ---
@@ -13,8 +13,7 @@ alwaysApply: false
 
 ## Статический анализ и формат
 
-- После правок `.bsl` — BSL LS `analyze` или диагностики IDE (как в skill 1c-mcp-development).
-- Вне MCP / офлайн — skill **bsl-language-server-local**: `java -jar … analyze` и `format` (см. `docs/cursor-examples/bsl-language-server-local/SKILL.md`).
+- После правок `.bsl` — проверка средствами проекта или диагностики IDE.
 
 ## Выгрузка метаданных (KD2)
 
@@ -22,4 +21,4 @@ alwaysApply: false
 
 ## Конфликт LS vs справка
 
-- Если диагностика BSL LS спорная относительно поведения 1С — приоритет у **официальной модели** из **onec-context-mcp**; правило/настройку LS при необходимости ослабить в конфиге проекта.
+- Если локальная диагностика спорит с поведением 1С — приоритет у **официальной модели** из **onec-context-mcp**; правило проекта при необходимости уточнить.

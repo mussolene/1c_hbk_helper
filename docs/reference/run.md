@@ -18,7 +18,7 @@ docker run -d -p 6333:6333 -v qdrant_data:/qdrant/storage qdrant/qdrant:v1.12.0
 HELP_SOURCE_BASE=/opt/1cv8 QDRANT_HOST=localhost PYTHONPATH=src python3 -m onec_help ingest
 
 # MCP (structured JSONL из Qdrant; каталог может быть пустым)
-PYTHONPATH=src python3 -m onec_help mcp . --transport streamable-http --host 0.0.0.0 --port 8050
+PYTHONPATH=src python3 -m onec_help mcp . --transport streamable-http --host 127.0.0.1 --port 8050
 ```
 
 ### Вариант B: пошагово (unpack → build-index)
@@ -32,7 +32,7 @@ PYTHONPATH=src python3 -m onec_help mcp . --transport streamable-http --host 0.0
    `QDRANT_HOST=localhost QDRANT_PORT=6333 PYTHONPATH=src python3 -m onec_help build-index ./unpacked`
 6. MCP локально (stdio или HTTP):
    `PYTHONPATH=src python3 -m onec_help mcp data/help_structured` (stdio) или
-   `PYTHONPATH=src python3 -m onec_help mcp data/help_structured --transport streamable-http --host 0.0.0.0 --port 8050`
+   `PYTHONPATH=src python3 -m onec_help mcp data/help_structured --transport streamable-http --host 127.0.0.1 --port 8050`
 
 ## Docker Compose
 

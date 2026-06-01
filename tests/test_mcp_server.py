@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -48,6 +49,64 @@ def test_structured_api_sort_key_prefers_newer_platform_version() -> None:
         key=lambda item: mcp_server._structured_api_sort_key(q, item),
     )
     assert ordered[0]["version"] == "8.5.1.1236"
+
+
+def test_structured_api_sort_key_prefers_real_object_over_stub() -> None:
+    stub = {
+        "full_name": "ТестовыйОбъект",
+        "name": "ТестовыйОбъект",
+        "title": "ТестовыйОбъект",
+        "summary": "",
+        "version": "8.5.1.1236",
+        "topic_path": "",
+        "resolver_kind": "stub",
+    }
+    real = {
+        "full_name": "ТестовыйОбъект",
+        "name": "ТестовыйОбъект",
+        "title": "ТестовыйОбъект (TestObject)",
+        "summary": "Реальная страница объекта.",
+        "version": "8.5.1.1236",
+        "topic_path": "shcntx_ru/objects/TestObject.html",
+        "resolver_kind": "platform_object",
+    }
+    ordered = sorted(
+        [stub, real],
+        key=lambda item: mcp_server._structured_api_sort_key("ТестовыйОбъект", item),
+    )
+    assert ordered[0]["resolver_kind"] == "platform_object"
+
+
+def test_dedup_structured_hits_drops_stub_when_real_object_present() -> None:
+    stub = {
+        "full_name": "ЭлементыФормы",
+        "name": "ЭлементыФормы",
+        "summary": "",
+        "version": "8.5.1.1236",
+        "topic_path": "",
+        "resolver_kind": "stub",
+    }
+    real = {
+        "full_name": "ЭлементыФормы",
+        "name": "ЭлементыФормы",
+        "summary": "Содержит коллекцию подчиненных элементов формы.",
+        "version": "8.5.1.1236",
+        "topic_path": "shcntx_ru/objects/FormItems.html",
+        "resolver_kind": "platform_object",
+    }
+    member = {
+        "full_name": "Форма.ЭлементыФормы",
+        "member_name": "ЭлементыФормы",
+        "summary": "Тип: ЭлементыФормы.",
+        "version": "8.5.1.1236",
+        "topic_path": "shcntx_ru/objects/Form/members/FormItems.html",
+    }
+
+    out = mcp_server._dedup_structured_hits([stub, real, member])
+
+    assert real in out
+    assert member in out
+    assert stub not in out
 
 
 def test_extract_fact_from_structured_includes_notes_compact() -> None:
@@ -137,6 +196,35 @@ def test_run_mcp_requires_fastmcp(help_sample_dir: Path) -> None:
     with patch.object(mcp_server, "_HAS_FASTMCP", False):
         with pytest.raises(RuntimeError, match="fastmcp"):
             mcp_server.run_mcp(help_sample_dir, transport="stdio")
+
+
+def test_direct_mcp_main_uses_help_path_env(tmp_path: Path) -> None:
+    with (
+        patch.object(sys, "argv", ["mcp_server"]),
+        patch.dict(
+            os.environ,
+            {
+                "HELP_PATH": str(tmp_path),
+                "MCP_TRANSPORT": "streamable-http",
+                "MCP_HOST": "127.0.0.1",
+                "MCP_PORT": "18050",
+                "MCP_PATH": "/custom",
+            },
+            clear=False,
+        ),
+        patch.object(mcp_server, "run_mcp") as mock_run_mcp,
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        mcp_server._main()
+
+    assert exit_info.value.code == 0
+    mock_run_mcp.assert_called_once_with(
+        help_path=tmp_path.resolve(),
+        transport="streamable-http",
+        host="127.0.0.1",
+        port=18050,
+        path="/custom",
+    )
 
 
 @patch.object(mcp_server, "_HAS_FASTMCP", True)
@@ -1568,7 +1656,7 @@ def test_mcp_tool_get_1c_task_context_via_app(mock_build_ctx, help_sample_dir: P
 
 
 def test_mcp_tool_get_1c_quick_guide_develop_via_app(help_sample_dir: Path) -> None:
-    """Quick guide should expose the AI-first route and BSL LS validation hint."""
+    """Quick guide should expose the AI-first route and local validation hint."""
     app = mcp_server._build_mcp_app(help_sample_dir)
     result = asyncio.run(app.call_tool("get_1c_quick_guide", {"task": "develop"}))
     text = result.content[0].text if result.content else ""
@@ -1578,4 +1666,5 @@ def test_mcp_tool_get_1c_quick_guide_develop_via_app(help_sample_dir: Path) -> N
     assert "get_1c_task_context" in text
     assert "search_1c_standards" in text
     assert "search_1c_metadata_exact" in text
-    assert "BSL Language Server" in text or "bsl-language-server" in text.lower()
+    assert "project's own checks" in text
+    assert "IDE diagnostics" in text

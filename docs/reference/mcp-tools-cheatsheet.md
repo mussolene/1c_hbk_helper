@@ -30,10 +30,6 @@
 
 ---
 
-## BSL Language Server (не MCP этого репозитория)
-
-Проверка `.bsl`: exec-JAR `analyze` / `format` ([bsl-language-server-local](../cursor-examples/bsl-language-server-local/SKILL.md)), расширение IDE или опционально `make bsl-start`. См. [bsl-ls-mcp-setup.md](bsl-ls-mcp-setup.md).
-
 ---
 
 ## Инструменты (tools) onec-context-mcp для AI
@@ -46,7 +42,7 @@
 
 | Промпт | Назначение |
 |--------|------------|
-| how_to_use_1c_help_and_bsl_ls | Длинная human/onboarding инструкция: onec-context-mcp + BSL LS (CLI/IDE). |
+| how_to_use_1c_help_and_bsl_ls | Длинная human/onboarding инструкция по onec-context-mcp. |
 | get_1c_common_pitfalls | Типичные ловушки 1С/BSL с wrong/right примерами кода (11+ паттернов). |
 | get_mcp_workflow_guide | Текст руководства по порядку вызовов (workflow). |
 | get_mcp_tools_tips | Подсказки: пустые ответы, URI, координаты. |
@@ -55,4 +51,4 @@
 
 ---
 
-**Канонический AI route:** `get_1c_quick_guide` → exact API: `get_1c_api_answer` (`detail="full"` при необходимости) / natural-language help: `answer_1c_help_question` / structured API: `get_1c_api_object` / broad structured lookup: `search_1c_api` (официальные примеры — `include_examples=True`) → standards/snippets: `search_1c_standards` / `search_1c_snippets` → metadata: `search_1c_metadata_exact` / `search_1c_metadata_semantic` / `search_1c_metadata_fields` → BSL LS `analyze` или IDE. Пути к `.bsl` — обычные пути в workspace.
+**Канонический AI route:** `get_1c_quick_guide` → exact API: `get_1c_api_answer` (`detail="full"` при необходимости) / natural-language help: `answer_1c_help_question` / structured API: `get_1c_api_object` / broad structured lookup: `search_1c_api` (официальные примеры — `include_examples=True`) → standards/snippets: `search_1c_standards` / `search_1c_snippets` → metadata: `search_1c_metadata_exact` / `search_1c_metadata_semantic` / `search_1c_metadata_fields`. Пути к `.bsl` — обычные пути в workspace.

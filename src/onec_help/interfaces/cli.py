@@ -1645,7 +1645,7 @@ def cmd_watchdog(args: argparse.Namespace) -> int:
 def cmd_mcp(args: argparse.Namespace) -> int:
     """Run MCP server (stdio, sse, http, streamable-http). Requires fastmcp (pip install fastmcp)."""
     try:
-        from ..mcp_server import run_mcp
+        from .mcp_server import run_mcp
     except ImportError:
         print("MCP requires fastmcp (Python 3.11+): pip install fastmcp", file=sys.stderr)
         return 1
@@ -1655,7 +1655,7 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     path = getattr(args, "path", None) or env_config.get_mcp_path()
     try:
         run_mcp(
-            help_path=Path(args.directory or "data").resolve(),
+            help_path=Path(args.directory or env_config.get_help_path()).resolve(),
             transport=transport,
             host=host,
             port=port,
@@ -2367,7 +2367,7 @@ def main() -> int:
         type=str,
         nargs="?",
         default=env_config.get_help_path(),
-        help="Directory with help (.md or HTML); default: HELP_PATH or DATA_DIR",
+        help="Directory with help (.md or HTML); default: HELP_PATH or DATA_DIR/help_structured",
     )
     p_mcp.add_argument(
         "--transport",

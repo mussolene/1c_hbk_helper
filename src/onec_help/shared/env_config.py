@@ -376,7 +376,7 @@ def get_its_v8std_max_content_raw() -> str:
 
 # --- MCP ---
 MCP_TRANSPORT_DEFAULT = "multi"
-MCP_HOST_DEFAULT = "0.0.0.0"
+MCP_HOST_DEFAULT = "127.0.0.1"
 MCP_PORT_DEFAULT = 8050
 MCP_PATH_DEFAULT = "/mcp"
 MCP_SNIPPET_MAX_CHARS_DEFAULT = 1200

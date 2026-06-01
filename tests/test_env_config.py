@@ -54,6 +54,12 @@ def test_get_help_path_from_env() -> None:
         assert env_config.get_help_path() == "/custom/help"
 
 
+def test_get_mcp_host_defaults_to_loopback() -> None:
+    """get_mcp_host does not expose local runs on all interfaces by default."""
+    with patch.dict(os.environ, {"MCP_HOST": ""}, clear=False):
+        assert env_config.get_mcp_host() == "127.0.0.1"
+
+
 def test_get_help_html_max_bytes_invalid_returns_default() -> None:
     """get_help_html_max_bytes returns default when value is not a number."""
     with patch.dict(os.environ, {"HELP_HTML_MAX_BYTES": "not_a_number"}, clear=False):

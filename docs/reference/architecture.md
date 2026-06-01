@@ -12,7 +12,6 @@
 | **mcp** | MCP API — structured API search/answers, memory, metadata | I/O, embedding для memory | 8050 |
 | **redis** | Кэш ingest/watchdog, progress markers, MCP metrics | Память + volume | — |
 | **ingest-worker** | Batch ETL: ingest, cron, load-snippets, watchdog | CPU, RAM, embedding API | — |
-| **bsl (compose)** | Опционально: BSL Language Server в Docker (`make bsl-start`) | Java/BSL LS | — |
 
 ## Коллекции Qdrant
 
@@ -93,7 +92,7 @@ make up-full
 2. **Healthcheck:** у сервиса `mcp` задан `start_period: 45s` — контейнеру даётся до 45 с на первый прогрев; затем проверка каждые 15 с (retries 5). При нехватке ресурсов или блокировке при старте увеличьте `start_period` в `docker-compose.base.yml`.
 3. **Зависимость от Qdrant:** MCP стартует только после `qdrant: condition: service_healthy`. Если Qdrant долго поднимается, MCP ждёт. Ingest при этом может уже работать в отдельном контейнере (ingest-worker).
 
-Локально тот же быстрый старт: `PYTHONPATH=src python3 -m onec_help.interfaces.mcp_server data/help_structured --transport streamable-http --host 0.0.0.0 --port 8050`.
+Локально тот же быстрый старт: `PYTHONPATH=src python3 -m onec_help.interfaces.mcp_server data/help_structured --transport streamable-http --host 127.0.0.1 --port 8050`.
 
 ## Переменная MCP_MODE
 

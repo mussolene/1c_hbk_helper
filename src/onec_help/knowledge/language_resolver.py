@@ -20,7 +20,7 @@ class SurfaceFamilySpec:
     item_manager_template: str
 
 
-_SURFACE_FAMILY_SPECS: dict[str, SurfaceFamilySpec] = {
+SURFACE_FAMILY_SPECS: dict[str, SurfaceFamilySpec] = {
     "Документы": SurfaceFamilySpec(
         family="Документы",
         collection_manager="ДокументыМенеджер",
@@ -181,7 +181,7 @@ _METADATA_ROOT_PREFIXES = (
     "Global context.Metadata.",
 )
 
-_METADATA_COLLECTION_TO_HELP_OBJECT: dict[str, str] = {
+METADATA_COLLECTION_TO_HELP_OBJECT: dict[str, str] = {
     "Документы": "ОбъектМетаданных: Документ",
     "Справочники": "ОбъектМетаданных: Справочник",
     "Перечисления": "ОбъектМетаданных: Перечисление",
@@ -254,7 +254,7 @@ def resolve_platform_surface_api_query(query: str) -> dict[str, Any]:
         }
     segments = normalized.split(".")
     root = segments[0]
-    spec = _SURFACE_FAMILY_SPECS.get(root)
+    spec = SURFACE_FAMILY_SPECS.get(root)
     if spec is None:
         return {
             "query": original,
@@ -443,7 +443,7 @@ def resolve_metadata_surface_query(query: str) -> dict[str, Any]:
             "candidates": _dedup_candidates(candidates),
         }
 
-    help_object = _METADATA_COLLECTION_TO_HELP_OBJECT.get(family)
+    help_object = METADATA_COLLECTION_TO_HELP_OBJECT.get(family)
     if help_object:
         candidates: list[dict[str, str]] = []
         candidates.append(

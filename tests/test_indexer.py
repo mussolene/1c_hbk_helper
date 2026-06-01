@@ -1244,6 +1244,26 @@ def test_search_index_no_client_returns_empty() -> None:
     assert search_index("query", limit=5) == []
 
 
+@patch(
+    "onec_help.search_store.indexer._get_default_qdrant_client",
+    side_effect=ConnectionRefusedError("refused"),
+)
+def test_search_index_fail_on_qdrant_unreachable_raises(_mock_client: MagicMock) -> None:
+    with pytest.raises(ConnectionRefusedError):
+        search_index("query", limit=5, fail_on_qdrant_unreachable=True)
+
+
+@patch(
+    "onec_help.search_store.indexer._get_default_qdrant_client",
+    side_effect=ConnectionRefusedError("refused"),
+)
+def test_search_index_keyword_fail_on_qdrant_unreachable_raises(
+    _mock_client: MagicMock,
+) -> None:
+    with pytest.raises(ConnectionRefusedError):
+        search_index_keyword("query", limit=5, fail_on_qdrant_unreachable=True)
+
+
 @patch("onec_help.search_store.indexer._collection_has_sparse", return_value=True)
 @patch("onec_help.search_store.indexer.QdrantClient")
 def test_add_bm25_already_has_sparse_saves_vocab(mock_client: MagicMock, mock_has_sparse) -> None:

@@ -49,12 +49,15 @@ RUN chmod +x /app/entrypoint.sh /app/entrypoint-mcp-only.sh \
     && chown -R app:app /app
 
 ENV PORT=8050
+ENV MCP_HOST=0.0.0.0
+ENV MCP_PORT=8050
+ENV MCP_PATH=/mcp
 ENV MCP_CURSOR_DOCS_PATH=/app/docs
 ENV PYTHONPATH=/app/src
 EXPOSE 8050
 
-ENV HELP_PATH=/data
+ENV DATA_DIR=/data
 VOLUME ["/data"]
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["python", "-m", "onec_help.interfaces.mcp_server", "/app/data/help_structured", "--host", "0.0.0.0", "--port", "8050", "--path", "/mcp"]
+CMD ["python", "-m", "onec_help.interfaces.mcp_server"]
