@@ -979,9 +979,10 @@ def _make_object_stub(
 
 
 def _is_object_stub(record: dict[str, Any]) -> bool:
-    return str(record.get("resolver_kind") or "") == "stub" or not str(
-        record.get("topic_path") or ""
-    ).strip()
+    return (
+        str(record.get("resolver_kind") or "") == "stub"
+        or not str(record.get("topic_path") or "").strip()
+    )
 
 
 def _build_structured_records(
@@ -1758,11 +1759,15 @@ def build_structured_api_snapshot(
         )
 
     for obj in objects_by_key.values():
-        if _is_object_stub(obj) and (
-            str(obj.get("language") or ""),
-            str(obj.get("full_name") or obj.get("object_name") or ""),
-            str(obj.get("version") or ""),
-        ) in real_object_versions:
+        if (
+            _is_object_stub(obj)
+            and (
+                str(obj.get("language") or ""),
+                str(obj.get("full_name") or obj.get("object_name") or ""),
+                str(obj.get("version") or ""),
+            )
+            in real_object_versions
+        ):
             continue
         objects_raw.append(obj)
 
@@ -2873,5 +2878,7 @@ def get_api_related(
     out = [dict(getattr(point, "payload", None) or {}) for point in points or []]
     if version:
         out = [item for item in out if payload_matches_platform_version(item, version)]
-    out.sort(key=lambda item: (str(item.get("link_kind") or ""), str(item.get("target_name") or "")))
+    out.sort(
+        key=lambda item: (str(item.get("link_kind") or ""), str(item.get("target_name") or ""))
+    )
     return out

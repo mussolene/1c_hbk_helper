@@ -3782,7 +3782,9 @@ def _main() -> None:
         default=None,
         help="MCP transport: stdio, sse, http, streamable-http, multi (default: env MCP_TRANSPORT or streamable-http). 'multi' serves streamable-http + SSE simultaneously.",
     )
-    p.add_argument("--host", default=None, help="Host for HTTP (default: env MCP_HOST or 127.0.0.1)")
+    p.add_argument(
+        "--host", default=None, help="Host for HTTP (default: env MCP_HOST or 127.0.0.1)"
+    )
     p.add_argument("--port", type=int, default=None, help="Port (default: env MCP_PORT or 8050)")
     p.add_argument("--path", default=None, help="URL path (default: env MCP_PATH or /mcp)")
     args = p.parse_args()

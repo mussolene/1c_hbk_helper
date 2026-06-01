@@ -779,7 +779,9 @@ def test_build_structured_api_snapshot_skips_stub_when_real_object_exists_same_v
 
     manifest = build_structured_api_snapshot(tmp_path / "snapshot", unpacked_dir=unpacked_dir)
     objects = [
-        item for item in load_api_objects(tmp_path / "snapshot") if item["object_name"] == "ЭлементыФормы"
+        item
+        for item in load_api_objects(tmp_path / "snapshot")
+        if item["object_name"] == "ЭлементыФормы"
     ]
     members = load_api_members(tmp_path / "snapshot")
 
