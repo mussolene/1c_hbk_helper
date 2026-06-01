@@ -1182,6 +1182,43 @@ def test_mcp_tool_compare_1c_help_via_app(help_sample_dir: Path) -> None:
     assert "8.3" in text or "Diff" in text
 
 
+def test_mcp_tool_compare_1c_help_handles_structured_qdrant_unavailable(
+    help_sample_dir: Path,
+) -> None:
+    app = mcp_server._build_mcp_app(help_sample_dir)
+    with patch.object(
+        mcp_server,
+        "_resolve_compare_structured_candidates",
+        side_effect=ConnectionError("Connection refused"),
+    ):
+        with patch.object(
+            mcp_server,
+            "_resolve_compare_query_to_topic_path",
+            side_effect=ConnectionError("Connection refused"),
+        ):
+            with patch(
+                "onec_help.search_store.indexer.compare_1c_help",
+                return_value=(
+                    "Help index (Qdrant) is unreachable. "
+                    "Start Qdrant or check QDRANT_HOST / QDRANT_PORT."
+                ),
+            ) as mock_compare:
+                result = asyncio.run(
+                    app.call_tool(
+                        "compare_1c_help",
+                        {
+                            "topic_path_or_query": "Format",
+                            "version_left": "8.3",
+                            "version_right": "8.3.27",
+                            "language": "ru",
+                        },
+                    )
+                )
+    text = result.content[0].text if result.content else ""
+    assert "Qdrant" in text
+    assert mock_compare.call_args.args[0] == "Format"
+
+
 def test_mcp_tool_compare_1c_help_resolves_structured_topic_path_before_compare(
     help_sample_dir: Path,
 ) -> None:

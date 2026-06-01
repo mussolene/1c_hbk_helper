@@ -3000,14 +3000,20 @@ def _build_mcp_app(help_path: Path) -> Any:
         version_left, version_right: platform versions, e.g. '8.2.19.130', '8.3.27.1859'.
         For best predictability pass an exact path from the internal topic index when available. include_diff: if True, append unified diff."""
         from ..search_store.indexer import compare_1c_help as _compare
+        from ..shared.qdrant_errors import is_qdrant_unreachable_error
 
         original = (topic_path_or_query or "").strip()
-        structured_candidates = _resolve_compare_structured_candidates(
-            original,
-            version_left=version_left,
-            version_right=version_right,
-            language=language,
-        )
+        try:
+            structured_candidates = _resolve_compare_structured_candidates(
+                original,
+                version_left=version_left,
+                version_right=version_right,
+                language=language,
+            )
+        except Exception as e:
+            if not is_qdrant_unreachable_error(e):
+                raise
+            structured_candidates = []
         structured_compare = _format_structured_compare(
             original,
             version_left=version_left,
@@ -3017,12 +3023,17 @@ def _build_mcp_app(help_path: Path) -> Any:
         )
         if structured_compare:
             return structured_compare
-        resolved = _resolve_compare_query_to_topic_path(
-            original,
-            version_left=version_left,
-            version_right=version_right,
-            language=language,
-        )
+        try:
+            resolved = _resolve_compare_query_to_topic_path(
+                original,
+                version_left=version_left,
+                version_right=version_right,
+                language=language,
+            )
+        except Exception as e:
+            if not is_qdrant_unreachable_error(e):
+                raise
+            resolved = original
         result = _compare(
             resolved,
             version_left,
