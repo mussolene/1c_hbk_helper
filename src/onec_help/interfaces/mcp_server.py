@@ -908,6 +908,36 @@ def _structured_api_sort_key(
     )
 
 
+def _matches_any_api_alias(item: dict[str, Any], aliases: set[str]) -> bool:
+    if not aliases:
+        return False
+    candidates = [
+        item.get("name"),
+        item.get("full_name"),
+        item.get("member_name"),
+        item.get("object_name"),
+        item.get("title"),
+    ]
+    candidates.extend(item.get("surface_aliases") or [])
+    candidates.extend(item.get("aliases") or [])
+    for raw in candidates:
+        value = str(raw or "").strip().lower()
+        if value and value in aliases:
+            return True
+    return False
+
+
+def _search_api_sort_key(
+    query: str,
+    item: dict[str, Any],
+    exact_aliases: set[str] | None = None,
+) -> tuple[int, tuple[int, int, int, int, bool, tuple[int, ...], str]]:
+    return (
+        0 if _matches_any_api_alias(item, exact_aliases or set()) else 1,
+        _structured_api_sort_key(query, item),
+    )
+
+
 # Exact-API tools (get_1c_api_answer / get_1c_api_object / …) expect Тип.Метод or short identifier,
 # not a prose question — otherwise agents get long «not found» noise.
 _NL_QUESTION_PREFIXES_RU = (
@@ -1060,13 +1090,25 @@ def _structured_item_matches_dcs_topic(item: dict[str, Any]) -> bool:
     return "компоновк" in blob or "схема компоновки" in blob or "системы компоновки" in blob
 
 
+def _display_api_name(item: dict[str, Any]) -> str:
+    """Return the BSL-facing name; keep full_name only as internal canonical id."""
+    full_name = str(item.get("full_name") or item.get("name") or item.get("title") or "").strip()
+    owner_name = str(item.get("owner_name") or "").strip()
+    member_name = str(item.get("member_name") or "").strip()
+    if (owner_name == "Глобальный контекст" or full_name.startswith("Глобальный контекст.")) and (
+        member_name or "." in full_name
+    ):
+        return member_name or full_name.split(".", 1)[1]
+    return full_name or "API"
+
+
 def _format_structured_api_object(
     item: dict[str, Any],
     *,
     include_path: bool = True,
     include_rich_sections: bool = False,
 ) -> str:
-    lines = [f"### {item.get('full_name') or item.get('name') or item.get('title') or 'API'}"]
+    lines = [f"### {_display_api_name(item)}"]
     if item.get("page_descriptor"):
         lines.append(str(item.get("page_descriptor")))
     meta: list[str] = []
@@ -1224,6 +1266,19 @@ def _classify_help_question(question: str) -> str:
     return "general"
 
 
+def _extract_question_api_aliases(question: str) -> list[str]:
+    """Map common prose phrases to canonical structured API names."""
+    from ..knowledge.query_aliases import resolve_query_api_aliases
+
+    return [item["target"] for item in resolve_query_api_aliases(question)]
+
+
+def _extract_question_api_alias_specs(question: str) -> list[dict[str, str]]:
+    from ..knowledge.query_aliases import resolve_query_api_aliases
+
+    return resolve_query_api_aliases(question)
+
+
 def _extract_question_api_names(question: str) -> list[str]:
     tokens = _extract_keyword_tokens(question)
     extra = re.findall(
@@ -1232,7 +1287,7 @@ def _extract_question_api_names(question: str) -> list[str]:
     )
     seen: set[str] = set()
     out: list[str] = []
-    for token in [*tokens, *extra]:
+    for token in [*_extract_question_api_aliases(question), *tokens, *extra]:
         value = token.strip()
         if len(value) < 3:
             continue
@@ -1276,11 +1331,27 @@ def _dedup_structured_hits(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _dedup_search_display_hits(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse repeated platform-version hits for broad search rendering."""
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for item in items:
+        name = _display_api_name(item).strip().lower()
+        owner = str(item.get("owner_name") or item.get("object_name") or "").strip().lower()
+        kind = str(item.get("kind") or item.get("entity_type") or "").strip().lower()
+        key = (name, owner, kind)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
 def _question_structured_sort_key(
     question: str,
     intent: str,
     item: dict[str, Any],
-) -> tuple[int, int, int, int, bool, tuple[int, ...], str]:
+) -> tuple[int, int, int, int, int, bool, tuple[int, ...], str]:
     query = (question or "").strip()
     if intent == "version":
         has_fact = bool(item.get("platform_since") or item.get("availability"))
@@ -1323,7 +1394,18 @@ def _question_structured_sort_key(
                 ).lower()
                 if any(w in rest for w in words):
                     content_no_match = 1
+    kind_text = str(
+        item.get("kind") or item.get("entity_type") or item.get("member_kind") or ""
+    ).lower()
+    q_lower = query.lower()
+    action_method_priority = 0
+    if intent == "general" and any(v in q_lower for v in ("прочитать", "записать", "создать")):
+        if any(k in kind_text for k in ("method", "function", "procedure")) or item.get(
+            "member_name"
+        ):
+            action_method_priority = -1
     return (
+        action_method_priority,
         best_priority,
         dotted_specificity,
         token_length_specificity,
@@ -1457,6 +1539,7 @@ def _answer_help_via_dcs_structured_search(
         question_clean,
         answer=fact,
         candidate=best,
+        answer_contract=_answer_contract_for_question(question_clean, config_version=version),
     )
 
 
@@ -1557,10 +1640,15 @@ def _format_question_answer(
     *,
     answer: str,
     candidate: dict[str, Any] | None = None,
+    answer_contract: dict[str, Any] | None = None,
 ) -> str:
     lines = [f"Вопрос: {question}", "", f"Ответ: {answer.strip()}"]
+    if answer_contract:
+        card = _format_answer_contract_card(answer_contract)
+        if card:
+            lines.append(card)
     if candidate:
-        api_name = candidate.get("full_name") or candidate.get("name") or candidate.get("title")
+        api_name = _display_api_name(candidate)
         if api_name:
             lines.append(f"API: {api_name}")
         meta: list[str] = []
@@ -1574,6 +1662,58 @@ def _format_question_answer(
         if meta:
             lines.append("Источник: " + " | ".join(meta))
     return "\n".join(lines)
+
+
+def _format_answer_contract_card(contract: dict[str, Any]) -> str:
+    route = str(contract.get("route") or "").strip()
+    action = str(contract.get("action") or "").strip()
+    status = str(contract.get("answer_status") or "").strip()
+    primary = str(contract.get("primary_tool") or "").strip()
+    layers = [str(x) for x in contract.get("source_layers") or () if str(x).strip()]
+    next_tools = [str(x) for x in contract.get("next_tools") or () if str(x).strip()]
+    assumptions = [str(x) for x in contract.get("assumptions") or () if str(x).strip()]
+    missing = [str(x) for x in contract.get("missing_context") or () if str(x).strip()]
+    if not route:
+        return ""
+    lines = [
+        "Route card:",
+        f"- route: {route}",
+        f"- action: {action or 'answer'}",
+        f"- status: {status or 'source_fact'}",
+    ]
+    if layers:
+        lines.append(f"- layers: {', '.join(layers)}")
+    if primary:
+        lines.append(f"- primary_tool: {primary}")
+    if next_tools:
+        lines.append(f"- next_tools: {', '.join(next_tools[:4])}")
+    if assumptions:
+        lines.append(f"- assumptions: {'; '.join(assumptions[:2])}")
+    if missing:
+        lines.append(f"- missing_context: {'; '.join(missing[:2])}")
+    return "\n".join(lines)
+
+
+def _answer_contract_for_question(
+    question: str,
+    *,
+    config_version: str | None = None,
+) -> dict[str, Any]:
+    try:
+        from ..knowledge.orchestrator import plan_1c_query
+
+        plan = plan_1c_query(question, config_version=config_version)
+        contract = plan.get("answer_contract")
+        if isinstance(contract, dict):
+            return contract
+    except Exception:
+        pass
+    try:
+        from ..knowledge.answer_contract import build_answer_contract
+
+        return build_answer_contract(question, config_version=config_version)
+    except Exception:
+        return {}
 
 
 def _format_orchestrated_answer(question: str, orchestrated: dict[str, Any]) -> str | None:
@@ -1611,6 +1751,7 @@ def _format_orchestrated_answer(question: str, orchestrated: dict[str, Any]) -> 
         question,
         answer="\n\n".join(answer_parts),
         candidate=candidate,
+        answer_contract=(orchestrated.get("plan") or {}).get("answer_contract") or {},
     )
 
 
@@ -1632,7 +1773,7 @@ def _answer_question_via_exact_api_route(
     )
     for best in candidates:
         best_sort = _question_structured_sort_key(question, intent, best)
-        pure_noise = best_sort[0] >= 3 and best_sort[3] >= 2
+        pure_noise = best_sort[1] >= 3 and best_sort[4] >= 2
         if pure_noise:
             continue
         if not _candidate_plausible_for_dcs_question(question, best):
@@ -1643,6 +1784,7 @@ def _answer_question_via_exact_api_route(
                 question,
                 answer=fact,
                 candidate=best,
+                answer_contract=_answer_contract_for_question(question, config_version=version),
             )
     return None
 
@@ -1957,12 +2099,26 @@ def _build_mcp_app(help_path: Path) -> Any:
         )
 
         resolved_items = _resolve_surface_api_candidates(q, version=version, language=language)
+        exact_alias_specs = _extract_question_api_alias_specs(q)
+        exact_aliases_raw = [item["target"] for item in exact_alias_specs]
+        exact_aliases = {alias.strip().lower() for alias in exact_aliases_raw if alias.strip()}
+        exact_alias_items: list[dict[str, Any]] = []
+        for alias_spec in exact_alias_specs:
+            alias = str(alias_spec.get("target") or "").strip()
+            lookup = str(alias_spec.get("lookup") or "").strip()
+            if lookup in {"", "member"}:
+                exact_alias_items.extend(_get_api_member(alias, version=version, language=language))
+            if lookup in {"", "object"}:
+                exact_alias_items.extend(_get_api_object(alias, version=version, language=language))
         resolved_members = [item for item in resolved_items if item.get("member_name")]
         resolved_objects = [item for item in resolved_items if not item.get("member_name")]
+        exact_alias_members = [item for item in exact_alias_items if item.get("member_name")]
+        exact_alias_objects = [item for item in exact_alias_items if not item.get("member_name")]
 
         members = sorted(
             _dedup_structured_hits(
-                resolved_members
+                exact_alias_members
+                + resolved_members
                 + _filter_noise_api_hits(
                     _search_api_members(
                         q,
@@ -1974,11 +2130,13 @@ def _build_mcp_app(help_path: Path) -> Any:
                     q,
                 )
             ),
-            key=lambda item: _structured_api_sort_key(q, item),
+            key=lambda item: _search_api_sort_key(q, item, exact_aliases),
         )
+        members = _dedup_search_display_hits(members)
         objects = sorted(
             _dedup_structured_hits(
-                resolved_objects
+                exact_alias_objects
+                + resolved_objects
                 + _filter_noise_api_hits(
                     _search_api_objects(
                         q,
@@ -1990,8 +2148,9 @@ def _build_mcp_app(help_path: Path) -> Any:
                     q,
                 )
             ),
-            key=lambda item: _structured_api_sort_key(q, item),
+            key=lambda item: _search_api_sort_key(q, item, exact_aliases),
         )
+        objects = _dedup_search_display_hits(objects)
         examples = (
             _search_official_examples(
                 q,
@@ -2014,9 +2173,7 @@ def _build_mcp_app(help_path: Path) -> Any:
                         "breadcrumb": item.get("breadcrumb") or [],
                     }
                 )
-                lines.append(
-                    f"{idx}. **{item.get('full_name') or item.get('name') or item.get('title') or ''}**{meta}"
-                )
+                lines.append(f"{idx}. **{_display_api_name(item)}**{meta}")
                 summary = str(item.get("summary") or item.get("description") or "").strip()
                 if summary:
                     lines.append(f"   {summary[: _snippet_max_chars()]}...")
@@ -2224,6 +2381,47 @@ def _build_mcp_app(help_path: Path) -> Any:
 
     @mcp.tool()
     @_record_mcp_tool
+    def classify_1c_question(
+        question: str,
+        file_uri: str | None = None,
+        symbol_name: str | None = None,
+        config_version: str | None = None,
+    ) -> str:
+        """Return the route/answer contract for a 1C question before retrieval or code generation."""
+        err = _check_rate_limit()
+        if err:
+            return err
+        question_clean, err = _truncate_if_needed(
+            (question or "").strip(), MAX_QUERY_CHARS, "question"
+        )
+        if err:
+            return err
+        if not question_clean:
+            return "Provide a question."
+        try:
+            from ..knowledge.orchestrator import plan_1c_query
+
+            plan = plan_1c_query(
+                question_clean,
+                file_uri=file_uri,
+                symbol_name=symbol_name,
+                config_version=config_version,
+            )
+            payload = {
+                "query": question_clean,
+                "route_kind": plan.get("route_kind") or "",
+                "resolver_kind": plan.get("resolver_kind") or "",
+                "route_plan": plan.get("route_plan") or [],
+                "answer_contract": plan.get("answer_contract") or {},
+                "candidate_nodes": plan.get("candidate_nodes") or [],
+                "local_context": plan.get("local_context") or {},
+            }
+            return json.dumps(payload, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            return f"Could not classify 1C question: {exc}"
+
+    @mcp.tool()
+    @_record_mcp_tool
     def answer_1c_help_question(
         question: str,
         version: str | None = None,
@@ -2269,6 +2467,9 @@ def _build_mcp_app(help_path: Path) -> Any:
                             "version": best.get("version"),
                             "topic_path": best.get("topic_path"),
                         },
+                        answer_contract=_answer_contract_for_question(
+                            question_clean, config_version=version
+                        ),
                     )
 
         if intent == "general":
@@ -2317,9 +2518,9 @@ def _build_mcp_app(help_path: Path) -> Any:
             for best in candidates:
                 best_sort = _question_structured_sort_key(question_clean, intent, best)
                 # Reject only pure semantic hits with no name match and no content keyword match.
-                # best_sort = (priority, dotted_specificity, token_len_specificity, content_no_match, member, no_fact, path)
+                # best_sort = (action_method, priority, dotted_specificity, token_len_specificity, content_no_match, member, no_fact, version, path)
                 # content_no_match: 0=in full_name, 1=in text/summary, 2=no match at all
-                pure_noise = best_sort[0] >= 3 and best_sort[3] >= 2
+                pure_noise = best_sort[1] >= 3 and best_sort[4] >= 2
                 if pure_noise:
                     continue
                 if not _candidate_plausible_for_dcs_question(question_clean, best):
@@ -2330,6 +2531,9 @@ def _build_mcp_app(help_path: Path) -> Any:
                         question_clean,
                         answer=fact,
                         candidate=best,
+                        answer_contract=_answer_contract_for_question(
+                            question_clean, config_version=version
+                        ),
                     )
 
         if intent != "general":
@@ -3272,6 +3476,7 @@ def _build_mcp_app(help_path: Path) -> Any:
         metadata_objects = ctx.get("metadata_objects") or []
         local_context = ctx.get("local_context") or {}
         resolved_surface = ctx.get("resolved_surface") or {}
+        answer_contract = ctx.get("answer_contract") or {}
         if not (help_topics or memory_items or guidance_items or metadata_objects or local_context):
             return "No task context found."
 
@@ -3279,6 +3484,9 @@ def _build_mcp_app(help_path: Path) -> Any:
         query_type = ctx.get("query_type")
         if query_type:
             parts.append(f"type: {query_type}")
+        contract_card = _format_answer_contract_card(answer_contract)
+        if contract_card:
+            parts.append(contract_card)
         context_lines: list[str] = []
         if local_context.get("module_type") and local_context.get("module_type") != "Unknown":
             context_lines.append(f"module: {local_context.get('module_type')}")
@@ -3317,7 +3525,11 @@ def _build_mcp_app(help_path: Path) -> Any:
         if workflow_items:
             lines = []
             for item in workflow_items[:5]:
-                title = item.get("full_name") or item.get("object_name") or item.get("title") or ""
+                title = (
+                    _display_api_name(item)
+                    if item.get("full_name")
+                    else (item.get("object_name") or item.get("title") or "")
+                )
                 kind = item.get("kind") or item.get("entity_type") or ""
                 path = item.get("topic_path") or item.get("path") or ""
                 line = f"- **{title}**"
@@ -3379,16 +3591,17 @@ def _build_mcp_app(help_path: Path) -> Any:
         This tool is designed for autonomous AI invocation (unlike the prompt version which targets user invocation)."""
         _guide_develop = (
             "1C-HELP DEVELOP WORKFLOW:\n"
-            '1. Exact API (Тип.Метод) → get_1c_api_answer(name); surface chains like Документы.Имя.Метод → resolve_1c_api_name(name) then get_1c_api_answer(name). Full sections → get_1c_api_answer(name, detail="full"). Natural-language help → answer_1c_help_question(question). Structured object/type → get_1c_api_object(name). Related API → get_1c_api_related(name).\n'
-            "2. Broad structured lookup (members, objects, official examples) → search_1c_api(query); examples only → search_1c_api(query, include_examples=True).\n"
-            "3. Local task context → get_1c_task_context(query, file_uri=..., symbol_name=...).\n"
-            "4. Standards only → search_1c_standards(query). Curated snippets only → search_1c_snippets(query).\n"
-            "5. Config metadata (KD2 graph): search_1c_metadata_exact, search_1c_metadata_semantic, search_1c_metadata_fields. "
+            "1. Ambiguous question → classify_1c_question(question) first; follow answer_contract.route/action/status/layers.\n"
+            '2. Exact API (Тип.Метод) → get_1c_api_answer(name); surface chains like Документы.Имя.Метод → resolve_1c_api_name(name) then get_1c_api_answer(name). Full sections → get_1c_api_answer(name, detail="full"). Natural-language help → answer_1c_help_question(question). Structured object/type → get_1c_api_object(name). Related API → get_1c_api_related(name).\n'
+            "3. Broad structured lookup (members, objects, official examples) → search_1c_api(query); examples only → search_1c_api(query, include_examples=True). If answer_contract.status=code_hypothesis_until_checked, validate generated code with BSL LS.\n"
+            "4. Local task context → get_1c_task_context(query, file_uri=..., symbol_name=...).\n"
+            "5. Standards only → search_1c_standards(query). Curated snippets only → search_1c_snippets(query).\n"
+            "6. Config metadata (KD2 graph): search_1c_metadata_exact, search_1c_metadata_semantic, search_1c_metadata_fields. "
             "Dotted BSL/query-like strings map to graph ids using the configuration object name only (first segment after the type prefix). "
             "Same name under different types: pass object_type. " + manager_help_hint_line() + "\n"
-            "6. Check index health: get_1c_help_index_status.\n"
-            "7. Validate .bsl with the project's own checks or IDE diagnostics.\n"
-            "8. Save reusable verified code only: save_1c_snippet(code_snippet, description, title).\n"
+            "7. Check index health: get_1c_help_index_status.\n"
+            "8. Validate .bsl with the project's own checks or IDE diagnostics.\n"
+            "9. Save reusable verified code only: save_1c_snippet(code_snippet, description, title).\n"
             "Key pitfalls: ПрочитатьJSON→Структура (use ПрочитатьВСоответствие=Истина for Соответствие); "
             "HTTPСоединение.Получить server-only; НачатьТранзакцию needs Попытка+ОтменитьТранзакцию."
         )
@@ -3420,6 +3633,7 @@ def _build_mcp_app(help_path: Path) -> Any:
         Not the default AI route; for autonomous workflow use get_1c_quick_guide instead."""
         block_develop = """onec-context-mcp — DEVELOP (human/onboarding prompt)
 - AI-first route: get_1c_quick_guide(task="develop") first.
+- Ambiguous route: classify_1c_question(question) first; follow answer_contract.route/action/status/layers.
 - Exact API: get_1c_api_answer(name); rich sections: get_1c_api_answer(name, detail="full"). Surface chain (например, Документы.Имя.Метод): resolve_1c_api_name(name) → get_1c_api_answer(name). Natural-language question: answer_1c_help_question(question). Structured object: get_1c_api_object(name). Broad structured lookup: search_1c_api(query); official examples section: search_1c_api(query, include_examples=True).
 - Local anti-hallucination context: get_1c_task_context(query, file_uri=..., symbol_name=...).
 - Standards: search_1c_standards(query). Curated snippets: search_1c_snippets(query).
@@ -3450,6 +3664,7 @@ def _build_mcp_app(help_path: Path) -> Any:
 
 ---
 2) onec-context-mcp — ORDER OF CALLS
+- Ambiguous route: classify_1c_question(question) first; follow answer_contract.route/action/status/layers. Generated code is a hypothesis until BSL LS/project checks pass.
 - Exact API: get_1c_api_answer(name) first for Тип.Метод; use detail="full" for full structured sections. For BSL surface chains such as Документы.Имя.Метод or Константы.Имя.Получить, first call resolve_1c_api_name(name), then get_1c_api_answer on the canonical candidate. Natural-language factual question: answer_1c_help_question(question, version=...). Structured truth-source: get_1c_api_object(name). Broad structured lookup: search_1c_api(query); examples block: search_1c_api(query, include_examples=True).
 - Task-local context: get_1c_task_context(query, file_uri=..., symbol_name=...).
 - Explicit standards/snippets: search_1c_standards(query), search_1c_snippets(query).

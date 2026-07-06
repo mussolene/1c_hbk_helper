@@ -11,6 +11,7 @@
 | Tier | Инструмент | Ключевой параметр | Назначение |
 |------|------------|-------------------|------------|
 | 1 | get_1c_quick_guide | task | Канонический AI entry point; короткий маршрут без лишних ветвлений. |
+| 1 | classify_1c_question | question | Дешёвый route/answer contract: слой ответа, следующий инструмент, статус проверки. |
 | 1 | get_1c_api_answer | name | Exact-first compact ответ для `Тип.Метод`. |
 | 1 | get_1c_api_object | name | Structured API truth-source из `onec_help_api`. |
 | 1 | answer_1c_help_question | question | Естественный вопрос по справке через structured Qdrant-first route. |
@@ -51,4 +52,4 @@
 
 ---
 
-**Канонический AI route:** `get_1c_quick_guide` → exact API: `get_1c_api_answer` (`detail="full"` при необходимости) / natural-language help: `answer_1c_help_question` / structured API: `get_1c_api_object` / broad structured lookup: `search_1c_api` (официальные примеры — `include_examples=True`) → standards/snippets: `search_1c_standards` / `search_1c_snippets` → metadata: `search_1c_metadata_exact` / `search_1c_metadata_semantic` / `search_1c_metadata_fields`. Пути к `.bsl` — обычные пути в workspace.
+**Канонический AI route:** `get_1c_quick_guide` → для неоднозначного вопроса `classify_1c_question` → exact API: `get_1c_api_answer` (`detail="full"` при необходимости) / natural-language help: `answer_1c_help_question` / structured API: `get_1c_api_object` / broad structured lookup: `search_1c_api` (официальные примеры — `include_examples=True`) → standards/snippets: `search_1c_standards` / `search_1c_snippets` → metadata: `search_1c_metadata_exact` / `search_1c_metadata_semantic` / `search_1c_metadata_fields`. Пути к `.bsl` — обычные пути в workspace; код считается гипотезой до BSL LS/project checks.

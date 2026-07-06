@@ -25,6 +25,7 @@ description: Выжимка по роли MCP onec-context-mcp. Применят
 | Задача | Инструмент |
 |--------|-----------|
 | Старт AI-сессии | **`get_1c_quick_guide`** |
+| Неочевидный маршрут / нужен слой ответа | `classify_1c_question(...)` |
 | Точный API / идентификатор | `get_1c_api_answer("Тип.Метод")` |
 | Общий API-вопрос / широкий structured lookup | `answer_1c_help_question(...)` или `search_1c_api(...)` |
 | Нужны объекты конфигурации тоже | `search_1c_metadata_exact` / `search_1c_metadata_semantic` → `get_1c_metadata_object` |
@@ -36,13 +37,14 @@ description: Выжимка по роли MCP onec-context-mcp. Применят
 ## Порядок вызовов (кратко)
 
 1. **Старт задачи (AI):** `get_1c_quick_guide(task="develop"|"refactor"|"test")`.
-2. **Точный API:** `get_1c_api_answer("Тип.Метод")`.
-3. **Общий API-вопрос:** `answer_1c_help_question(query)` или `search_1c_api(query)`.
-4. **Стандарты/сниппеты:** `search_1c_standards(query)` / `search_1c_snippets(query)`.
-5. **Метаданные:** `search_1c_metadata_exact` / `search_1c_metadata_semantic` / `search_1c_metadata_fields` → `get_1c_metadata_object`.
-6. **Проверка .bsl:** средствами проекта или IDE → цикл до приемлемого уровня замечаний.
-7. **Навигация:** rg/IDE/чтение модулей по путям выгрузки.
-8. **После рабочего кода:** `save_1c_snippet` только для действительно переиспользуемого результата.
+2. **Неочевидный маршрут:** `classify_1c_question(query)` → следовать `answer_contract`.
+3. **Точный API:** `get_1c_api_answer("Тип.Метод")`.
+4. **Общий API-вопрос:** `answer_1c_help_question(query)` или `search_1c_api(query)`.
+5. **Стандарты/сниппеты:** `search_1c_standards(query)` / `search_1c_snippets(query)`.
+6. **Метаданные:** `search_1c_metadata_exact` / `search_1c_metadata_semantic` / `search_1c_metadata_fields` → `get_1c_metadata_object`.
+7. **Проверка .bsl:** средствами проекта или IDE → цикл до приемлемого уровня замечаний.
+8. **Навигация:** rg/IDE/чтение модулей по путям выгрузки.
+9. **После рабочего кода:** `save_1c_snippet` только для действительно переиспользуемого результата.
 
 ## Подводные камни
 

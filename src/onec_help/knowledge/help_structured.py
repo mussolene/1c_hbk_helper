@@ -84,6 +84,7 @@ _STRUCTURED_OBJECT_KINDS = {
     "collection",
     "enum",
 }
+_SURFACE_OWNER_PREFIXES = frozenset({"Глобальный контекст", "Встроенные функции языка"})
 _INLINE_SECTION_LABELS = {
     "Синтаксис:": "syntax",
     "Поля:": "fields",
@@ -703,6 +704,42 @@ def _split_full_name(name: str) -> tuple[str, str]:
     return "", value
 
 
+def _is_surface_owner(owner_name: str) -> bool:
+    return (owner_name or "").strip() in _SURFACE_OWNER_PREFIXES
+
+
+def _strip_surface_owner_prefix(value: str, owner_name: str = "") -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return ""
+    owners = [owner_name] if _is_surface_owner(owner_name) else []
+    owners.extend(owner for owner in _SURFACE_OWNER_PREFIXES if owner not in owners)
+    for owner in owners:
+        prefix = f"{owner}."
+        if cleaned.startswith(prefix):
+            return cleaned[len(prefix) :].strip()
+    return cleaned
+
+
+def _surface_member_full_name(full_name: str, owner_name: str, member_name: str) -> str:
+    if _is_surface_owner(owner_name) and member_name:
+        return member_name
+    return _strip_surface_owner_prefix(full_name, owner_name)
+
+
+def _strip_surface_prefixes_in_text(value: str, owner_name: str = "") -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return ""
+    owners = [owner_name] if _is_surface_owner(owner_name) else []
+    owners.extend(owner for owner in _SURFACE_OWNER_PREFIXES if owner not in owners)
+    for owner in owners:
+        cleaned = cleaned.replace(f"{owner}.", "")
+    cleaned = cleaned.replace("Global context.", "")
+    cleaned = cleaned.replace("Script functions.", "")
+    return cleaned.strip()
+
+
 @lru_cache(maxsize=8192)
 def _read_v8sh_page_title(html_path: str) -> str:
     path = Path(html_path)
@@ -797,7 +834,7 @@ def _surface_aliases_for_member(full_name: str, owner_name: str, member_name: st
         and member_name in _METADATA_COLLECTION_OBJECT_TYPES
     ):
         return [f"Метаданные.{member_name}"]
-    if owner_name == "Глобальный контекст" and member_name:
+    if _is_surface_owner(owner_name) and member_name:
         return [member_name]
 
     for spec in SURFACE_FAMILY_SPECS.values():
@@ -884,7 +921,7 @@ def _typed_relations_for_member(
             reason="canonical BSL surface-syntax alias",
         )
 
-    if full_name == "Глобальный контекст.Метаданные":
+    if owner_name == "Глобальный контекст" and member_name == "Метаданные":
         add("ОбъектМетаданныхКонфигурация", "global_property_returns_type")
     elif owner_name == "ОбъектМетаданныхКонфигурация" and member_name == "СвойстваОбъектов":
         add("ПеречислимыеСвойстваОбъектовМетаданных", "metadata_property_returns_type")
@@ -1040,17 +1077,23 @@ def _build_structured_records(
     member_record: dict[str, Any] | None = None
 
     if member_kind in _STRUCTURED_MEMBER_KINDS:
-        full_name = _normalize_api_name(title, member_kind, breadcrumb)
-        owner_name, member_name = _split_full_name(full_name)
+        raw_full_name = _normalize_api_name(title, member_kind, breadcrumb)
+        owner_name, member_name = _split_full_name(raw_full_name)
+        full_name = _surface_member_full_name(raw_full_name, owner_name, member_name)
+        display_title = (
+            _strip_surface_prefixes_in_text(title, owner_name)
+            if _is_surface_owner(owner_name)
+            else title
+        )
         owner_kind = (
             _infer_object_kind(path.rsplit("/", 2)[0] if "/" in path else path, owner_name)
             if owner_name
             else _infer_object_kind(path, _strip_title_suffix(title))
         )
         alias_list: list[str] = []
-        if title and title != full_name:
-            alias_list.append(title)
-        syn_opt = _parenthetical_synonym(title, full_name)
+        if display_title and display_title != full_name:
+            alias_list.append(display_title)
+        syn_opt = _parenthetical_synonym(display_title, full_name)
         if syn_opt and syn_opt not in alias_list:
             alias_list.append(syn_opt)
         member_record = {
@@ -1060,7 +1103,7 @@ def _build_structured_records(
             "member_name": member_name,
             "full_name": full_name,
             "kind": member_kind,
-            "title": title,
+            "title": display_title,
             "summary": summary,
             "description": description,
             "notes": notes,
@@ -1112,6 +1155,23 @@ def _build_structured_records(
             member_record["source_sections"] = {
                 **member_record["source_sections"],
                 "syntax_fallback": full_name,
+            }
+        if _is_surface_owner(owner_name):
+            member_record["syntax"] = _strip_surface_prefixes_in_text(
+                str(member_record.get("syntax") or ""), owner_name
+            )
+            member_record["aliases"] = _extend_unique(
+                [],
+                *(
+                    _strip_surface_prefixes_in_text(str(alias), owner_name)
+                    for alias in member_record.get("aliases") or []
+                ),
+            )
+            member_record["source_sections"] = {
+                key: _strip_surface_prefixes_in_text(value, owner_name)
+                if isinstance(value, str)
+                else value
+                for key, value in member_record["source_sections"].items()
             }
     elif _should_index_object_topic(
         path,
@@ -1188,8 +1248,8 @@ def _build_structured_records(
                     "member_name": member_record.get("member_name") or "",
                     "full_name": member_record.get("full_name") or "",
                     "kind": member_record.get("kind") or "example",
-                    "example_title": f"{title} — пример {idx}",
-                    "title": f"{title} — пример {idx}",
+                    "example_title": f"{member_record.get('title') or title} — пример {idx}",
+                    "title": f"{member_record.get('title') or title} — пример {idx}",
                     "description": description,
                     "code": code,
                     "topic_path": path,

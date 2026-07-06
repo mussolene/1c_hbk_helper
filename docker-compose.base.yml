@@ -43,6 +43,7 @@ services:
       MCP_PORT: ${MCP_CONTAINER_PORT:-8050}
       MCP_PATH: ${MCP_PATH:-/mcp}
       HELP_PATH: ${HELP_PATH:-/app/data/help_structured}
+      DATA_DIR: ${DATA_DIR:-/app/data}
       HELP_LANGUAGES: ${HELP_LANGUAGES:-ru}
       INGEST_TEMP_DIR: ${INGEST_TEMP_DIR:-/tmp/help_ingest}
       INGEST_CACHE_FILE: ${INGEST_CACHE_FILE:-/app/var/ingest_cache/ingest_cache.db}

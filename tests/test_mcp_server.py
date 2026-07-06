@@ -322,7 +322,7 @@ def test_resolve_exact_api_owner_alias_for_common_settings_storage() -> None:
         "_get_api_member",
         return_value=[
             {
-                "full_name": "Глобальный контекст.ХранилищеОбщихНастроек",
+                "full_name": "ХранилищеОбщихНастроек",
                 "member_name": "ХранилищеОбщихНастроек",
                 "owner_name": "Глобальный контекст",
                 "kind": "property",
@@ -514,7 +514,43 @@ def test_build_mcp_app_returns_mcp() -> None:
     assert app is not None
     tools = asyncio.run(app.list_tools())
     assert any(t.name == "search_1c_api" for t in tools)
+    assert any(t.name == "classify_1c_question" for t in tools)
     assert all(t.name != "get_1c_help_topic" for t in tools)
+
+
+def test_mcp_tool_classify_1c_question_returns_answer_contract(help_sample_dir: Path) -> None:
+    app = mcp_server._build_mcp_app(help_sample_dir)
+
+    result = asyncio.run(
+        app.call_tool(
+            "classify_1c_question",
+            {"question": "где вызывается процедура УстановитьСтатусДокумента"},
+        )
+    )
+
+    text = result.content[0].text if result.content else ""
+    assert '"answer_contract"' in text
+    assert '"route": "codebase_behavior"' in text
+    assert "onec-context-toolkit:code" in text
+
+
+def test_format_question_answer_includes_route_card() -> None:
+    text = mcp_server._format_question_answer(
+        "напиши код чтения JSON",
+        answer="Используйте ПрочитатьJSON.",
+        answer_contract={
+            "route": "platform_example",
+            "action": "answer_then_validate",
+            "answer_status": "code_hypothesis_until_checked",
+            "source_layers": ("platform", "bsl_ls"),
+            "primary_tool": "search_1c_api",
+            "next_tools": ("search_1c_api", "BSL Language Server analyze"),
+        },
+    )
+
+    assert "Route card:" in text
+    assert "route: platform_example" in text
+    assert "status: code_hypothesis_until_checked" in text
 
 
 def test_mcp_tool_search_1c_api_via_app(help_sample_dir: Path) -> None:
@@ -771,7 +807,7 @@ def test_mcp_tool_get_1c_api_answer_resolves_owner_alias_for_storage_manager(
             [
                 {
                     "name": "ХранилищеОбщихНастроек",
-                    "full_name": "Глобальный контекст.ХранилищеОбщихНастроек",
+                    "full_name": "ХранилищеОбщихНастроек",
                     "member_name": "ХранилищеОбщихНастроек",
                     "owner_name": "Глобальный контекст",
                     "kind": "property",
@@ -1065,7 +1101,7 @@ def test_mcp_tool_answer_1c_help_question_prefers_exact_short_api_name(
         return_value=[
             {
                 "name": "ПрочитатьJSON",
-                "full_name": "Глобальный контекст.ПрочитатьJSON",
+                "full_name": "ПрочитатьJSON",
                 "summary": "Считывает значение из JSON-текста или файла.",
                 "description": "Объект JSON будет преобразован в соответствие или структуру.",
                 "notes": "Для Соответствия используйте параметр ПрочитатьВСоответствие.",
@@ -1081,8 +1117,154 @@ def test_mcp_tool_answer_1c_help_question_prefers_exact_short_api_name(
             )
         )
     text = result.content[0].text if result.content else ""
-    assert "Глобальный контекст.ПрочитатьJSON" in text
+    assert "API: ПрочитатьJSON" in text
     assert "ПрочитатьВСоответствие" in text
+
+
+def test_mcp_tool_answer_1c_help_question_rewrites_json_phrase_to_api_member(
+    help_sample_dir: Path,
+) -> None:
+    """A prose JSON question should route to ПрочитатьJSON, not the broad Соответствие type."""
+    app = mcp_server._build_mcp_app(help_sample_dir)
+    member = {
+        "name": "ПрочитатьJSON",
+        "full_name": "ПрочитатьJSON",
+        "kind": "method",
+        "summary": "Считывает значение из JSON-текста или файла.",
+        "description": "Объект JSON будет преобразован в соответствие или структуру.",
+        "notes": "Для Соответствия используйте параметр ПрочитатьВСоответствие.",
+        "topic_path": "ReadJSON.html",
+        "version": "8.3.27.1859",
+    }
+    broad_object = {
+        "name": "Соответствие",
+        "full_name": "Соответствие",
+        "kind": "type",
+        "summary": "Представляет доступ к соответствию.",
+        "topic_path": "Map.html",
+        "version": "8.3.27.1859",
+    }
+
+    def fake_get_api_member(name: str, **_: object) -> list[dict[str, object]]:
+        return [member] if name == "ПрочитатьJSON" else []
+
+    def fake_get_api_object(name: str, **_: object) -> list[dict[str, object]]:
+        return [broad_object] if name == "Соответствие" else []
+
+    with (
+        patch.object(mcp_server, "_get_api_member", side_effect=fake_get_api_member),
+        patch.object(mcp_server, "_get_api_object", side_effect=fake_get_api_object),
+    ):
+        result = asyncio.run(
+            app.call_tool(
+                "answer_1c_help_question",
+                {
+                    "question": "Как в 1С прочитать JSON в Соответствие? Нужен параметр ПрочитатьВСоответствие."
+                },
+            )
+        )
+    text = result.content[0].text if result.content else ""
+    assert "API: ПрочитатьJSON" in text
+    assert "ПрочитатьВСоответствие" in text
+    assert "API: Соответствие" not in text
+
+
+def test_help_question_json_phrase_prefers_action_method_over_result_type() -> None:
+    question = "Как в 1С прочитать JSON в Соответствие? Нужен параметр ПрочитатьВСоответствие."
+    member = {
+        "name": "ПрочитатьJSON",
+        "full_name": "ПрочитатьJSON",
+        "kind": "method",
+        "summary": "Считывает значение из JSON-текста или файла.",
+        "notes": "Для Соответствия используйте параметр ПрочитатьВСоответствие.",
+        "topic_path": "ReadJSON.html",
+        "version": "8.3.27.1859",
+    }
+    result_type = {
+        "name": "Соответствие",
+        "full_name": "Соответствие",
+        "kind": "type",
+        "summary": "Представляет доступ к соответствию.",
+        "topic_path": "Map.html",
+        "version": "8.3.27.1859",
+    }
+    with patch.object(
+        mcp_server,
+        "_search_exactish_help_question_candidates",
+        return_value=[result_type, member],
+    ):
+        out = mcp_server._answer_question_via_exact_api_route(
+            question,
+            intent="general",
+            version=None,
+            language=None,
+            detail="compact",
+        )
+    assert out is not None
+    assert "API: ПрочитатьJSON" in out
+    assert "ПрочитатьВСоответствие" in out
+    assert "API: Соответствие" not in out
+
+
+def test_help_question_common_bsl_phrases_add_exact_api_aliases() -> None:
+    assert "ЗначениеЗаполнено" in mcp_server._extract_question_api_aliases(
+        "Как проверить, что значение заполнено и не пустое?"
+    )
+    assert "Массив.Найти" in mcp_server._extract_question_api_aliases(
+        "Как найти значение в массиве и получить индекс элемента?"
+    )
+    assert "УникальныйИдентификатор.По умолчанию" in mcp_server._extract_question_api_aliases(
+        "Как создать новый уникальный идентификатор в 1С?"
+    )
+
+
+def test_help_question_prefers_value_filled_alias_over_form_fill_check() -> None:
+    question = "Как проверить, что значение заполнено и не пустое?"
+    value_filled = {
+        "name": "ЗначениеЗаполнено",
+        "full_name": "ЗначениеЗаполнено",
+        "kind": "method",
+        "summary": "Функция проверяет, отличается ли переданное значение от значения по умолчанию.",
+        "topic_path": "ValueIsFilled.html",
+        "version": "8.3.27.1859",
+    }
+    form_check = {
+        "name": "Форма.ПроверитьЗаполнение",
+        "full_name": "Форма.ПроверитьЗаполнение",
+        "kind": "method",
+        "summary": "Проверяет заполнение реквизитов формы.",
+        "topic_path": "CheckFilling.html",
+        "version": "8.3.27.1859",
+    }
+    with patch.object(
+        mcp_server,
+        "_search_exactish_help_question_candidates",
+        return_value=[form_check, value_filled],
+    ):
+        out = mcp_server._answer_question_via_exact_api_route(
+            question,
+            intent="general",
+            version=None,
+            language=None,
+            detail="compact",
+        )
+    assert out is not None
+    assert "API: ЗначениеЗаполнено" in out
+    assert "API: Форма.ПроверитьЗаполнение" not in out
+
+
+def test_format_structured_api_object_displays_global_context_member_as_callable() -> None:
+    out = mcp_server._format_structured_api_object(
+        {
+            "full_name": "ПрочитатьJSON",
+            "owner_name": "Глобальный контекст",
+            "member_name": "ПрочитатьJSON",
+            "kind": "method",
+            "summary": "Считывает JSON.",
+        }
+    )
+    assert out.startswith("### ПрочитатьJSON")
+    assert "### Глобальный контекст.ПрочитатьJSON" not in out
 
 
 def test_extract_fact_from_structured_restriction_combines_notes_and_description() -> None:
@@ -1122,6 +1304,57 @@ def test_mcp_tool_search_1c_api_ranks_structured_member_first(help_sample_dir: P
     text = result.content[0].text if result.content else ""
     assert "## API members" in text
     assert "HTTPСоединение.Получить" in text
+
+
+def test_mcp_tool_search_1c_api_promotes_common_phrase_alias(help_sample_dir: Path) -> None:
+    app = mcp_server._build_mcp_app(help_sample_dir)
+
+    def fake_get_api_member(name: str, **_: object) -> list[dict[str, object]]:
+        if name == "Массив.Найти":
+            return [
+                {
+                    "name": "Массив.Найти",
+                    "full_name": "Массив.Найти",
+                    "member_name": "Найти",
+                    "owner_name": "Массив",
+                    "summary": "Выполняет поиск элемента в массиве.",
+                    "kind": "method",
+                    "topic_path": "ArrayFind.html",
+                }
+            ]
+        return []
+
+    with (
+        patch.object(mcp_server, "_get_api_member", side_effect=fake_get_api_member),
+        patch.object(mcp_server, "_get_api_object", return_value=[]),
+        patch.object(
+            mcp_server,
+            "_search_api_members",
+            return_value=[
+                {
+                    "name": "Массив.ВГраница",
+                    "full_name": "Массив.ВГраница",
+                    "member_name": "ВГраница",
+                    "owner_name": "Массив",
+                    "summary": "Получает наибольший индекс элемента массива.",
+                    "kind": "method",
+                    "topic_path": "ArrayUBound.html",
+                }
+            ],
+        ),
+        patch.object(mcp_server, "_search_api_objects", return_value=[]),
+        patch.object(mcp_server, "_search_official_examples", return_value=[]),
+    ):
+        result = asyncio.run(
+            app.call_tool(
+                "search_1c_api",
+                {"query": "Как найти значение в массиве и получить индекс элемента?", "limit": 2},
+            )
+        )
+    text = result.content[0].text if result.content else ""
+    assert "1. **Массив.Найти**" in text
+    assert "2. **Массив.ВГраница**" in text
+    assert text.count("**Массив.Найти**") == 1
 
 
 def test_mcp_tool_save_1c_snippet_via_app(help_sample_dir: Path, tmp_path: Path) -> None:

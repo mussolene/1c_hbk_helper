@@ -15,7 +15,7 @@ EN: public archive:
 Use the latest dated backup set. Current public set:
 
 ```text
-2026-05-21_081637Z_onec-context-mcp_v1.0.15_git-3d5c5f8_qdrant-1.12.0_nomic-embed-text-v2-moe-768_physical/
+2026-07-06_113500Z_onec-context-mcp_v1.0.20_git-v1.0.20_qdrant-1.12.0_nomic-embed-text-v2-moe-768_physical/
   manifest.json
   qdrant-storage.tar.zst
   bm25-vocab.tar.zst

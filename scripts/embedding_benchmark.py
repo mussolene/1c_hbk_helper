@@ -106,7 +106,7 @@ def run_with_env(
     env["PYTHONPATH"] = src_dir + (os.pathsep + env.get("PYTHONPATH", ""))
     code = """
 import os, sys, time, json
-from onec_help import embedding as emb
+from onec_help.search_store import embedding as emb
 
 samples = [
     ("МенеджерКриптографии.ПодписатьДанные — подписание данных ключом.", "Подпись данных в 1С"),
@@ -189,7 +189,7 @@ out["cosine_similar"] = round(_cos(v1, v2), 4)
     samples_repr = repr([RU_SAMPLES[0][0], RU_SAMPLES[0][1]])
     code = f"""
 import time, json, resource
-from onec_help import embedding as emb
+from onec_help.search_store import embedding as emb
 
 samples_quality = {samples_repr}
 flat = [t for pair in {repr(RU_SAMPLES)} for t in pair]

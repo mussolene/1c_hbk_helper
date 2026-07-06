@@ -24,6 +24,7 @@ Structured help search (`search_1c_api`, hybrid retrieval в `api_members|api_ob
 
 Старый topic-layer больше не является публичным search/read surface. Runtime route теперь такой:
 
+- route/answer contract: `classify_1c_question`
 - exact API: `get_1c_api_answer`
 - natural-language factual question: `answer_1c_help_question`
 - broad structured lookup и официальные примеры из справки: `search_1c_api` (параметр `include_examples`, по умолчанию включён)
@@ -32,6 +33,7 @@ Structured help search (`search_1c_api`, hybrid retrieval в `api_members|api_ob
 
 - Для **точных имён** (`Тип.Метод`) — используйте **get_1c_api_answer**.
 - Для **общих вопросов по API** — **answer_1c_help_question**.
+- Для **неочевидного маршрута** — сначала **classify_1c_question**: он возвращает `answer_contract` с `route`, `action`, `source_layers`, `primary_tool`, `next_tools`, `answer_status`, `missing_context`.
 - Для **широкого поиска по API и объектам** — **search_1c_api**.
 - Для **официальных примеров платформы** — **search_1c_api** с примерами; для **curated кода** — **search_1c_snippets**.
 
@@ -42,8 +44,9 @@ Structured help search (`search_1c_api`, hybrid retrieval в `api_members|api_ob
 ### Быстрая проверка (когда MCP доступен)
 
 1. **Статус индекса** — `get_1c_help_index_status`: число топиков, версии, языки, размер БД. Если индекс пуст — запустить ingest.
-2. **Natural-language question** — `answer_1c_help_question("как прочитать JSON в Соответствие")`.
-3. **Точное имя** — `get_1c_api_answer("Формат")` или `get_1c_api_answer("ПрочитатьJSON", detail="full")`.
+2. **Route contract** — `classify_1c_question("как прочитать JSON в Соответствие")`, если вопрос может относиться к metadata/code/full/BSL LS.
+3. **Natural-language question** — `answer_1c_help_question("как прочитать JSON в Соответствие")`.
+4. **Точное имя** — `get_1c_api_answer("Формат")` или `get_1c_api_answer("ПрочитатьJSON", detail="full")`.
 
 ### Скорость
 
@@ -61,6 +64,7 @@ Structured help search (`search_1c_api`, hybrid retrieval в `api_members|api_ob
 
 - **Один вызов:** `answer_1c_help_question(query)` — часто достаточно для factual API-вопросов.
 - **Два вызова:** `get_1c_api_answer("Тип.Метод", detail="full")` + `search_1c_api("Тип.Метод", include_examples=True)`.
-- **Третий вызов (по желанию):** `save_1c_snippet(code, description, title)` — сохранить рабочий пример в память, чтобы в следующих сессиях он находился через `search_1c_snippets`.
+- **Перед кодом:** `classify_1c_question(query)` — если `answer_status=code_hypothesis_until_checked`, код нужно проверить BSL LS.
+- **Третий вызов (по желанию):** `save_1c_snippet(code, description, title)` — сохранить уже проверенный рабочий пример в память, чтобы в следующих сессиях он находился через `search_1c_snippets`.
 
 Итого: рабочий API-контекст теперь получается за 1–3 вызова по structured Qdrant-first route без topic fallback.

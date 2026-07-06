@@ -409,6 +409,7 @@ def plan_1c_query(
     symbol_name: str | None = None,
     config_version: str | None = None,
 ) -> dict[str, Any]:
+    from ..answer_contract import build_answer_contract
     from ..language_resolver import resolve_1c_language_query
 
     q = (query or "").strip()
@@ -443,11 +444,19 @@ def plan_1c_query(
         route_plan.extend(["platform_graph_lexical", "guidance", "semantic_fallback"])
     else:
         route_plan.extend(["platform_graph_exact_optional", "metadata_optional", "guidance"])
+    answer_contract = build_answer_contract(
+        q,
+        route_kind=route_kind,
+        has_file_context=bool(file_uri),
+        has_symbol_context=bool(symbol_name),
+        config_version=cfg_ver,
+    )
     return {
         "query": q,
         "canonical_query": str(resolved.get("normalized_query") or q).strip(),
         "resolver_kind": str(resolved.get("resolver_kind") or route_kind).strip(),
         "route_kind": route_kind,
+        "answer_contract": answer_contract,
         "candidate_nodes": candidate_nodes,
         "confidence": confidence,
         "route_plan": route_plan,
@@ -526,6 +535,7 @@ def resolve_1c_task_context(req: ContextRequest) -> dict[str, Any]:
         "request": asdict(req),
         "query_type": query_type,
         "route_kind": route_kind,
+        "answer_contract": plan.get("answer_contract") or {},
         "resolved_surface": plan.get("resolved_surface") or {},
         "route_plan": plan.get("route_plan") or [],
         "workflow": workflow_items,

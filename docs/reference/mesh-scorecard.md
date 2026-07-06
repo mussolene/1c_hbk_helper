@@ -7,6 +7,7 @@
 - `graph/exact route`
 - `metadata deterministic route`
 - `workflow-aware task context`
+- `answer-contract route` — правильный слой ответа (`platform`, `metadata`, `code`, `full`, `bsl_ls`) и следующий инструмент
 
 ## Запуск
 
@@ -43,6 +44,7 @@ Scorecard строится по benchmark-сценариям и считает:
 - `summary.metadata_hit_pct` — попал ли правильный metadata object
 - `summary.workflow_hit_pct` — появилась ли правильная workflow-цепочка
 - `summary.field_hit_pct` — сработал ли deterministic metadata field lookup
+- `summary.answer_contract_hit_pct` — совпал ли продуктовый contract ответа: route/action/status/layers/tools
 - latency:
   - `summary.latency.plan.median_ms`
   - `summary.latency.context.median_ms`
@@ -55,6 +57,11 @@ Scorecard строится по benchmark-сценариям и считает:
   - `exact_api_surface`
   - `metadata_navigation`
   - `workflow_context`
+  - `answer_contract`
+
+`blind_answer_contract` cases берутся из `src/onec_help/knowledge/answer_contract_benchmark.json`.
+Они не генерируются из текущих aliases или Qdrant payloads: это blind-ish набор developer
+questions, который проверяет не top-hit, а правильный route и статус ответа.
 
 ## Когда использовать
 

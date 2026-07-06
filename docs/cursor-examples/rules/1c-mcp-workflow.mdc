@@ -15,12 +15,13 @@ alwaysApply: false
 ## Канонический маршрут
 
 **onec-context-mcp (наш MCP):**
-1. Точный API/идентификатор: `get_1c_api_answer("Тип.Метод")`.
-2. Structured truth-source и официальные примеры: `get_1c_api_object("Тип.Метод")`, `search_1c_api(query, include_examples=True)`.
-3. Общий API-вопрос / broad structured lookup: `answer_1c_help_question(question)` или `search_1c_api(query)`.
-4. Если нужны стандарты или сниппеты явно: `search_1c_standards(query)` / `search_1c_snippets(query)`.
-5. Если нужен объектный контекст: `search_1c_metadata_exact(query)` или `search_1c_metadata_semantic(query)` → `get_1c_metadata_object(object_id)`. Для реквизитов: `search_1c_metadata_fields(object_query, field_query)`.
-6. Если ответы кажутся неполными: `get_1c_help_index_status`.
+1. Неочевидный маршрут: `classify_1c_question(question)` и следовать `answer_contract.route/action/status/layers`.
+2. Точный API/идентификатор: `get_1c_api_answer("Тип.Метод")`.
+3. Structured truth-source и официальные примеры: `get_1c_api_object("Тип.Метод")`, `search_1c_api(query, include_examples=True)`.
+4. Общий API-вопрос / broad structured lookup: `answer_1c_help_question(question)` или `search_1c_api(query)`.
+5. Если нужны стандарты или сниппеты явно: `search_1c_standards(query)` / `search_1c_snippets(query)`.
+6. Если нужен объектный контекст: `search_1c_metadata_exact(query)` или `search_1c_metadata_semantic(query)` → `get_1c_metadata_object(object_id)`. Для реквизитов: `search_1c_metadata_fields(object_query, field_query)`.
+7. Если ответы кажутся неполными: `get_1c_help_index_status`.
 
 **Локальный код:**
 1. После правок: проверить файл средствами проекта или IDE.
@@ -29,6 +30,7 @@ alwaysApply: false
 ## Чек-лист перед коммитом / ревью
 
 - [ ] Использован минимальный route `onec-context-mcp` без широких tools по умолчанию?
+- [ ] Для неоднозначных вопросов сначала проверен `answer_contract` через `classify_1c_question`?
 - [ ] При необходимости использованы узкие tools (`get_1c_api_answer`, `answer_1c_help_question`, `search_1c_api`, `search_1c_standards`, `search_1c_snippets`, metadata exact/semantic/fields)?
 - [ ] Проверка изменённых `.bsl` средствами проекта или IDE пройдена?
 - [ ] `save_1c_snippet` вызывался только для действительно переиспользуемого и проверенного кода?

@@ -26,6 +26,7 @@ description: AI-first skill для разработки 1С (BSL): MCP onec-cont
 | Сценарий | Источник | Инструмент | Заметки |
 |----------|----------|------------|---------|
 | Старт задачи | onec-context-mcp | `get_1c_quick_guide` | Единственный канонический AI entry point. |
+| Неочевидный маршрут | onec-context-mcp | `classify_1c_question` | Возвращает `answer_contract`: route/action/status/layers/next_tools. |
 | Точный API / идентификатор | onec-context-mcp | `get_1c_api_answer` | Exact-first compact ответ для `Тип.Метод`. |
 | Structured API object | onec-context-mcp | `get_1c_api_object` | Low-token truth-source из `onec_help_api`. |
 | Официальные примеры из справки | onec-context-mcp | `search_1c_api` (`include_examples=True`, по умолчанию) | Те же hits, что раньше давал отдельный tool; не смешивать с `search_1c_snippets`. |
@@ -70,15 +71,16 @@ description: AI-first skill для разработки 1С (BSL): MCP onec-cont
 ### Написание кода (цикл до чистоты)
 
 1. Вызвать `get_1c_quick_guide(task="develop")` в начале сессии.
-2. Если запрос точный: `get_1c_api_answer("Тип.Метод")` по умолчанию **compact**; `detail="full"` — только если не хватает секций; при необходимости truth-source `get_1c_api_object("Тип.Метод")`.
-3. Если нужны официальные примеры из справки: `search_1c_api(query, include_examples=True)`.
-4. Если есть локальный файл/символ: `get_1c_task_context(query, file_uri, symbol_name)`.
-5. Если нужен широкий поиск по API/объектам: `search_1c_api(query)` или `answer_1c_help_question(question)`.
-6. Если нужны стандарты явно: `search_1c_standards(query)`. Если нужны curated примеры кода: `search_1c_snippets(query)`.
-7. Реализовать или адаптировать код.
-8. Проверить изменённые `.bsl` средствами проекта или IDE.
-9. **При Error/Warning:** исправить → повторить п. 8.
-10. `save_1c_snippet` только если код переиспользуемый и уже проверен.
+2. Если маршрут неочевиден: `classify_1c_question(query)`; если `answer_status=code_hypothesis_until_checked`, код обязательно проверить BSL LS/project checks.
+3. Если запрос точный: `get_1c_api_answer("Тип.Метод")` по умолчанию **compact**; `detail="full"` — только если не хватает секций; при необходимости truth-source `get_1c_api_object("Тип.Метод")`.
+4. Если нужны официальные примеры из справки: `search_1c_api(query, include_examples=True)`.
+5. Если есть локальный файл/символ: `get_1c_task_context(query, file_uri, symbol_name)`.
+6. Если нужен широкий поиск по API/объектам: `search_1c_api(query)` или `answer_1c_help_question(question)`.
+7. Если нужны стандарты явно: `search_1c_standards(query)`. Если нужны curated примеры кода: `search_1c_snippets(query)`.
+8. Реализовать или адаптировать код.
+9. Проверить изменённые `.bsl` средствами проекта или IDE.
+10. **При Error/Warning:** исправить → повторить п. 9.
+11. `save_1c_snippet` только если код переиспользуемый и уже проверен.
 
 ### Рефакторинг (цикл по файлам)
 

@@ -1,0 +1,268 @@
+[
+  {
+    "id": "blind_platform_json_read",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "ПрочитатьJSON",
+    "expected_answer_route": "platform_fact",
+    "expected_action": "answer",
+    "expected_answer_status": "source_fact",
+    "expected_layers_contains": ["platform"],
+    "expected_tools_contains": ["get_1c_api_answer"]
+  },
+  {
+    "id": "blind_platform_http_get",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "HTTPСоединение.Получить",
+    "expected_answer_route": "platform_fact",
+    "expected_action": "answer",
+    "expected_layers_contains": ["platform"]
+  },
+  {
+    "id": "blind_platform_version_question",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "с какой версии доступен метод HTTPСоединение.Получить",
+    "expected_answer_route": "platform_fact",
+    "expected_action": "answer",
+    "expected_layers_contains": ["platform"]
+  },
+  {
+    "id": "blind_platform_restriction_question",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "можно ли использовать HTTPСоединение.Получить на клиенте",
+    "expected_answer_route": "platform_fact",
+    "expected_action": "answer",
+    "expected_layers_contains": ["platform"]
+  },
+  {
+    "id": "blind_platform_language_fact",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "как работает ЗначениеЗаполнено для пустой строки",
+    "expected_answer_route": "platform_fact",
+    "expected_action": "answer",
+    "expected_answer_status": "source_fact",
+    "expected_layers_contains": ["platform"]
+  },
+  {
+    "id": "blind_platform_example_json",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "покажи пример как прочитать JSON в Соответствие",
+    "expected_answer_route": "platform_example",
+    "expected_action": "answer_then_validate",
+    "expected_answer_status": "code_hypothesis_until_checked",
+    "expected_layers_contains": ["platform", "bsl_ls"]
+  },
+  {
+    "id": "blind_platform_generate_code",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "напиши код создания HTTP запроса в 1С",
+    "expected_answer_route": "platform_example",
+    "expected_action": "answer_then_validate",
+    "expected_layers_contains": ["platform", "bsl_ls"]
+  },
+  {
+    "id": "blind_metadata_document_attr",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "где реквизит Комментарий у документа РеализацияТоваровУслуг",
+    "expected_answer_route": "metadata",
+    "expected_action": "retrieve",
+    "expected_layers_contains": ["metadata"],
+    "expected_tools_contains": ["metadata"]
+  },
+  {
+    "id": "blind_metadata_table_part_type",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "какой тип у реквизита Номенклатура в табличной части Товары",
+    "expected_answer_route": "metadata",
+    "expected_action": "retrieve",
+    "expected_layers_contains": ["metadata"]
+  },
+  {
+    "id": "blind_metadata_form_command",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "найди команду формы документа ЗаказПокупателя",
+    "expected_answer_route": "metadata",
+    "expected_action": "retrieve",
+    "expected_layers_contains": ["metadata"]
+  },
+  {
+    "id": "blind_metadata_surface",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "Метаданные.Документы.РеализацияТоваровУслуг",
+    "expected_answer_route": "metadata",
+    "expected_action": "retrieve",
+    "expected_layers_contains": ["metadata"]
+  },
+  {
+    "id": "blind_code_callers",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "где вызывается процедура УстановитьСтатусДокумента",
+    "expected_answer_route": "codebase_behavior",
+    "expected_action": "delegate_to_tool",
+    "expected_answer_status": "code_inference_required",
+    "expected_layers_contains": ["code"],
+    "expected_tools_contains": ["code"]
+  },
+  {
+    "id": "blind_code_behavior",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "почему документ получает статус Проведен и какие обработчики влияют на поведение",
+    "expected_answer_route": "codebase_behavior",
+    "expected_action": "delegate_to_tool",
+    "expected_layers_contains": ["code"]
+  },
+  {
+    "id": "blind_code_symbol_context",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "объясни влияние этой процедуры",
+    "file_uri": "file:///repo/src/Documents/Sales/ObjectModule.bsl",
+    "symbol_name": "ПередЗаписью",
+    "expected_answer_route": "codebase_behavior",
+    "expected_action": "delegate_to_tool",
+    "expected_layers_contains": ["code"]
+  },
+  {
+    "id": "blind_full_xml_form",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "подтверди exact XML формы документа РеализацияТоваровУслуг",
+    "expected_answer_route": "full_source_verification",
+    "expected_action": "delegate_to_tool",
+    "expected_answer_status": "needs_source_verification",
+    "expected_layers_contains": ["full"]
+  },
+  {
+    "id": "blind_full_raw_source",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "прочитай raw исходник модуля формы",
+    "expected_answer_route": "full_source_verification",
+    "expected_action": "delegate_to_tool",
+    "expected_layers_contains": ["full"]
+  },
+  {
+    "id": "blind_validation_bsl_ls",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "проверить код BSL LS и показать диагностики",
+    "expected_answer_route": "validation_bsl_ls",
+    "expected_action": "validate",
+    "expected_answer_status": "requires_tool_run",
+    "expected_layers_contains": ["bsl_ls"],
+    "expected_tools_contains": ["Language Server"]
+  },
+  {
+    "id": "blind_validation_syntax",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "проверь синтаксис измененного модуля",
+    "expected_answer_route": "validation_bsl_ls",
+    "expected_action": "validate",
+    "expected_layers_contains": ["bsl_ls"]
+  },
+  {
+    "id": "blind_validation_format",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "отформатируй BSL модуль по language server",
+    "expected_answer_route": "validation_bsl_ls",
+    "expected_action": "validate",
+    "expected_layers_contains": ["bsl_ls"]
+  },
+  {
+    "id": "blind_standards_query",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "какой стандарт v8std по именованию процедур",
+    "expected_answer_route": "standards_or_snippets",
+    "expected_action": "retrieve",
+    "expected_layers_contains": ["standards"],
+    "expected_tools_contains": ["search_1c_standards"]
+  },
+  {
+    "id": "blind_snippet_query",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "найди сниппет загрузки файла во временное хранилище",
+    "expected_answer_route": "standards_or_snippets",
+    "expected_action": "retrieve",
+    "expected_layers_contains": ["snippets"]
+  },
+  {
+    "id": "blind_ambiguous_object_or_api",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "что с заказом покупателя",
+    "expected_answer_route": "ambiguous",
+    "expected_action": "clarify_or_search",
+    "expected_answer_status": "needs_route",
+    "expected_layers_contains": ["platform", "metadata", "code"]
+  },
+  {
+    "id": "blind_ambiguous_value",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "значение не работает",
+    "expected_answer_route": "ambiguous",
+    "expected_action": "clarify_or_search",
+    "expected_layers_contains": ["platform", "metadata", "code"]
+  },
+  {
+    "id": "blind_metadata_registry_field",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "найди измерение Номенклатура регистра накопления ОстаткиТоваров",
+    "expected_answer_route": "metadata",
+    "expected_action": "retrieve",
+    "expected_layers_contains": ["metadata"]
+  },
+  {
+    "id": "blind_code_file_context",
+    "suite": "blind_answer_contract",
+    "profile": "answer_contract",
+    "runner": "answer_contract",
+    "query": "что делает текущий обработчик",
+    "file_uri": "file:///repo/src/Catalogs/Items/Forms/ItemForm/Module.bsl",
+    "symbol_name": "ПриОткрытии",
+    "expected_answer_route": "codebase_behavior",
+    "expected_action": "delegate_to_tool",
+    "expected_layers_contains": ["code"]
+  }
+]

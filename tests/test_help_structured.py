@@ -190,9 +190,9 @@ def test_build_structured_api_snapshot_adds_html_links_and_surface_aliases(tmp_p
     manifest = build_structured_api_snapshot(tmp_path / "out", unpacked_dir=tmp_path)
     assert manifest["links"] >= 3
     members = load_api_members(tmp_path / "out")
-    docs_prop = next(
-        item for item in members if item["full_name"] == "Глобальный контекст.Документы"
-    )
+    docs_prop = next(item for item in members if item["full_name"] == "Документы")
+    assert docs_prop["owner_name"] == "Глобальный контекст"
+    assert docs_prop["title"] == "Документы"
     assert "Документы" in docs_prop["surface_aliases"]
     links = [
         json.loads(line)
@@ -201,7 +201,7 @@ def test_build_structured_api_snapshot_adds_html_links_and_surface_aliases(tmp_p
     ]
     assert any(
         link["link_kind"] == "html_href"
-        and link["source_full_name"] == "Глобальный контекст.Документы"
+        and link["source_full_name"] == "Документы"
         and link["target_name"] == "ДокументыМенеджер"
         for link in links
     )
@@ -815,7 +815,7 @@ def test_get_api_member_prefers_exact_member_name_for_bare_query() -> None:
                             (),
                             {
                                 "payload": {
-                                    "full_name": "Глобальный контекст.Формат",
+                                    "full_name": "Формат",
                                     "member_name": "Формат",
                                     "owner_name": "Глобальный контекст",
                                     "version": "8.3.27.1719",
@@ -841,7 +841,7 @@ def test_get_api_member_prefers_exact_member_name_for_bare_query() -> None:
 
     with patch("qdrant_client.QdrantClient", return_value=_Client()):
         results = get_api_member("Формат")
-    assert results[0]["full_name"] == "Глобальный контекст.Формат"
+    assert results[0]["full_name"] == "Формат"
 
 
 def test_get_api_member_orders_newer_platform_first() -> None:

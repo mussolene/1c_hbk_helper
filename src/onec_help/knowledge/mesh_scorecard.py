@@ -12,6 +12,7 @@ from typing import Any
 
 from ..runtime.mcp_metrics import get_metrics as get_mcp_metrics
 from ..shared import env_config
+from .answer_contract import build_answer_contract, contract_matches
 from .help_structured import (
     get_api_member,
     get_api_object,
@@ -34,6 +35,7 @@ _DEFAULT_TARGETS: dict[str, float] = {
     "metadata_hit_pct": 85.0,
     "workflow_hit_pct": 80.0,
     "field_hit_pct": 95.0,
+    "answer_contract_hit_pct": 90.0,
     "median_plan_ms": 50.0,
     "median_context_ms": 1200.0,
 }
@@ -45,10 +47,12 @@ _PROFILE_TITLES = {
 }
 _RUNNER_TITLES = {
     "task_context": "Task Context",
+    "api_search": "API Search",
     "metadata_field": "Metadata Field",
     "exact_member": "Exact Member",
     "exact_object": "Exact Object",
     "metadata_exact": "Metadata Exact",
+    "answer_contract": "Answer Contract",
 }
 _VALID_RUNNERS = frozenset(_RUNNER_TITLES)
 _DEFAULT_TOTAL_CASES = 120
@@ -66,6 +70,10 @@ def get_default_mesh_benchmark_path() -> Path:
 
 def get_default_mesh_external_path() -> Path:
     return Path(__file__).with_name("mesh_external_tasks.json")
+
+
+def get_default_answer_contract_benchmark_path() -> Path:
+    return Path(__file__).with_name("answer_contract_benchmark.json")
 
 
 def load_mesh_benchmark(path: Path | None = None) -> list[dict[str, Any]]:
@@ -257,13 +265,24 @@ def compose_mesh_benchmark(
     benchmark_path: Path | None = None,
     external_path: Path | None = None,
     total_target: int = _DEFAULT_TOTAL_CASES,
+    include_answer_contract: bool = True,
 ) -> list[dict[str, Any]]:
     benchmark = load_mesh_benchmark(benchmark_path)
     external = load_mesh_benchmark(external_path or get_default_mesh_external_path())
+    answer_contract = (
+        load_mesh_benchmark(get_default_answer_contract_benchmark_path())
+        if include_answer_contract
+        else []
+    )
     seen_ids: set[str] = set()
     out: list[dict[str, Any]] = []
     _append_unique_cases(out, benchmark, seen_ids=seen_ids)
     _append_unique_cases(out, external, seen_ids=seen_ids)
+    if len(out) < total_target:
+        _append_unique_cases(out, answer_contract, seen_ids=seen_ids)
+    from .query_aliases import iter_query_alias_benchmark_cases
+
+    _append_unique_cases(out, iter_query_alias_benchmark_cases(), seen_ids=seen_ids)
     generated_target = max(0, total_target - len(out))
     _append_unique_cases(
         out,
@@ -326,6 +345,9 @@ def _profile_card(
         "metadata_hit_pct": _metric_pct(rows, "metadata_expected", "metadata_ok"),
         "workflow_hit_pct": _metric_pct(rows, "workflow_expected", "workflow_ok"),
         "field_hit_pct": _metric_pct(rows, "field_expected", "field_ok"),
+        "answer_contract_hit_pct": _metric_pct(
+            rows, "answer_contract_expected", "answer_contract_ok"
+        ),
         "plan_latency": _ms(plan_lat),
         "context_latency": _ms(ctx_lat),
     }
@@ -343,6 +365,14 @@ def _fast_help_hits(plan: dict[str, Any], query: str, *, limit: int = 2) -> list
     titles: list[str] = []
     seen: set[str] = set()
 
+    def lookup_names(name: str) -> list[str]:
+        clean = str(name or "").strip()
+        out = [clean] if clean else []
+        for prefix in ("Глобальный контекст.", "Встроенные функции языка."):
+            if clean.startswith(prefix):
+                out.append(clean[len(prefix) :].strip())
+        return [item for item in out if item]
+
     def add_name(name: str) -> None:
         clean = str(name or "").strip()
         if clean and clean not in seen:
@@ -353,13 +383,22 @@ def _fast_help_hits(plan: dict[str, Any], query: str, *, limit: int = 2) -> list
         lookup = str(candidate.get("lookup") or "").strip()
         name = str(candidate.get("name") or "").strip()
         if lookup == "member":
-            for item in get_api_member(name):
-                add_name(str(item.get("full_name") or item.get("title") or item.get("name") or ""))
+            for lookup_name in lookup_names(name):
+                for item in get_api_member(lookup_name):
+                    add_name(
+                        str(item.get("full_name") or item.get("title") or item.get("name") or "")
+                    )
         elif lookup == "object":
-            for item in get_api_object(name):
-                add_name(
-                    str(item.get("full_name") or item.get("title") or item.get("object_name") or "")
-                )
+            for lookup_name in lookup_names(name):
+                for item in get_api_object(lookup_name):
+                    add_name(
+                        str(
+                            item.get("full_name")
+                            or item.get("title")
+                            or item.get("object_name")
+                            or ""
+                        )
+                    )
         if len(titles) >= limit:
             return titles[:limit]
 
@@ -371,16 +410,63 @@ def _fast_help_hits(plan: dict[str, Any], query: str, *, limit: int = 2) -> list
     return titles[:limit]
 
 
+def _api_search_hits(query: str, *, limit: int = 5) -> list[str]:
+    from .query_aliases import resolve_query_api_aliases
+
+    aliases = resolve_query_api_aliases(query)
+    alias_targets = {str(item.get("target") or "").strip().lower() for item in aliases}
+    rows: list[dict[str, Any]] = []
+    for alias in aliases:
+        target = str(alias.get("target") or "").strip()
+        lookup = str(alias.get("lookup") or "").strip()
+        if lookup == "member":
+            rows.extend(get_api_member(target))
+        elif lookup == "object":
+            rows.extend(get_api_object(target))
+    rows.extend(search_api_members(query, limit=limit))
+    rows.extend(search_api_objects(query, limit=max(3, limit // 2)))
+
+    def name_of(item: dict[str, Any]) -> str:
+        return str(
+            item.get("full_name")
+            or item.get("name")
+            or item.get("object_name")
+            or item.get("title")
+            or ""
+        ).strip()
+
+    def sort_key(item: dict[str, Any]) -> tuple[int, str]:
+        name = name_of(item).lower()
+        member = str(item.get("member_name") or "").strip().lower()
+        return (0 if name in alias_targets or member in alias_targets else 1, name)
+
+    out: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for item in sorted(rows, key=sort_key):
+        name = name_of(item)
+        owner = str(item.get("owner_name") or item.get("object_name") or "").strip()
+        key = (name.lower(), owner.lower())
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def build_mesh_scorecard(
     *,
     benchmark_path: Path | None = None,
     external_path: Path | None = None,
     total_target: int = _DEFAULT_TOTAL_CASES,
+    include_answer_contract: bool = True,
 ) -> dict[str, Any]:
     benchmark = compose_mesh_benchmark(
         benchmark_path=benchmark_path,
         external_path=external_path,
         total_target=total_target,
+        include_answer_contract=include_answer_contract,
     )
     cases: list[dict[str, Any]] = []
 
@@ -402,6 +488,18 @@ def build_mesh_scorecard(
         top_metadata = ""
         top_workflow = ""
         top_field = ""
+        answer_contract_ok = False
+        answer_route_ok = False
+        answer_action_ok = False
+        answer_status_ok = False
+        answer_layers_ok = False
+        answer_tools_ok = False
+        answer_forbidden_layers_ok = True
+        answer_route = ""
+        answer_action = ""
+        answer_layers = ""
+        answer_status = ""
+        primary_tool = ""
         top_candidate = ""
 
         if runner == "task_context":
@@ -478,6 +576,16 @@ def build_mesh_scorecard(
                 help_titles, [str(x) for x in item.get("expected_help_contains") or []]
             )
 
+        elif runner == "api_search":
+            query = str(item.get("query") or "").strip()
+            t0 = time.perf_counter()
+            help_titles = _api_search_hits(query, limit=5)
+            context_ms = (time.perf_counter() - t0) * 1000.0
+            top_help = help_titles[0] if help_titles else ""
+            help_ok = _contains_any(
+                help_titles[:1], [str(x) for x in item.get("expected_help_contains") or []]
+            )
+
         elif runner == "metadata_exact":
             query = str(item.get("query") or "").strip()
             cfg = str(item.get("config_version") or "").strip()
@@ -519,6 +627,36 @@ def build_mesh_scorecard(
                 field_titles, [str(x) for x in item.get("expected_field_contains") or []]
             )
 
+        elif runner == "answer_contract":
+            query = str(item.get("query") or "").strip()
+            cfg = str(item.get("config_version") or "").strip() or None
+            t0 = time.perf_counter()
+            plan = plan_1c_query(
+                query,
+                file_uri=str(item.get("file_uri") or "").strip() or None,
+                symbol_name=str(item.get("symbol_name") or "").strip() or None,
+                config_version=cfg,
+            )
+            plan_ms = (time.perf_counter() - t0) * 1000.0
+            contract = dict(plan.get("answer_contract") or {})
+            if not contract:
+                contract = build_answer_contract(query, config_version=cfg)
+            matches = contract_matches(item, contract)
+            answer_route_ok = matches["answer_route_ok"]
+            answer_action_ok = matches["answer_action_ok"]
+            answer_status_ok = matches["answer_status_ok"]
+            answer_layers_ok = matches["answer_layers_ok"]
+            answer_tools_ok = matches["answer_tools_ok"]
+            answer_forbidden_layers_ok = matches["answer_forbidden_layers_ok"]
+            answer_contract_ok = all(matches.values())
+            route_kind = str(plan.get("route_kind") or "")
+            resolver_kind = str(plan.get("resolver_kind") or "")
+            answer_route = str(contract.get("route") or "")
+            answer_action = str(contract.get("action") or "")
+            answer_status = str(contract.get("answer_status") or "")
+            answer_layers = ",".join(str(x) for x in contract.get("source_layers") or ())
+            primary_tool = str(contract.get("primary_tool") or "")
+
         checks = [
             route_ok if item.get("expected_route_kind") else True,
             candidate_ok if item.get("expected_candidate_contains") else True,
@@ -526,6 +664,7 @@ def build_mesh_scorecard(
             metadata_ok if item.get("expected_metadata_contains") else True,
             workflow_ok if item.get("expected_workflow_contains") else True,
             field_ok if item.get("expected_field_contains") else True,
+            answer_contract_ok if item.get("expected_answer_route") else True,
         ]
         case_pass = all(checks)
         cases.append(
@@ -549,6 +688,14 @@ def build_mesh_scorecard(
                 "workflow_ok": workflow_ok,
                 "field_expected": bool(item.get("expected_field_contains")),
                 "field_ok": field_ok,
+                "answer_contract_expected": bool(item.get("expected_answer_route")),
+                "answer_contract_ok": answer_contract_ok,
+                "answer_route_ok": answer_route_ok,
+                "answer_action_ok": answer_action_ok,
+                "answer_status_ok": answer_status_ok,
+                "answer_layers_ok": answer_layers_ok,
+                "answer_tools_ok": answer_tools_ok,
+                "answer_forbidden_layers_ok": answer_forbidden_layers_ok,
                 "case_pass": case_pass,
                 "plan_ms": round(plan_ms, 1) if plan_ms is not None else None,
                 "context_ms": round(context_ms, 1) if context_ms is not None else None,
@@ -557,6 +704,11 @@ def build_mesh_scorecard(
                 "top_metadata": top_metadata,
                 "top_workflow": top_workflow,
                 "top_field": top_field,
+                "answer_route": answer_route,
+                "answer_action": answer_action,
+                "answer_status": answer_status,
+                "answer_layers": answer_layers,
+                "primary_tool": primary_tool,
                 "source_title": str(item.get("source_title") or ""),
                 "source_url": str(item.get("source_url") or ""),
             }
@@ -584,6 +736,7 @@ def build_mesh_scorecard(
     metadata_cases = [x for x in cases if x.get("metadata_expected")]
     workflow_cases = [x for x in cases if x.get("workflow_expected")]
     field_cases = [x for x in cases if x.get("field_expected")]
+    answer_contract_cases = [x for x in cases if x.get("answer_contract_expected")]
     summary = {
         "total_cases": len(cases),
         "suite_counts": {name: len(rows) for name, rows in sorted(suites.items())},
@@ -601,6 +754,10 @@ def build_mesh_scorecard(
         ),
         "field_hit_pct": _percent(
             sum(1 for x in field_cases if x.get("field_ok")), len(field_cases)
+        ),
+        "answer_contract_hit_pct": _percent(
+            sum(1 for x in answer_contract_cases if x.get("answer_contract_ok")),
+            len(answer_contract_cases),
         ),
         "latency": {
             "plan": _ms([float(x["plan_ms"]) for x in cases if x.get("plan_ms") is not None]),
