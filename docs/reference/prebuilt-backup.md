@@ -12,10 +12,10 @@ RU: публичный архив:
 EN: public archive:
 [https://cloud.mail.ru/public/NzFn/qLfhyf8zo](https://cloud.mail.ru/public/NzFn/qLfhyf8zo)
 
-Use the latest dated backup set. Current public set:
+Use the latest physical backup set. Current public set:
 
 ```text
-2026-07-06_113500Z_onec-context-mcp_v1.0.20_git-v1.0.20_qdrant-1.12.0_nomic-embed-text-v2-moe-768_physical/
+v1.0.20-prebuilt_physical/
   manifest.json
   qdrant-storage.tar.zst
   bm25-vocab.tar.zst
@@ -83,7 +83,7 @@ make qdrant-restore BACKUP=latest
 again. To restore a specific backup set:
 
 ```bash
-make qdrant-restore BACKUP=2026-05-21_..._physical
+make qdrant-restore BACKUP=v1.0.20-prebuilt_physical
 ```
 
 ## Create Backup

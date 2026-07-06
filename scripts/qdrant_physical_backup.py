@@ -38,17 +38,8 @@ def _safe_name(value: str) -> str:
 
 
 def _default_backup_name() -> str:
-    git_rev = _safe_name(os.environ.get("GIT_REV", "nogit") or "nogit")
     server_version = _safe_name(os.environ.get("SERVER_VERSION", "local") or "local")
-    qdrant_version = _safe_name(os.environ.get("QDRANT_VERSION", "1.12.0") or "1.12.0")
-    embedding_model = _safe_name(
-        os.environ.get("EMBEDDING_MODEL", "nomic-embed-text-v2-moe") or "nomic-embed-text-v2-moe"
-    )
-    embedding_dim = _safe_name(os.environ.get("EMBEDDING_DIMENSION", "768") or "768")
-    return (
-        f"{_now_stamp()}_onec-context-mcp_v{server_version}_git-{git_rev}"
-        f"_qdrant-{qdrant_version}_{embedding_model}-{embedding_dim}_physical"
-    )
+    return f"{_now_stamp()}_v{server_version}_physical"
 
 
 def _tar_zst(source: Path, archive: Path) -> dict[str, Any]:

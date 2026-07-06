@@ -19,6 +19,18 @@ def _load_module():
     return module
 
 
+def test_default_backup_name_stays_short(monkeypatch: pytest.MonkeyPatch) -> None:
+    mod = _load_module()
+    monkeypatch.setenv("SERVER_VERSION", "1.0.20")
+    monkeypatch.setenv("GIT_REV", "v1.0.20")
+    monkeypatch.setenv("QDRANT_VERSION", "1.12.0")
+    monkeypatch.setenv("EMBEDDING_MODEL", "nomic-embed-text-v2-moe")
+    monkeypatch.setenv("EMBEDDING_DIMENSION", "768")
+    monkeypatch.setattr(mod, "_now_stamp", lambda: "2026-07-06_113500Z")
+
+    assert mod._default_backup_name() == "2026-07-06_113500Z_v1.0.20_physical"
+
+
 def test_backup_restore_roundtrip_includes_qdrant_and_bm25(tmp_path: Path) -> None:
     mod = _load_module()
     qdrant = tmp_path / "qdrant"
