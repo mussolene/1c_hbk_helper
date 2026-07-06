@@ -107,9 +107,16 @@ def test_build_mesh_scorecard_reports_cards_and_targets(tmp_path: Path) -> None:
             "onec_help.knowledge.mesh_scorecard._generate_runtime_benchmark_cases",
             return_value=[],
         ),
+        patch(
+            "onec_help.knowledge.query_aliases.iter_query_alias_benchmark_cases",
+            return_value=[],
+        ),
     ):
         scorecard = build_mesh_scorecard(
-            benchmark_path=bench, external_path=external, total_target=2
+            benchmark_path=bench,
+            external_path=external,
+            total_target=2,
+            include_answer_contract=False,
         )
 
     assert scorecard["summary"]["overall_case_pass_pct"] == 100.0
@@ -340,13 +347,18 @@ def test_fast_help_hits_strips_surface_owner_candidate_prefix() -> None:
             {"lookup": "member", "name": "Глобальный контекст.ПолучитьИзВременногоХранилища"}
         ]
     }
-    with patch(
-        "onec_help.knowledge.mesh_scorecard.get_api_member",
-        side_effect=lambda name: (
-            [{"full_name": "ПолучитьИзВременногоХранилища"}]
-            if name == "ПолучитьИзВременногоХранилища"
-            else []
+    with (
+        patch(
+            "onec_help.knowledge.mesh_scorecard.get_api_member",
+            side_effect=lambda name: (
+                [{"full_name": "ПолучитьИзВременногоХранилища"}]
+                if name == "ПолучитьИзВременногоХранилища"
+                else []
+            ),
         ),
+        patch("onec_help.knowledge.mesh_scorecard.search_api_members", return_value=[]),
+        patch("onec_help.knowledge.mesh_scorecard.search_api_objects", return_value=[]),
+        patch("onec_help.knowledge.mesh_scorecard.search_api_topics", return_value=[]),
     ):
         hits = _fast_help_hits(plan, "расшифровка ячейки СКД", limit=2)
 
