@@ -4,6 +4,15 @@
 
 Краткое объяснение без деталей: [../explanation/how-it-works.md](../explanation/how-it-works.md).
 
+## Границы продукта
+
+`onec-context-mcp` — централизованный сервис platform help/API, standards,
+snippets и versioned metadata context. Он не изменяет текущий checkout, не
+заменяет LSP и не выполняет точные локальные refactoring edits.
+
+Каноническая межрепозиторная карта ролей и deployment-сценариев:
+[Product boundaries and deployment map](https://github.com/mussolene/1c_hbk_bsl/blob/main/docs/architecture.md#product-boundaries-and-deployment-map).
+
 ## Сервисы и ответственность
 
 | Сервис | Роль | Ресурсы | Порт |
